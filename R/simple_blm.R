@@ -20,11 +20,11 @@
 #'   \eqn{v^{-a-1} \exp(-b/v)}, where \eqn{a} is `residual_shape` and \eqn{b} is
 #'   `residual_scale`.
 #'
-#' @return When `residual_var` is known, a named list with `posterior_mean` and
-#'   `posterior_var` for the normal posterior distribution of the slope. When
-#'   the residual variance is learned, the list additionally contains
-#'   `posterior_scale` and `posterior_df` for the marginal Student t posterior
-#'   of the slope, and `residual_shape` and `residual_scale` for the
+#' @return A named list containing `slope_mean`, `slope_var`,
+#'   `intercept_mean`, and `intercept_var`. When the residual variance is
+#'   learned, the list additionally contains `slope_scale`, `slope_df`,
+#'   `intercept_scale`, and `intercept_df` for the marginal Student t
+#'   posteriors, plus `residual_var_shape` and `residual_var_scale` for the
 #'   inverse-gamma posterior of the residual variance.
 #'
 #' @details When the residual variance is learned, the conjugate prior is
@@ -61,18 +61,12 @@ simple_blm <- function(y, x, prior_var, residual_var = NULL,
     stop("`y` and `x` must contain only finite, non-missing values.", call. = FALSE)
   }
 
-  validate_variance <- function(value, name) {
-    if (!is.numeric(value) || length(value) != 1L || is.na(value) ||
-        !is.finite(value) || value <= 0) {
-      stop(sprintf("`%s` must be a positive, finite numeric scalar.", name),
-           call. = FALSE)
-    }
-  }
+  .validate_variance(prior_var, "prior_var")
 
-  validate_variance(prior_var, "prior_var")
-
-  x_centered <- x - mean(x)
-  y_centered <- y - mean(y)
+  x_mean <- mean(x)
+  y_mean <- mean(y)
+  x_centered <- x - x_mean
+  y_centered <- y - y_mean
 
   if (!is.null(residual_var)) {
     if (!is.null(residual_shape) || !is.null(residual_scale)) {
@@ -81,15 +75,19 @@ simple_blm <- function(y, x, prior_var, residual_var = NULL,
         call. = FALSE
       )
     }
-    validate_variance(residual_var, "residual_var")
+    .validate_variance(residual_var, "residual_var")
 
     posterior_var <- 1 / (sum(x_centered^2) / residual_var + 1 / prior_var)
     posterior_mean <- posterior_var *
       sum(x_centered * y_centered) / residual_var
+    intercept_mean <- y_mean - posterior_mean * x_mean
+    intercept_var <- residual_var / length(y) + x_mean^2 * posterior_var
 
     return(list(
-      posterior_mean = posterior_mean,
-      posterior_var = posterior_var
+      slope_mean = posterior_mean,
+      slope_var = posterior_var,
+      intercept_mean = intercept_mean,
+      intercept_var = intercept_var
     ))
   }
 
@@ -102,8 +100,8 @@ simple_blm <- function(y, x, prior_var, residual_var = NULL,
       call. = FALSE
     )
   }
-  validate_variance(residual_shape, "residual_shape")
-  validate_variance(residual_scale, "residual_scale")
+  .validate_variance(residual_shape, "residual_shape")
+  .validate_variance(residual_scale, "residual_scale")
 
   # Normal-inverse-gamma update. Centering removes one residual degree of
   # freedom because the intercept has been integrated out.
@@ -118,19 +116,36 @@ simple_blm <- function(y, x, prior_var, residual_var = NULL,
     posterior_residual_scale / posterior_residual_shape *
       posterior_relative_var
   )
+  intercept_mean <- y_mean - posterior_mean * x_mean
+  intercept_relative_var <- 1 / length(y) +
+    x_mean^2 * posterior_relative_var
+  intercept_scale <- sqrt(
+    posterior_residual_scale / posterior_residual_shape *
+      intercept_relative_var
+  )
   posterior_var <- if (posterior_residual_shape > 1) {
     posterior_residual_scale / (posterior_residual_shape - 1) *
       posterior_relative_var
   } else {
     Inf
   }
+  intercept_var <- if (posterior_residual_shape > 1) {
+    posterior_residual_scale / (posterior_residual_shape - 1) *
+      intercept_relative_var
+  } else {
+    Inf
+  }
 
   list(
-    posterior_mean = posterior_mean,
-    posterior_var = posterior_var,
-    posterior_scale = posterior_scale,
-    posterior_df = 2 * posterior_residual_shape,
-    residual_shape = posterior_residual_shape,
-    residual_scale = posterior_residual_scale
+    slope_mean = posterior_mean,
+    slope_var = posterior_var,
+    slope_scale = posterior_scale,
+    slope_df = 2 * posterior_residual_shape,
+    intercept_mean = intercept_mean,
+    intercept_var = intercept_var,
+    intercept_scale = intercept_scale,
+    intercept_df = 2 * posterior_residual_shape,
+    residual_var_shape = posterior_residual_shape,
+    residual_var_scale = posterior_residual_scale
   )
 }

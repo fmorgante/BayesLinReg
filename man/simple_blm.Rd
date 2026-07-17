@@ -35,11 +35,11 @@ inverse-gamma prior for the residual variance. Required when
 \code{residual_scale}.}
 }
 \value{
-When \code{residual_var} is known, a named list with \code{posterior_mean} and
-\code{posterior_var} for the normal posterior distribution of the slope. When
-the residual variance is learned, the list additionally contains
-\code{posterior_scale} and \code{posterior_df} for the marginal Student t
-posterior of the slope, and \code{residual_shape} and \code{residual_scale} for
+A named list containing \code{slope_mean}, \code{slope_var},
+\code{intercept_mean}, and \code{intercept_var}. When the residual variance is
+learned, the list additionally contains \code{slope_scale}, \code{slope_df},
+\code{intercept_scale}, and \code{intercept_df} for the marginal Student t
+posteriors, plus \code{residual_var_shape} and \code{residual_var_scale} for
 the inverse-gamma posterior of the residual variance.
 }
 \description{
