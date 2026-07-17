@@ -6,7 +6,7 @@
 #' using an inverse-gamma prior and Gibbs sampling.
 #'
 #' @param y A numeric vector containing the response values.
-#' @param x A numeric matrix or data frame with observations in rows and
+#' @param X A numeric matrix or data frame with observations in rows and
 #'   predictors in columns.
 #' @param prior_var A positive numeric scalar giving a common prior variance
 #'   for all coefficients, or a positive numeric vector with one variance per
@@ -39,17 +39,17 @@
 #' @export
 #'
 #' @examples
-#' x <- cbind(x1 = 1:5, x2 = c(0, 1, 0, 1, 0))
-#' y <- 1 + 2 * x[, "x1"] - 3 * x[, "x2"]
-#' multiple_blm(y, x, prior_var = 10, residual_var = 1)
+#' X <- cbind(x1 = 1:5, x2 = c(0, 1, 0, 1, 0))
+#' y <- 1 + 2 * X[, "x1"] - 3 * X[, "x2"]
+#' multiple_blm(y, X, prior_var = 10, residual_var = 1)
 #' multiple_blm(
-#'   y, x,
+#'   y, X,
 #'   prior_var = c(10, 5),
 #'   residual_shape = 2,
 #'   residual_scale = 1,
 #'   seed = 123
 #' )
-multiple_blm <- function(y, x, prior_var, residual_var = NULL,
+multiple_blm <- function(y, X, prior_var, residual_var = NULL,
                          residual_shape = NULL, residual_scale = NULL,
                          iterations = 4000L, burnin = 1000L, thin = 1L,
                          seed = NULL) {
@@ -63,15 +63,15 @@ multiple_blm <- function(y, x, prior_var, residual_var = NULL,
     stop("`y` must contain only finite, non-missing values.", call. = FALSE)
   }
 
-  x <- .as_predictor_matrix(x, length(y))
-  number_of_predictors <- ncol(x)
-  predictor_names <- colnames(x)
+  X <- .as_predictor_matrix(X, length(y))
+  number_of_predictors <- ncol(X)
+  predictor_names <- colnames(X)
   prior_var <- .validate_prior_var(prior_var, number_of_predictors)
   prior_precision <- diag(1 / prior_var, nrow = number_of_predictors)
 
-  x_mean <- colMeans(x)
+  x_mean <- colMeans(X)
   y_mean <- mean(y)
-  x_centered <- sweep(x, 2L, x_mean, FUN = "-")
+  x_centered <- sweep(X, 2L, x_mean, FUN = "-")
   y_centered <- y - y_mean
 
   if (!is.null(residual_var)) {
@@ -119,7 +119,7 @@ multiple_blm <- function(y, x, prior_var, residual_var = NULL,
 
   samples <- .blm_gibbs(
     y = y,
-    x = x,
+    x = X,
     prior_var = prior_var,
     residual_shape = residual_shape,
     residual_scale = residual_scale,
@@ -131,11 +131,11 @@ multiple_blm <- function(y, x, prior_var, residual_var = NULL,
 
   list(
     coefficient_mean = colMeans(samples$coefficient_samples),
-    coefficient_cov = cov(samples$coefficient_samples),
+    coefficient_cov = stats::cov(samples$coefficient_samples),
     intercept_mean = mean(samples$intercept_samples),
-    intercept_var = var(samples$intercept_samples),
+    intercept_var = stats::var(samples$intercept_samples),
     residual_var_mean = mean(samples$residual_var_samples),
-    residual_var_var = var(samples$residual_var_samples),
+    residual_var_var = stats::var(samples$residual_var_samples),
     coefficient_samples = samples$coefficient_samples,
     intercept_samples = samples$intercept_samples,
     residual_var_samples = samples$residual_var_samples

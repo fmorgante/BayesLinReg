@@ -6,7 +6,7 @@
 \usage{
 multiple_blm(
   y,
-  x,
+  X,
   prior_var,
   residual_var = NULL,
   residual_shape = NULL,
@@ -20,7 +20,7 @@ multiple_blm(
 \arguments{
 \item{y}{A numeric vector containing the response values.}
 
-\item{x}{A numeric matrix or data frame with observations in rows and
+\item{X}{A numeric matrix or data frame with observations in rows and
 predictors in columns.}
 
 \item{prior_var}{A positive numeric scalar giving a common prior variance
@@ -67,11 +67,11 @@ independent of the inverse-gamma residual-variance prior. Posterior summaries
 are computed from retained Gibbs draws when the residual variance is learned.
 }
 \examples{
-x <- cbind(x1 = 1:5, x2 = c(0, 1, 0, 1, 0))
-y <- 1 + 2 * x[, "x1"] - 3 * x[, "x2"]
-multiple_blm(y, x, prior_var = 10, residual_var = 1)
+X <- cbind(x1 = 1:5, x2 = c(0, 1, 0, 1, 0))
+y <- 1 + 2 * X[, "x1"] - 3 * X[, "x2"]
+multiple_blm(y, X, prior_var = 10, residual_var = 1)
 multiple_blm(
-  y, x,
+  y, X,
   prior_var = c(10, 5),
   residual_shape = 2,
   residual_scale = 1,

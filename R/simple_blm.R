@@ -127,11 +127,11 @@ simple_blm <- function(y, x, prior_var, residual_var = NULL,
 
   list(
     slope_mean = mean(slope_samples),
-    slope_var = var(slope_samples),
+    slope_var = stats::var(slope_samples),
     intercept_mean = mean(samples$intercept_samples),
-    intercept_var = var(samples$intercept_samples),
+    intercept_var = stats::var(samples$intercept_samples),
     residual_var_mean = mean(samples$residual_var_samples),
-    residual_var_var = var(samples$residual_var_samples),
+    residual_var_var = stats::var(samples$residual_var_samples),
     slope_samples = slope_samples,
     intercept_samples = samples$intercept_samples,
     residual_var_samples = samples$residual_var_samples

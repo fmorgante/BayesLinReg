@@ -36,22 +36,22 @@
 .as_predictor_matrix <- function(x, number_of_observations) {
   if (is.data.frame(x)) {
     if (ncol(x) < 1L || !all(vapply(x, is.numeric, logical(1)))) {
-      stop("`x` must contain at least one numeric predictor.", call. = FALSE)
+      stop("`X` must contain at least one numeric predictor.", call. = FALSE)
     }
     x <- as.matrix(x)
   } else if (!is.matrix(x) || !is.numeric(x)) {
-    stop("`x` must be a numeric matrix or data frame.", call. = FALSE)
+    stop("`X` must be a numeric matrix or data frame.", call. = FALSE)
   }
 
   if (nrow(x) != number_of_observations) {
-    stop("`y` and `x` must have the same number of observations.",
+    stop("`y` and `X` must have the same number of observations.",
          call. = FALSE)
   }
   if (ncol(x) < 1L) {
-    stop("`x` must contain at least one predictor.", call. = FALSE)
+    stop("`X` must contain at least one predictor.", call. = FALSE)
   }
   if (anyNA(x) || any(!is.finite(x))) {
-    stop("`x` must contain only finite, non-missing values.", call. = FALSE)
+    stop("`X` must contain only finite, non-missing values.", call. = FALSE)
   }
 
   predictor_names <- colnames(x)
@@ -138,12 +138,15 @@
       solve(coefficient_precision, xy_crossprod / residual_var)
     )
     coefficient <- coefficient_mean +
-      drop(backsolve(precision_cholesky, rnorm(number_of_predictors)))
+      drop(backsolve(
+        precision_cholesky,
+        stats::rnorm(number_of_predictors)
+      ))
 
     residuals <- y_centered - x_centered %*% coefficient
     residual_posterior_scale <- residual_scale +
       0.5 * sum(residuals^2)
-    residual_var <- 1 / rgamma(
+    residual_var <- 1 / stats::rgamma(
       1L,
       shape = residual_posterior_shape,
       rate = residual_posterior_scale
@@ -152,7 +155,7 @@
     if (retained_index <= number_of_draws &&
         iteration == retained_iterations[retained_index]) {
       coefficient_samples[retained_index, ] <- coefficient
-      intercept_samples[retained_index] <- rnorm(
+      intercept_samples[retained_index] <- stats::rnorm(
         1L,
         mean = y_mean - sum(x_mean * coefficient),
         sd = sqrt(residual_var / length(y))

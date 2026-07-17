@@ -8,7 +8,7 @@ y <- 1 + 2 * x[, "first"] - 3 * x[, "second"]
 
 known_fit <- multiple_blm(
   y = y,
-  x = x,
+  X = x,
   prior_var = 10,
   residual_var = 1
 )
@@ -62,38 +62,54 @@ stopifnot(
 
 learned_fit <- multiple_blm(
   y = y,
-  x = x,
+  X = x,
   prior_var = 10,
   residual_shape = 2,
-  residual_scale = 1
-)
-relative_cov <- expected_cov
-expected_shape <- 4
-expected_scale <- 1 + 0.5 * (
-  sum((y - mean(y) -
-    sweep(x, 2, colMeans(x), "-") %*% expected_mean)^2) +
-    sum(expected_mean^2 / 10)
+  residual_scale = 1,
+  iterations = 1500,
+  burnin = 500,
+  thin = 2,
+  seed = 42
 )
 stopifnot(
   identical(
     names(learned_fit),
     c(
-      "coefficient_mean", "coefficient_cov", "coefficient_scale",
-      "coefficient_df", "intercept_mean", "intercept_var",
-      "intercept_scale", "intercept_df", "residual_var_shape",
-      "residual_var_scale"
+      "coefficient_mean", "coefficient_cov", "intercept_mean",
+      "intercept_var", "residual_var_mean", "residual_var_var",
+      "coefficient_samples", "intercept_samples", "residual_var_samples"
     )
   ),
-  isTRUE(all.equal(learned_fit$coefficient_mean, expected_mean)),
-  isTRUE(all.equal(learned_fit$residual_var_shape, expected_shape)),
-  isTRUE(all.equal(learned_fit$residual_var_scale, expected_scale)),
+  identical(dim(learned_fit$coefficient_samples), c(500L, 2L)),
+  identical(colnames(learned_fit$coefficient_samples), colnames(x)),
+  length(learned_fit$intercept_samples) == 500,
+  length(learned_fit$residual_var_samples) == 500,
+  all(learned_fit$residual_var_samples > 0),
+  isTRUE(all.equal(
+    learned_fit$coefficient_mean,
+    colMeans(learned_fit$coefficient_samples)
+  )),
   isTRUE(all.equal(
     learned_fit$coefficient_cov,
-    expected_scale / (expected_shape - 1) * relative_cov
+    cov(learned_fit$coefficient_samples)
   )),
-  learned_fit$coefficient_df == 2 * expected_shape,
-  learned_fit$intercept_df == 2 * expected_shape
+  identical(
+    learned_fit$residual_var_mean,
+    mean(learned_fit$residual_var_samples)
+  )
 )
+
+# The seed makes MCMC output reproducible.
+repeated_fit <- multiple_blm(
+  y, x, 10,
+  residual_shape = 2,
+  residual_scale = 1,
+  iterations = 1500,
+  burnin = 500,
+  thin = 2,
+  seed = 42
+)
+stopifnot(isTRUE(all.equal(learned_fit, repeated_fit)))
 
 # Invalid designs, priors, and residual specifications are rejected.
 stopifnot(
@@ -102,6 +118,17 @@ stopifnot(
   inherits(try(multiple_blm(y, x, c(10, 0), 1), silent = TRUE), "try-error"),
   inherits(try(multiple_blm(y, x, c(10, 10, 10), 1), silent = TRUE), "try-error"),
   inherits(try(multiple_blm(y, x, 10), silent = TRUE), "try-error"),
+  inherits(
+    try(
+      multiple_blm(
+        y, x, 10,
+        residual_shape = 2, residual_scale = 1,
+        iterations = 10, burnin = 9
+      ),
+      silent = TRUE
+    ),
+    "try-error"
+  ),
   inherits(
     try(
       multiple_blm(y, x, 10, residual_var = 1, residual_shape = 2),
