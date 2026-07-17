@@ -3,4 +3,5 @@
 useDynLib(blm, .registration = TRUE)
 importFrom(Rcpp, evalCpp)
 export(multiple_blm)
+export(assess_convergence)
 export(simple_blm)

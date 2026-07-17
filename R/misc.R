@@ -102,6 +102,14 @@
   retained_iterations
 }
 
+.validate_nchains <- function(nchains) {
+  if (!is.numeric(nchains) || length(nchains) != 1L || is.na(nchains) ||
+      !is.finite(nchains) || nchains != floor(nchains) || nchains < 1) {
+    stop("`nchains` must be a positive integer.", call. = FALSE)
+  }
+  as.integer(nchains)
+}
+
 .blm_gibbs <- function(y, x, prior_var, residual_shape, residual_scale,
                        iterations, burnin, thin, seed, verbose = FALSE,
                        coefficient_prior = "normal",
@@ -262,4 +270,135 @@
     samples$pi_samples <- NULL
   }
   samples
+}
+
+.combine_blm_chains <- function(chain_samples, use_spike_slab) {
+  number_of_draws <- vapply(
+    chain_samples,
+    function(samples) nrow(samples$coefficient_samples),
+    integer(1)
+  )
+  combined <- list(
+    coefficient_samples = do.call(
+      rbind,
+      lapply(chain_samples, `[[`, "coefficient_samples")
+    ),
+    intercept_samples = unlist(
+      lapply(chain_samples, `[[`, "intercept_samples"),
+      use.names = FALSE
+    ),
+    residual_var_samples = unlist(
+      lapply(chain_samples, `[[`, "residual_var_samples"),
+      use.names = FALSE
+    ),
+    chain_id = rep.int(seq_along(chain_samples), number_of_draws)
+  )
+  if (use_spike_slab) {
+    combined$inclusion_samples <- do.call(
+      rbind,
+      lapply(chain_samples, `[[`, "inclusion_samples")
+    )
+    combined$pi_samples <- unlist(
+      lapply(chain_samples, `[[`, "pi_samples"),
+      use.names = FALSE
+    )
+  }
+  combined
+}
+
+.fit_sample_matrix <- function(fit) {
+  required <- c(
+    "coefficient_samples",
+    "intercept_samples",
+    "residual_var_samples"
+  )
+  if (!is.list(fit) || !all(required %in% names(fit))) {
+    stop(
+      "`fit` must be a sampled fit returned by `multiple_blm()`.",
+      call. = FALSE
+    )
+  }
+
+  coefficient_samples <- as.matrix(fit$coefficient_samples)
+  number_of_draws <- nrow(coefficient_samples)
+  if (length(fit$intercept_samples) != number_of_draws ||
+      length(fit$residual_var_samples) != number_of_draws) {
+    stop("`fit` contains sample components with incompatible lengths.",
+         call. = FALSE)
+  }
+
+  sample_matrix <- cbind(
+    intercept = fit$intercept_samples,
+    residual_var = fit$residual_var_samples
+  )
+
+  if (!is.null(fit$pi_samples)) {
+    if (length(fit$pi_samples) != number_of_draws) {
+      stop("`fit` contains incompatible pi samples.", call. = FALSE)
+    }
+    sample_matrix <- cbind(sample_matrix, pi = fit$pi_samples)
+  }
+  sample_matrix
+}
+
+.as_blm_mcmc_list <- function(fit) {
+  sample_matrix <- .fit_sample_matrix(fit)
+  number_of_draws <- nrow(sample_matrix)
+  chain_id <- if (is.null(fit$chain_id)) {
+    rep.int(1L, number_of_draws)
+  } else {
+    fit$chain_id
+  }
+  if (length(chain_id) != number_of_draws || anyNA(chain_id) ||
+      any(chain_id < 1) || any(chain_id != floor(chain_id))) {
+    stop("`fit$chain_id` is invalid.", call. = FALSE)
+  }
+
+  split_indices <- split(seq_len(number_of_draws), chain_id)
+  chain_lengths <- vapply(split_indices, length, integer(1))
+  if (length(unique(chain_lengths)) != 1L) {
+    stop("All chains must contain the same number of retained draws.",
+         call. = FALSE)
+  }
+  if (chain_lengths[1] < 20L) {
+    stop("At least 20 retained draws per chain are required.",
+         call. = FALSE)
+  }
+
+  coda::mcmc.list(lapply(
+    split_indices,
+    function(indices) coda::mcmc(sample_matrix[indices, , drop = FALSE])
+  ))
+}
+
+.classical_rhat <- function(chains) {
+  parameter_names <- coda::varnames(chains)
+  number_of_chains <- coda::nchain(chains)
+  if (number_of_chains < 2L) {
+    return(stats::setNames(rep(NA_real_, length(parameter_names)),
+                           parameter_names))
+  }
+
+  chain_matrices <- lapply(chains, as.matrix)
+  draws_per_chain <- nrow(chain_matrices[[1]])
+  rhat <- vapply(seq_along(parameter_names), function(parameter) {
+    chain_means <- vapply(
+      chain_matrices,
+      function(chain) mean(chain[, parameter]),
+      numeric(1)
+    )
+    within_variance <- mean(vapply(
+      chain_matrices,
+      function(chain) stats::var(chain[, parameter]),
+      numeric(1)
+    ))
+    if (!is.finite(within_variance) || within_variance <= 0) {
+      return(NA_real_)
+    }
+    between_variance <- draws_per_chain * stats::var(chain_means)
+    pooled_variance <- (draws_per_chain - 1) / draws_per_chain *
+      within_variance + between_variance / draws_per_chain
+    sqrt(pooled_variance / within_variance)
+  }, numeric(1))
+  stats::setNames(rhat, parameter_names)
 }

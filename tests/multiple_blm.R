@@ -111,6 +111,60 @@ repeated_fit <- multiple_blm(
 )
 stopifnot(isTRUE(all.equal(learned_fit, repeated_fit)))
 
+# Chain combination retains the origin of every draw.
+mock_chain <- list(
+  coefficient_samples = matrix(1:4, ncol = 2),
+  intercept_samples = c(1, 2),
+  residual_var_samples = c(3, 4)
+)
+mock_combined <- blm:::.combine_blm_chains(
+  list(mock_chain, mock_chain),
+  use_spike_slab = FALSE
+)
+stopifnot(
+  identical(mock_combined$chain_id, c(1L, 1L, 2L, 2L)),
+  identical(dim(mock_combined$coefficient_samples), c(4L, 2L))
+)
+
+# Socket-based multisession tests are enabled explicitly outside restricted
+# package-check environments.
+if (identical(Sys.getenv("BLM_TEST_FUTURE"), "true")) {
+  parallel_fit <- multiple_blm(
+    y, x, 10,
+    residual_shape = 2,
+    residual_scale = 1,
+    iterations = 100,
+    burnin = 20,
+    thin = 2,
+    seed = 123,
+    nchains = 2
+  )
+  repeated_parallel_fit <- multiple_blm(
+    y, x, 10,
+    residual_shape = 2,
+    residual_scale = 1,
+    iterations = 100,
+    burnin = 20,
+    thin = 2,
+    seed = 123,
+    nchains = 2
+  )
+  stopifnot(
+    isTRUE(all.equal(parallel_fit, repeated_parallel_fit)),
+    parallel_fit$nchains == 2L,
+    identical(parallel_fit$chain_id, rep.int(1:2, c(40L, 40L))),
+    identical(dim(parallel_fit$coefficient_samples), c(80L, 2L)),
+    !identical(
+      parallel_fit$coefficient_samples[parallel_fit$chain_id == 1L, ],
+      parallel_fit$coefficient_samples[parallel_fit$chain_id == 2L, ]
+    ),
+    isTRUE(all.equal(
+      parallel_fit$coefficient_mean,
+      colMeans(parallel_fit$coefficient_samples)
+    ))
+  )
+}
+
 # The Rcpp and R implementations target the same posterior.
 r_fit <- multiple_blm(
   y, x, 10,
@@ -246,6 +300,25 @@ stopifnot(
   inherits(try(multiple_blm(y, x, c(10, 0), 1), silent = TRUE), "try-error"),
   inherits(try(multiple_blm(y, x, c(10, 10, 10), 1), silent = TRUE), "try-error"),
   inherits(try(multiple_blm(y, x, 10), silent = TRUE), "try-error"),
+  inherits(
+    try(
+      multiple_blm(y, x, 10, residual_var = 1, nchains = 2),
+      silent = TRUE
+    ),
+    "try-error"
+  ),
+  inherits(
+    try(
+      multiple_blm(
+        y, x, 10,
+        residual_shape = 2,
+        residual_scale = 1,
+        nchains = 0
+      ),
+      silent = TRUE
+    ),
+    "try-error"
+  ),
   inherits(
     try(multiple_blm(y, x, 10, residual_var = 1, version = "C"), silent = TRUE),
     "try-error"

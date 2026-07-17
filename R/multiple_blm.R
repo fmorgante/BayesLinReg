@@ -16,7 +16,7 @@
 #'   mass at zero and the normal slab specified by `prior_var`, and requires
 #'   `residual_var = NULL`.
 #' @param pi_alpha,pi_beta Positive shape parameters for the Beta prior on the
-#'   shared inclusion probability eqn{\pi}. Used with the spike-and-slab prior.
+#'   shared inclusion probability \eqn{\pi}. Used with the spike-and-slab prior.
 #' @param residual_var A positive numeric scalar giving the known residual
 #'   variance, or `NULL` to learn it from the data.
 #' @param residual_shape A positive numeric scalar giving the shape of the
@@ -34,6 +34,9 @@
 #'   compiled C++ implementation or `"R"` for the reference R implementation.
 #' @param verbose A logical scalar. If `TRUE`, display the current Gibbs
 #'   iteration.
+#' @param nchains A positive integer giving the number of independent MCMC
+#'   chains. Values greater than one run chains in parallel using a temporary
+#'   \code{future::multisession} plan.
 #'
 #' @return A named list containing `coefficient_mean`, `coefficient_cov`,
 #'   `intercept_mean`, and `intercept_var`. When the residual variance is
@@ -43,6 +46,9 @@
 #'   With the spike-and-slab prior, the list also contains
 #'   `inclusion_probability`, `pi_mean`, `pi_var`, `inclusion_samples`,
 #'   and `pi_samples`.
+#'   When `nchains > 1`, retained draws are combined across chains and the
+#'   result additionally contains `nchains` and a corresponding `chain_id`
+#'   for each draw.
 #'
 #' @details With known residual variance, the coefficients have independent
 #'   zero-mean normal priors with variances given by `prior_var`. These priors
@@ -67,7 +73,8 @@
 #'   residual_scale = 1,
 #'   seed = 123,
 #'   version = "Rcpp",
-#'   verbose = TRUE
+#'   verbose = FALSE,
+#'   nchains = 1
 #' )
 multiple_blm <- function(y, X, prior_var, residual_var = NULL,
                          coefficient_prior = c("normal", "spike_slab"),
@@ -75,9 +82,10 @@ multiple_blm <- function(y, X, prior_var, residual_var = NULL,
                          residual_shape = NULL, residual_scale = NULL,
                          iterations = 4000L, burnin = 1000L, thin = 1L,
                          seed = NULL, version = c("Rcpp", "R"),
-                         verbose = FALSE) {
+                         verbose = FALSE, nchains = 1L) {
   version <- match.arg(version)
   coefficient_prior <- match.arg(coefficient_prior)
+  nchains <- .validate_nchains(nchains)
   if (!is.logical(verbose) || length(verbose) != 1L || is.na(verbose)) {
     stop("`verbose` must be TRUE or FALSE.", call. = FALSE)
   }
@@ -113,6 +121,12 @@ multiple_blm <- function(y, X, prior_var, residual_var = NULL,
   y_centered <- y - y_mean
 
   if (!is.null(residual_var)) {
+    if (nchains > 1L) {
+      stop(
+        "`nchains > 1` is only available when the residual variance is learned.",
+        call. = FALSE
+      )
+    }
     if (!is.null(residual_shape) || !is.null(residual_scale)) {
       stop(
         "Supply either `residual_var` or the inverse-gamma prior, not both.",
@@ -155,8 +169,7 @@ multiple_blm <- function(y, X, prior_var, residual_var = NULL,
   .validate_variance(residual_shape, "residual_shape")
   .validate_variance(residual_scale, "residual_scale")
 
-  sampler <- if (version == "Rcpp") .blm_gibbs_rcpp else .blm_gibbs
-  samples <- sampler(
+  sampler_arguments <- list(
     y = y,
     x = X,
     prior_var = prior_var,
@@ -165,12 +178,46 @@ multiple_blm <- function(y, X, prior_var, residual_var = NULL,
     iterations = iterations,
     burnin = burnin,
     thin = thin,
-    seed = seed,
     verbose = verbose,
     coefficient_prior = coefficient_prior,
     pi_alpha = pi_alpha,
     pi_beta = pi_beta
   )
+
+  if (nchains == 1L) {
+    sampler <- if (version == "Rcpp") .blm_gibbs_rcpp else .blm_gibbs
+    samples <- do.call(sampler, c(sampler_arguments, list(seed = seed)))
+  } else {
+    chain_seeds <- if (is.null(seed)) {
+      rep(list(NULL), nchains)
+    } else {
+      as.list((abs(as.double(seed)) + seq_len(nchains) - 1) %% 2147483647)
+    }
+    previous_plan <- future::plan()
+    on.exit(future::plan(previous_plan), add = TRUE)
+    future::plan(future::multisession, workers = nchains)
+
+    chain_futures <- lapply(seq_len(nchains), function(chain) {
+      chain_seed <- chain_seeds[[chain]]
+      future::future({
+        namespace <- asNamespace("blm")
+        chain_sampler <- if (version == "Rcpp") {
+          get(".blm_gibbs_rcpp", envir = namespace)
+        } else {
+          get(".blm_gibbs", envir = namespace)
+        }
+        do.call(
+          chain_sampler,
+          c(sampler_arguments, list(seed = chain_seed))
+        )
+      }, seed = TRUE)
+    })
+    chain_samples <- lapply(chain_futures, future::value)
+    samples <- .combine_blm_chains(
+      chain_samples,
+      use_spike_slab = coefficient_prior == "spike_slab"
+    )
+  }
 
   result <- list(
     coefficient_mean = colMeans(samples$coefficient_samples),
@@ -189,6 +236,10 @@ multiple_blm <- function(y, X, prior_var, residual_var = NULL,
     result$pi_var <- stats::var(samples$pi_samples)
     result$inclusion_samples <- samples$inclusion_samples
     result$pi_samples <- samples$pi_samples
+  }
+  if (nchains > 1L) {
+    result$nchains <- nchains
+    result$chain_id <- samples$chain_id
   }
   result
 }

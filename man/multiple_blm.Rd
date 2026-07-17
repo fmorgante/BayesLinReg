@@ -19,7 +19,8 @@ multiple_blm(
   thin = 1L,
   seed = NULL,
   version = c("Rcpp", "R"),
-  verbose = FALSE
+  verbose = FALSE,
+  nchains = 1L
 )
 }
 \arguments{
@@ -65,6 +66,10 @@ compiled C++ implementation or \code{"R"} for the reference R implementation.}
 
 \item{verbose}{A logical scalar. If \code{TRUE}, display the current Gibbs
 iteration.}
+
+\item{nchains}{A positive integer giving the number of independent MCMC
+chains. Values greater than one run chains in parallel using a temporary
+\code{future::multisession} plan.}
 }
 \value{
 A named list containing \code{coefficient_mean}, \code{coefficient_cov},
@@ -73,7 +78,9 @@ learned, the list additionally contains \code{residual_var_mean},
 \code{residual_var_var}, \code{coefficient_samples}, \code{intercept_samples},
 and \code{residual_var_samples}. With the spike-and-slab prior, the list also
 contains \code{inclusion_probability}, \code{pi_mean}, \code{pi_var},
-\code{inclusion_samples}, and \code{pi_samples}.
+\code{inclusion_samples}, and \code{pi_samples}. When \code{nchains > 1},
+retained draws are combined across chains and the result additionally contains
+\code{nchains} and a corresponding \code{chain_id} for each draw.
 }
 \description{
 Computes posterior distributions for the coefficients and intercept in a
@@ -104,6 +111,7 @@ multiple_blm(
   residual_scale = 1,
   seed = 123,
   version = "Rcpp",
-  verbose = TRUE
+  verbose = FALSE,
+  nchains = 1
 )
 }
