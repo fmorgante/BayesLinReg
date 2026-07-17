@@ -103,7 +103,9 @@
 }
 
 .blm_gibbs <- function(y, x, prior_var, residual_shape, residual_scale,
-                       iterations, burnin, thin, seed, verbose = FALSE) {
+                       iterations, burnin, thin, seed, verbose = FALSE,
+                       coefficient_prior = "normal",
+                       pi_alpha = 1, pi_beta = 1) {
   retained_iterations <- .validate_mcmc(iterations, burnin, thin, seed)
   number_of_predictors <- ncol(x)
   predictor_names <- colnames(x)
@@ -123,6 +125,18 @@
   )
   intercept_samples <- numeric(number_of_draws)
   residual_var_samples <- numeric(number_of_draws)
+  use_spike_slab <- coefficient_prior == "spike_slab"
+  if (use_spike_slab) {
+    inclusion_samples <- matrix(
+      NA_integer_,
+      nrow = number_of_draws,
+      ncol = number_of_predictors,
+      dimnames = list(NULL, predictor_names)
+    )
+    pi_samples <- numeric(number_of_draws)
+    inclusion <- rep.int(1L, number_of_predictors)
+    pi <- pi_alpha / (pi_alpha + pi_beta)
+  }
 
   coefficient <- numeric(number_of_predictors)
   residuals <- y_centered
@@ -144,13 +158,40 @@
       )
       conditional_mean <- conditional_var *
         sum(x_centered[, predictor] * partial_residuals) / residual_var
-      coefficient[predictor] <- stats::rnorm(
-        1L,
-        mean = conditional_mean,
-        sd = sqrt(conditional_var)
-      )
+      if (use_spike_slab) {
+        bounded_pi <- min(
+          max(pi, .Machine$double.eps),
+          1 - .Machine$double.eps
+        )
+        log_inclusion_odds <- stats::qlogis(bounded_pi) +
+          0.5 * log(conditional_var / prior_var[predictor]) +
+          conditional_mean^2 / (2 * conditional_var)
+        inclusion[predictor] <- stats::rbinom(
+          1L,
+          size = 1L,
+          prob = stats::plogis(log_inclusion_odds)
+        )
+      }
+      if (!use_spike_slab || inclusion[predictor] == 1L) {
+        coefficient[predictor] <- stats::rnorm(
+          1L,
+          mean = conditional_mean,
+          sd = sqrt(conditional_var)
+        )
+      } else {
+        coefficient[predictor] <- 0
+      }
       residuals <- partial_residuals -
         x_centered[, predictor] * coefficient[predictor]
+    }
+
+    if (use_spike_slab) {
+      number_included <- sum(inclusion)
+      pi <- stats::rbeta(
+        1L,
+        shape1 = pi_alpha + number_included,
+        shape2 = pi_beta + number_of_predictors - number_included
+      )
     }
 
     residual_posterior_scale <- residual_scale +
@@ -170,6 +211,10 @@
         sd = sqrt(residual_var / length(y))
       )
       residual_var_samples[retained_index] <- residual_var
+      if (use_spike_slab) {
+        inclusion_samples[retained_index, ] <- inclusion
+        pi_samples[retained_index] <- pi
+      }
       retained_index <- retained_index + 1L
     }
   }
@@ -178,15 +223,22 @@
     cat("\n")
   }
 
-  list(
+  samples <- list(
     coefficient_samples = coefficient_samples,
     intercept_samples = intercept_samples,
     residual_var_samples = residual_var_samples
   )
+  if (use_spike_slab) {
+    samples$inclusion_samples <- inclusion_samples
+    samples$pi_samples <- pi_samples
+  }
+  samples
 }
 
 .blm_gibbs_rcpp <- function(y, x, prior_var, residual_shape, residual_scale,
-                            iterations, burnin, thin, seed, verbose = FALSE) {
+                            iterations, burnin, thin, seed, verbose = FALSE,
+                            coefficient_prior = "normal",
+                            pi_alpha = 1, pi_beta = 1) {
   .validate_mcmc(iterations, burnin, thin, seed)
   samples <- blm_gibbs_rcpp_cpp(
     y = y,
@@ -197,8 +249,17 @@
     iterations = iterations,
     burnin = burnin,
     thin = thin,
-    verbose = verbose
+    verbose = verbose,
+    use_spike_slab = coefficient_prior == "spike_slab",
+    pi_alpha = pi_alpha,
+    pi_beta = pi_beta
   )
   colnames(samples$coefficient_samples) <- colnames(x)
+  if (coefficient_prior == "spike_slab") {
+    colnames(samples$inclusion_samples) <- colnames(x)
+  } else {
+    samples$inclusion_samples <- NULL
+    samples$pi_samples <- NULL
+  }
   samples
 }

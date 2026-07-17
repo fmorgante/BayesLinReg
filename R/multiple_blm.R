@@ -11,6 +11,12 @@
 #' @param prior_var A positive numeric scalar giving a common prior variance
 #'   for all coefficients, or a positive numeric vector with one variance per
 #'   predictor.
+#' @param coefficient_prior The coefficient-prior family. `"normal"` uses
+#'   independent normal priors. `"spike_slab"` uses a mixture of a point
+#'   mass at zero and the normal slab specified by `prior_var`, and requires
+#'   `residual_var = NULL`.
+#' @param pi_alpha,pi_beta Positive shape parameters for the Beta prior on the
+#'   shared inclusion probability eqn{\pi}. Used with the spike-and-slab prior.
 #' @param residual_var A positive numeric scalar giving the known residual
 #'   variance, or `NULL` to learn it from the data.
 #' @param residual_shape A positive numeric scalar giving the shape of the
@@ -34,6 +40,9 @@
 #'   learned, the list additionally contains `residual_var_mean`,
 #'   `residual_var_var`, `coefficient_samples`, `intercept_samples`, and
 #'   `residual_var_samples`.
+#'   With the spike-and-slab prior, the list also contains
+#'   `inclusion_probability`, `pi_mean`, `pi_var`, `inclusion_samples`,
+#'   and `pi_samples`.
 #'
 #' @details With known residual variance, the coefficients have independent
 #'   zero-mean normal priors with variances given by `prior_var`. These priors
@@ -41,6 +50,9 @@
 #'   summaries are computed from retained Gibbs draws when the residual
 #'   variance is learned. During each Gibbs sweep, coefficients are updated one
 #'   at a time from their univariate conditional normal distributions.
+#'   For the spike-and-slab prior, inclusion indicators are sampled using the
+#'   coefficient-marginalized conditional odds, and the shared inclusion
+#'   probability is updated from its full conditional Beta distribution.
 #' @export
 #'
 #' @examples
@@ -50,6 +62,7 @@
 #' multiple_blm(
 #'   y, X,
 #'   prior_var = c(10, 5),
+#'   coefficient_prior = "spike_slab",
 #'   residual_shape = 2,
 #'   residual_scale = 1,
 #'   seed = 123,
@@ -57,11 +70,14 @@
 #'   verbose = TRUE
 #' )
 multiple_blm <- function(y, X, prior_var, residual_var = NULL,
+                         coefficient_prior = c("normal", "spike_slab"),
+                         pi_alpha = 1, pi_beta = 1,
                          residual_shape = NULL, residual_scale = NULL,
                          iterations = 4000L, burnin = 1000L, thin = 1L,
                          seed = NULL, version = c("Rcpp", "R"),
                          verbose = FALSE) {
   version <- match.arg(version)
+  coefficient_prior <- match.arg(coefficient_prior)
   if (!is.logical(verbose) || length(verbose) != 1L || is.na(verbose)) {
     stop("`verbose` must be TRUE or FALSE.", call. = FALSE)
   }
@@ -79,6 +95,16 @@ multiple_blm <- function(y, X, prior_var, residual_var = NULL,
   number_of_predictors <- ncol(X)
   predictor_names <- colnames(X)
   prior_var <- .validate_prior_var(prior_var, number_of_predictors)
+  if (coefficient_prior == "spike_slab") {
+    .validate_variance(pi_alpha, "pi_alpha")
+    .validate_variance(pi_beta, "pi_beta")
+    if (!is.null(residual_var)) {
+      stop(
+        "`coefficient_prior = \"spike_slab\"` requires learning the residual variance.",
+        call. = FALSE
+      )
+    }
+  }
   prior_precision <- diag(1 / prior_var, nrow = number_of_predictors)
 
   x_mean <- colMeans(X)
@@ -140,10 +166,13 @@ multiple_blm <- function(y, X, prior_var, residual_var = NULL,
     burnin = burnin,
     thin = thin,
     seed = seed,
-    verbose = verbose
+    verbose = verbose,
+    coefficient_prior = coefficient_prior,
+    pi_alpha = pi_alpha,
+    pi_beta = pi_beta
   )
 
-  list(
+  result <- list(
     coefficient_mean = colMeans(samples$coefficient_samples),
     coefficient_cov = stats::cov(samples$coefficient_samples),
     intercept_mean = mean(samples$intercept_samples),
@@ -154,4 +183,12 @@ multiple_blm <- function(y, X, prior_var, residual_var = NULL,
     intercept_samples = samples$intercept_samples,
     residual_var_samples = samples$residual_var_samples
   )
+  if (coefficient_prior == "spike_slab") {
+    result$inclusion_probability <- colMeans(samples$inclusion_samples)
+    result$pi_mean <- mean(samples$pi_samples)
+    result$pi_var <- stats::var(samples$pi_samples)
+    result$inclusion_samples <- samples$inclusion_samples
+    result$pi_samples <- samples$pi_samples
+  }
+  result
 }

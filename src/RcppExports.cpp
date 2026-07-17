@@ -11,8 +11,8 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
 // blm_gibbs_rcpp_cpp
-Rcpp::List blm_gibbs_rcpp_cpp(const Rcpp::NumericVector& y, const Rcpp::NumericMatrix& X, const Rcpp::NumericVector& prior_var, const double residual_shape, const double residual_scale, const int iterations, const int burnin, const int thin, const bool verbose);
-RcppExport SEXP _blm_blm_gibbs_rcpp_cpp(SEXP ySEXP, SEXP XSEXP, SEXP prior_varSEXP, SEXP residual_shapeSEXP, SEXP residual_scaleSEXP, SEXP iterationsSEXP, SEXP burninSEXP, SEXP thinSEXP, SEXP verboseSEXP) {
+Rcpp::List blm_gibbs_rcpp_cpp(const Rcpp::NumericVector& y, const Rcpp::NumericMatrix& X, const Rcpp::NumericVector& prior_var, const double residual_shape, const double residual_scale, const int iterations, const int burnin, const int thin, const bool verbose, const bool use_spike_slab, const double pi_alpha, const double pi_beta);
+RcppExport SEXP _blm_blm_gibbs_rcpp_cpp(SEXP ySEXP, SEXP XSEXP, SEXP prior_varSEXP, SEXP residual_shapeSEXP, SEXP residual_scaleSEXP, SEXP iterationsSEXP, SEXP burninSEXP, SEXP thinSEXP, SEXP verboseSEXP, SEXP use_spike_slabSEXP, SEXP pi_alphaSEXP, SEXP pi_betaSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -25,13 +25,16 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const int >::type burnin(burninSEXP);
     Rcpp::traits::input_parameter< const int >::type thin(thinSEXP);
     Rcpp::traits::input_parameter< const bool >::type verbose(verboseSEXP);
-    rcpp_result_gen = Rcpp::wrap(blm_gibbs_rcpp_cpp(y, X, prior_var, residual_shape, residual_scale, iterations, burnin, thin, verbose));
+    Rcpp::traits::input_parameter< const bool >::type use_spike_slab(use_spike_slabSEXP);
+    Rcpp::traits::input_parameter< const double >::type pi_alpha(pi_alphaSEXP);
+    Rcpp::traits::input_parameter< const double >::type pi_beta(pi_betaSEXP);
+    rcpp_result_gen = Rcpp::wrap(blm_gibbs_rcpp_cpp(y, X, prior_var, residual_shape, residual_scale, iterations, burnin, thin, verbose, use_spike_slab, pi_alpha, pi_beta));
     return rcpp_result_gen;
 END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_blm_blm_gibbs_rcpp_cpp", (DL_FUNC) &_blm_blm_gibbs_rcpp_cpp, 9},
+    {"_blm_blm_gibbs_rcpp_cpp", (DL_FUNC) &_blm_blm_gibbs_rcpp_cpp, 12},
     {NULL, NULL, 0}
 };
 

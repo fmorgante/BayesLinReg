@@ -9,6 +9,9 @@ multiple_blm(
   X,
   prior_var,
   residual_var = NULL,
+  coefficient_prior = c("normal", "spike_slab"),
+  pi_alpha = 1,
+  pi_beta = 1,
   residual_shape = NULL,
   residual_scale = NULL,
   iterations = 4000L,
@@ -28,6 +31,14 @@ predictors in columns.}
 \item{prior_var}{A positive numeric scalar giving a common prior variance
 for all coefficients, or a positive numeric vector with one variance per
 predictor.}
+
+\item{coefficient_prior}{The coefficient-prior family. \code{"normal"} uses
+independent normal priors. \code{"spike_slab"} uses a mixture of a point mass
+at zero and the normal slab specified by \code{prior_var}, and requires
+\code{residual_var = NULL}.}
+
+\item{pi_alpha, pi_beta}{Positive shape parameters for the Beta prior on the
+shared inclusion probability \eqn{\pi}. Used with the spike-and-slab prior.}
 
 \item{residual_var}{A positive numeric scalar giving the known residual
 variance, or \code{NULL} to learn it from the data.}
@@ -60,7 +71,9 @@ A named list containing \code{coefficient_mean}, \code{coefficient_cov},
 \code{intercept_mean}, and \code{intercept_var}. When the residual variance is
 learned, the list additionally contains \code{residual_var_mean},
 \code{residual_var_var}, \code{coefficient_samples}, \code{intercept_samples},
-and \code{residual_var_samples}.
+and \code{residual_var_samples}. With the spike-and-slab prior, the list also
+contains \code{inclusion_probability}, \code{pi_mean}, \code{pi_var},
+\code{inclusion_samples}, and \code{pi_samples}.
 }
 \description{
 Computes posterior distributions for the coefficients and intercept in a
@@ -74,7 +87,10 @@ normal priors with variances given by \code{prior_var}. These priors are
 independent of the inverse-gamma residual-variance prior. Posterior summaries
 are computed from retained Gibbs draws when the residual variance is learned.
 During each Gibbs sweep, coefficients are updated one at a time from their
-univariate conditional normal distributions.
+univariate conditional normal distributions. For the spike-and-slab prior,
+inclusion indicators are sampled using the coefficient-marginalized
+conditional odds, and the shared inclusion probability is updated from its
+full conditional Beta distribution.
 }
 \examples{
 X <- cbind(x1 = 1:5, x2 = c(0, 1, 0, 1, 0))
@@ -83,6 +99,7 @@ multiple_blm(y, X, prior_var = 10, residual_var = 1)
 multiple_blm(
   y, X,
   prior_var = c(10, 5),
+  coefficient_prior = "spike_slab",
   residual_shape = 2,
   residual_scale = 1,
   seed = 123,

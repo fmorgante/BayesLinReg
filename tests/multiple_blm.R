@@ -154,6 +154,70 @@ stopifnot(
     correlated_r$residual_var_mean) < 0.05
 )
 
+# A spike-and-slab prior learns predictor inclusion and the shared pi.
+selection_n <- 60
+selection_X <- cbind(
+  signal = seq(-2, 2, length.out = selection_n),
+  noise1 = sin(seq_len(selection_n)),
+  noise2 = cos(seq_len(selection_n)),
+  noise3 = rep(c(-1, 0, 1), 20)
+)
+selection_y <- 1 + 2.5 * selection_X[, "signal"] +
+  0.25 * rep(c(-1, 1), 30)
+selection_rcpp <- multiple_blm(
+  selection_y, selection_X, 10,
+  coefficient_prior = "spike_slab",
+  pi_alpha = 1,
+  pi_beta = 1,
+  residual_shape = 2,
+  residual_scale = 1,
+  iterations = 1200,
+  burnin = 400,
+  thin = 2,
+  seed = 77,
+  version = "Rcpp"
+)
+stopifnot(
+  identical(
+    tail(names(selection_rcpp), 5),
+    c(
+      "inclusion_probability", "pi_mean", "pi_var",
+      "inclusion_samples", "pi_samples"
+    )
+  ),
+  identical(dim(selection_rcpp$inclusion_samples), c(400L, 4L)),
+  all(selection_rcpp$inclusion_samples %in% 0:1),
+  all(
+    selection_rcpp$coefficient_samples[
+      selection_rcpp$inclusion_samples == 0
+    ] == 0
+  ),
+  selection_rcpp$inclusion_probability["signal"] > 0.9,
+  max(selection_rcpp$inclusion_probability[-1]) < 0.3,
+  all(selection_rcpp$pi_samples > 0 & selection_rcpp$pi_samples < 1),
+  identical(selection_rcpp$pi_mean, mean(selection_rcpp$pi_samples)),
+  identical(selection_rcpp$pi_var, var(selection_rcpp$pi_samples))
+)
+
+selection_r <- multiple_blm(
+  selection_y, selection_X, 10,
+  coefficient_prior = "spike_slab",
+  residual_shape = 2,
+  residual_scale = 1,
+  iterations = 1200,
+  burnin = 400,
+  thin = 2,
+  seed = 77,
+  version = "R"
+)
+stopifnot(
+  max(abs(
+    selection_rcpp$inclusion_probability -
+      selection_r$inclusion_probability
+  )) < 0.1,
+  abs(selection_rcpp$pi_mean - selection_r$pi_mean) < 0.1
+)
+
 # Both implementations display an iteration counter when requested.
 for (sampler_version in c("Rcpp", "R")) {
   progress_output <- capture.output(
@@ -184,6 +248,30 @@ stopifnot(
   inherits(try(multiple_blm(y, x, 10), silent = TRUE), "try-error"),
   inherits(
     try(multiple_blm(y, x, 10, residual_var = 1, version = "C"), silent = TRUE),
+    "try-error"
+  ),
+  inherits(
+    try(
+      multiple_blm(
+        y, x, 10,
+        residual_var = 1,
+        coefficient_prior = "spike_slab"
+      ),
+      silent = TRUE
+    ),
+    "try-error"
+  ),
+  inherits(
+    try(
+      multiple_blm(
+        y, x, 10,
+        coefficient_prior = "spike_slab",
+        pi_alpha = 0,
+        residual_shape = 2,
+        residual_scale = 1
+      ),
+      silent = TRUE
+    ),
     "try-error"
   ),
   inherits(
