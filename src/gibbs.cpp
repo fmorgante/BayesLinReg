@@ -1,7 +1,6 @@
 #include <Rcpp.h>
 #include <algorithm>
 #include <cmath>
-#include <iostream>
 #include <limits>
 #include <vector>
 
@@ -15,7 +14,7 @@ Rcpp::List blm_gibbs_rcpp_cpp(
     const int iterations,
     const int burnin,
     const int thin,
-    const bool verbose,
+    const Rcpp::Function& progress_callback,
     const bool use_spike_slab,
     const double pi_alpha,
     const double pi_beta) {
@@ -71,13 +70,10 @@ Rcpp::List blm_gibbs_rcpp_cpp(
   const double posterior_shape =
     residual_shape + static_cast<double>(n - 1) / 2.0;
   int retained_index = 0;
+  int next_progress_percent = 10;
+  int last_reported_iteration = 0;
 
   for (int iteration = 1; iteration <= iterations; ++iteration) {
-    if (verbose) {
-      Rcpp::Rcout << "\rGibbs iteration " << iteration << "/"
-                  << iterations << std::flush;
-    }
-
     // Update each coefficient from its univariate conditional normal.
     for (int j = 0; j < p; ++j) {
       double conditional_numerator = 0.0;
@@ -162,13 +158,31 @@ Rcpp::List blm_gibbs_rcpp_cpp(
       ++retained_index;
     }
 
+    if (next_progress_percent <= 100) {
+      int threshold = static_cast<int>(std::ceil(
+        iterations * next_progress_percent / 100.0
+      ));
+      if (iteration >= threshold) {
+        do {
+          next_progress_percent += 10;
+          if (next_progress_percent > 100) {
+            break;
+          }
+          threshold = static_cast<int>(std::ceil(
+            iterations * next_progress_percent / 100.0
+          ));
+        } while (iteration >= threshold);
+        progress_callback(
+          iteration - last_reported_iteration,
+          iteration
+        );
+        last_reported_iteration = iteration;
+      }
+    }
+
     if (iteration % 1000 == 0) {
       Rcpp::checkUserInterrupt();
     }
-  }
-
-  if (verbose) {
-    Rcpp::Rcout << std::endl;
   }
 
   return Rcpp::List::create(

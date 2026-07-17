@@ -111,7 +111,8 @@
 }
 
 .blm_gibbs <- function(y, x, prior_var, residual_shape, residual_scale,
-                       iterations, burnin, thin, seed, verbose = FALSE,
+                       iterations, burnin, thin, seed,
+                       progress_callback = NULL,
                        coefficient_prior = "normal",
                        pi_alpha = 1, pi_beta = 1) {
   retained_iterations <- .validate_mcmc(iterations, burnin, thin, seed)
@@ -151,13 +152,18 @@
   residual_var <- residual_scale / (residual_shape + 1)
   residual_posterior_shape <- residual_shape + (length(y) - 1) / 2
   retained_index <- 1L
+  progress_thresholds <- if (!is.null(progress_callback)) {
+    unique(pmax(
+      1L,
+      as.integer((iterations * seq_len(10L) + 9) %/% 10)
+    ))
+  } else {
+    integer(0)
+  }
+  progress_index <- 1L
+  last_reported_iteration <- 0L
 
   for (iteration in seq_len(iterations)) {
-    if (verbose) {
-      cat(sprintf("\rGibbs iteration %d/%d", iteration, iterations))
-      utils::flush.console()
-    }
-
     for (predictor in seq_len(number_of_predictors)) {
       partial_residuals <- residuals +
         x_centered[, predictor] * coefficient[predictor]
@@ -225,10 +231,16 @@
       }
       retained_index <- retained_index + 1L
     }
-  }
 
-  if (verbose) {
-    cat("\n")
+    if (progress_index <= length(progress_thresholds) &&
+        iteration >= progress_thresholds[progress_index]) {
+      progress_callback(
+        amount = iteration - last_reported_iteration,
+        iteration = iteration
+      )
+      last_reported_iteration <- iteration
+      progress_index <- progress_index + 1L
+    }
   }
 
   samples <- list(
@@ -244,10 +256,14 @@
 }
 
 .blm_gibbs_rcpp <- function(y, x, prior_var, residual_shape, residual_scale,
-                            iterations, burnin, thin, seed, verbose = FALSE,
+                            iterations, burnin, thin, seed,
+                            progress_callback = NULL,
                             coefficient_prior = "normal",
                             pi_alpha = 1, pi_beta = 1) {
   .validate_mcmc(iterations, burnin, thin, seed)
+  if (is.null(progress_callback)) {
+    progress_callback <- function(amount, iteration) invisible(NULL)
+  }
   samples <- blm_gibbs_rcpp_cpp(
     y = y,
     X = x,
@@ -257,7 +273,7 @@
     iterations = iterations,
     burnin = burnin,
     thin = thin,
-    verbose = verbose,
+    progress_callback = progress_callback,
     use_spike_slab = coefficient_prior == "spike_slab",
     pi_alpha = pi_alpha,
     pi_beta = pi_beta
@@ -270,6 +286,81 @@
     samples$pi_samples <- NULL
   }
   samples
+}
+
+.chain_progress_callback <- function(progressor, chain, nchains) {
+  if (is.null(progressor)) {
+    return(NULL)
+  }
+  force(progressor)
+  force(chain)
+  force(nchains)
+  function(amount, iteration) {
+    progressor(
+      amount = amount,
+      message = sprintf(
+        "Chain %d/%d: iteration %d",
+        chain,
+        nchains,
+        iteration
+      )
+    )
+  }
+}
+
+.run_blm_chains <- function(sampler_arguments, version, nchains, seed,
+                            use_spike_slab, progressor = NULL) {
+  if (nchains == 1L) {
+    sampler <- if (version == "Rcpp") .blm_gibbs_rcpp else .blm_gibbs
+    return(do.call(
+      sampler,
+      c(
+        sampler_arguments,
+        list(
+          seed = seed,
+          progress_callback = .chain_progress_callback(
+            progressor,
+            chain = 1L,
+            nchains = 1L
+          )
+        )
+      )
+    ))
+  }
+
+  chain_seeds <- if (is.null(seed)) {
+    rep(list(NULL), nchains)
+  } else {
+    as.list((abs(as.double(seed)) + seq_len(nchains) - 1) %% 2147483647)
+  }
+  previous_plan <- future::plan()
+  on.exit(future::plan(previous_plan), add = TRUE)
+  future::plan(future::multisession, workers = nchains)
+
+  chain_futures <- lapply(seq_len(nchains), function(chain) {
+    chain_seed <- chain_seeds[[chain]]
+    chain_progress <- .chain_progress_callback(progressor, chain, nchains)
+    future::future({
+      namespace <- asNamespace("blm")
+      chain_sampler <- if (version == "Rcpp") {
+        get(".blm_gibbs_rcpp", envir = namespace)
+      } else {
+        get(".blm_gibbs", envir = namespace)
+      }
+      do.call(
+        chain_sampler,
+        c(
+          sampler_arguments,
+          list(
+            seed = chain_seed,
+            progress_callback = chain_progress
+          )
+        )
+      )
+    }, seed = TRUE)
+  })
+  chain_samples <- lapply(chain_futures, future::value)
+  .combine_blm_chains(chain_samples, use_spike_slab = use_spike_slab)
 }
 
 .combine_blm_chains <- function(chain_samples, use_spike_slab) {

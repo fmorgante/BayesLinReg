@@ -32,8 +32,9 @@
 #'   generator.
 #' @param version The Gibbs-sampler implementation to use: `"Rcpp"` for the
 #'   compiled C++ implementation or `"R"` for the reference R implementation.
-#' @param verbose A logical scalar. If `TRUE`, display the current Gibbs
-#'   iteration.
+#' @param verbose A logical scalar. If `TRUE`, display aggregate Gibbs
+#'   progress using [progressr::with_progress()], updated every 10 percent per
+#'   chain.
 #' @param nchains A positive integer giving the number of independent MCMC
 #'   chains. Values greater than one run chains in parallel using a temporary
 #'   \code{future::multisession} plan.
@@ -178,43 +179,29 @@ multiple_blm <- function(y, X, prior_var, residual_var = NULL,
     iterations = iterations,
     burnin = burnin,
     thin = thin,
-    verbose = verbose,
     coefficient_prior = coefficient_prior,
     pi_alpha = pi_alpha,
     pi_beta = pi_beta
   )
 
-  if (nchains == 1L) {
-    sampler <- if (version == "Rcpp") .blm_gibbs_rcpp else .blm_gibbs
-    samples <- do.call(sampler, c(sampler_arguments, list(seed = seed)))
+  if (verbose) {
+    samples <- progressr::with_progress({
+      progress <- progressr::progressor(steps = nchains * iterations)
+      .run_blm_chains(
+        sampler_arguments = sampler_arguments,
+        version = version,
+        nchains = nchains,
+        seed = seed,
+        use_spike_slab = coefficient_prior == "spike_slab",
+        progressor = progress
+      )
+    }, enable = TRUE)
   } else {
-    chain_seeds <- if (is.null(seed)) {
-      rep(list(NULL), nchains)
-    } else {
-      as.list((abs(as.double(seed)) + seq_len(nchains) - 1) %% 2147483647)
-    }
-    previous_plan <- future::plan()
-    on.exit(future::plan(previous_plan), add = TRUE)
-    future::plan(future::multisession, workers = nchains)
-
-    chain_futures <- lapply(seq_len(nchains), function(chain) {
-      chain_seed <- chain_seeds[[chain]]
-      future::future({
-        namespace <- asNamespace("blm")
-        chain_sampler <- if (version == "Rcpp") {
-          get(".blm_gibbs_rcpp", envir = namespace)
-        } else {
-          get(".blm_gibbs", envir = namespace)
-        }
-        do.call(
-          chain_sampler,
-          c(sampler_arguments, list(seed = chain_seed))
-        )
-      }, seed = TRUE)
-    })
-    chain_samples <- lapply(chain_futures, future::value)
-    samples <- .combine_blm_chains(
-      chain_samples,
+    samples <- .run_blm_chains(
+      sampler_arguments = sampler_arguments,
+      version = version,
+      nchains = nchains,
+      seed = seed,
       use_spike_slab = coefficient_prior == "spike_slab"
     )
   }

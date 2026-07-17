@@ -64,8 +64,9 @@ generator.}
 \item{version}{The Gibbs-sampler implementation to use: \code{"Rcpp"} for the
 compiled C++ implementation or \code{"R"} for the reference R implementation.}
 
-\item{verbose}{A logical scalar. If \code{TRUE}, display the current Gibbs
-iteration.}
+\item{verbose}{A logical scalar. If \code{TRUE}, display aggregate Gibbs
+progress using \code{\link[progressr:with_progress]{progressr::with_progress()}},
+updated every 10 percent per chain.}
 
 \item{nchains}{A positive integer giving the number of independent MCMC
 chains. Values greater than one run chains in parallel using a temporary

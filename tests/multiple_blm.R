@@ -137,7 +137,8 @@ if (identical(Sys.getenv("BLM_TEST_FUTURE"), "true")) {
     burnin = 20,
     thin = 2,
     seed = 123,
-    nchains = 2
+    nchains = 2,
+    verbose = TRUE
   )
   repeated_parallel_fit <- multiple_blm(
     y, x, 10,
@@ -147,7 +148,8 @@ if (identical(Sys.getenv("BLM_TEST_FUTURE"), "true")) {
     burnin = 20,
     thin = 2,
     seed = 123,
-    nchains = 2
+    nchains = 2,
+    verbose = TRUE
   )
   stopifnot(
     isTRUE(all.equal(parallel_fit, repeated_parallel_fit)),
@@ -272,25 +274,35 @@ stopifnot(
   abs(selection_rcpp$pi_mean - selection_r$pi_mean) < 0.1
 )
 
-# Both implementations display an iteration counter when requested.
+# Both implementations report progress at 10-percent intervals.
 for (sampler_version in c("Rcpp", "R")) {
-  progress_output <- capture.output(
-    multiple_blm(
-      y, x, 10,
-      residual_shape = 2,
-      residual_scale = 1,
-      iterations = 6,
-      burnin = 2,
-      seed = 42,
-      version = sampler_version,
-      verbose = TRUE
-    )
-  )
-  stopifnot(grepl(
-    "Gibbs iteration 6/6",
-    paste(progress_output, collapse = "\n"),
-    fixed = TRUE
+  progress_amounts <- integer()
+  progress_iterations <- integer()
+  progress_callback <- function(amount, iteration) {
+    progress_amounts <<- c(progress_amounts, amount)
+    progress_iterations <<- c(progress_iterations, iteration)
+  }
+  sampler <- if (sampler_version == "Rcpp") {
+    blm:::.blm_gibbs_rcpp
+  } else {
+    blm:::.blm_gibbs
+  }
+  invisible(sampler(
+    y = y,
+    x = x,
+    prior_var = c(10, 10),
+    residual_shape = 2,
+    residual_scale = 1,
+    iterations = 100,
+    burnin = 20,
+    thin = 1,
+    seed = 42,
+    progress_callback = progress_callback
   ))
+  stopifnot(
+    isTRUE(all.equal(progress_iterations, seq.int(10L, 100L, by = 10L))),
+    isTRUE(all.equal(progress_amounts, rep.int(10L, 10L)))
+  )
 }
 
 # Invalid designs, priors, and residual specifications are rejected.
