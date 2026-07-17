@@ -24,6 +24,10 @@
 #' @param thin A positive integer giving the interval between retained draws.
 #' @param seed `NULL` or an integer used to initialize the random-number
 #'   generator.
+#' @param version The Gibbs-sampler implementation to use: `"Rcpp"` for the
+#'   compiled C++ implementation or `"R"` for the reference R implementation.
+#' @param verbose A logical scalar. If `TRUE`, display the current Gibbs
+#'   iteration.
 #'
 #' @return A named list containing `coefficient_mean`, `coefficient_cov`,
 #'   `intercept_mean`, and `intercept_var`. When the residual variance is
@@ -35,7 +39,8 @@
 #'   zero-mean normal priors with variances given by `prior_var`. These priors
 #'   are independent of the inverse-gamma residual-variance prior. Posterior
 #'   summaries are computed from retained Gibbs draws when the residual
-#'   variance is learned.
+#'   variance is learned. During each Gibbs sweep, coefficients are updated one
+#'   at a time from their univariate conditional normal distributions.
 #' @export
 #'
 #' @examples
@@ -47,12 +52,19 @@
 #'   prior_var = c(10, 5),
 #'   residual_shape = 2,
 #'   residual_scale = 1,
-#'   seed = 123
+#'   seed = 123,
+#'   version = "Rcpp",
+#'   verbose = TRUE
 #' )
 multiple_blm <- function(y, X, prior_var, residual_var = NULL,
                          residual_shape = NULL, residual_scale = NULL,
                          iterations = 4000L, burnin = 1000L, thin = 1L,
-                         seed = NULL) {
+                         seed = NULL, version = c("Rcpp", "R"),
+                         verbose = FALSE) {
+  version <- match.arg(version)
+  if (!is.logical(verbose) || length(verbose) != 1L || is.na(verbose)) {
+    stop("`verbose` must be TRUE or FALSE.", call. = FALSE)
+  }
   if (!is.numeric(y) || !is.atomic(y) || is.object(y) || !is.null(dim(y))) {
     stop("`y` must be a numeric vector.", call. = FALSE)
   }
@@ -117,7 +129,8 @@ multiple_blm <- function(y, X, prior_var, residual_var = NULL,
   .validate_variance(residual_shape, "residual_shape")
   .validate_variance(residual_scale, "residual_scale")
 
-  samples <- .blm_gibbs(
+  sampler <- if (version == "Rcpp") .blm_gibbs_rcpp else .blm_gibbs
+  samples <- sampler(
     y = y,
     x = X,
     prior_var = prior_var,
@@ -126,7 +139,8 @@ multiple_blm <- function(y, X, prior_var, residual_var = NULL,
     iterations = iterations,
     burnin = burnin,
     thin = thin,
-    seed = seed
+    seed = seed,
+    verbose = verbose
   )
 
   list(

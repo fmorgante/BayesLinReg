@@ -14,7 +14,9 @@ multiple_blm(
   iterations = 4000L,
   burnin = 1000L,
   thin = 1L,
-  seed = NULL
+  seed = NULL,
+  version = c("Rcpp", "R"),
+  verbose = FALSE
 )
 }
 \arguments{
@@ -46,6 +48,12 @@ iterations to discard.}
 
 \item{seed}{\code{NULL} or an integer used to initialize the random-number
 generator.}
+
+\item{version}{The Gibbs-sampler implementation to use: \code{"Rcpp"} for the
+compiled C++ implementation or \code{"R"} for the reference R implementation.}
+
+\item{verbose}{A logical scalar. If \code{TRUE}, display the current Gibbs
+iteration.}
 }
 \value{
 A named list containing \code{coefficient_mean}, \code{coefficient_cov},
@@ -65,6 +73,8 @@ With known residual variance, the coefficients have independent zero-mean
 normal priors with variances given by \code{prior_var}. These priors are
 independent of the inverse-gamma residual-variance prior. Posterior summaries
 are computed from retained Gibbs draws when the residual variance is learned.
+During each Gibbs sweep, coefficients are updated one at a time from their
+univariate conditional normal distributions.
 }
 \examples{
 X <- cbind(x1 = 1:5, x2 = c(0, 1, 0, 1, 0))
@@ -75,6 +85,8 @@ multiple_blm(
   prior_var = c(10, 5),
   residual_shape = 2,
   residual_scale = 1,
-  seed = 123
+  seed = 123,
+  version = "Rcpp",
+  verbose = TRUE
 )
 }

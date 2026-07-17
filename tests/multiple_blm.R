@@ -111,6 +111,70 @@ repeated_fit <- multiple_blm(
 )
 stopifnot(isTRUE(all.equal(learned_fit, repeated_fit)))
 
+# The Rcpp and R implementations target the same posterior.
+r_fit <- multiple_blm(
+  y, x, 10,
+  residual_shape = 2,
+  residual_scale = 1,
+  iterations = 1500,
+  burnin = 500,
+  thin = 2,
+  seed = 42,
+  version = "R"
+)
+stopifnot(
+  identical(dim(r_fit$coefficient_samples), c(500L, 2L)),
+  max(abs(r_fit$coefficient_mean - learned_fit$coefficient_mean)) < 0.2,
+  abs(r_fit$residual_var_mean - learned_fit$residual_var_mean) < 0.2
+)
+
+# Component-wise conditioning is exercised with correlated predictors.
+correlated_X <- cbind(
+  first = 1:8,
+  second = c(2, 1, 4, 3, 6, 5, 8, 7)
+)
+correlated_y <- 1 + 2 * correlated_X[, 1] - correlated_X[, 2]
+correlated_rcpp <- multiple_blm(
+  correlated_y, correlated_X, 10,
+  residual_shape = 2, residual_scale = 1,
+  iterations = 600, burnin = 200, seed = 91,
+  version = "Rcpp"
+)
+correlated_r <- multiple_blm(
+  correlated_y, correlated_X, 10,
+  residual_shape = 2, residual_scale = 1,
+  iterations = 600, burnin = 200, seed = 91,
+  version = "R"
+)
+stopifnot(
+  max(abs(
+    correlated_rcpp$coefficient_mean - correlated_r$coefficient_mean
+  )) < 0.05,
+  abs(correlated_rcpp$residual_var_mean -
+    correlated_r$residual_var_mean) < 0.05
+)
+
+# Both implementations display an iteration counter when requested.
+for (sampler_version in c("Rcpp", "R")) {
+  progress_output <- capture.output(
+    multiple_blm(
+      y, x, 10,
+      residual_shape = 2,
+      residual_scale = 1,
+      iterations = 6,
+      burnin = 2,
+      seed = 42,
+      version = sampler_version,
+      verbose = TRUE
+    )
+  )
+  stopifnot(grepl(
+    "Gibbs iteration 6/6",
+    paste(progress_output, collapse = "\n"),
+    fixed = TRUE
+  ))
+}
+
 # Invalid designs, priors, and residual specifications are rejected.
 stopifnot(
   inherits(try(multiple_blm(y, x[, 1], 10, 1), silent = TRUE), "try-error"),
@@ -118,6 +182,17 @@ stopifnot(
   inherits(try(multiple_blm(y, x, c(10, 0), 1), silent = TRUE), "try-error"),
   inherits(try(multiple_blm(y, x, c(10, 10, 10), 1), silent = TRUE), "try-error"),
   inherits(try(multiple_blm(y, x, 10), silent = TRUE), "try-error"),
+  inherits(
+    try(multiple_blm(y, x, 10, residual_var = 1, version = "C"), silent = TRUE),
+    "try-error"
+  ),
+  inherits(
+    try(
+      multiple_blm(y, x, 10, residual_var = 1, verbose = NA),
+      silent = TRUE
+    ),
+    "try-error"
+  ),
   inherits(
     try(
       multiple_blm(
