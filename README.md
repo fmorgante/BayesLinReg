@@ -1,4 +1,4 @@
-#blm
+# blm
 
 This R package implements the Bayesian linear regression model with different prior options on the regression coefficients. 
 
