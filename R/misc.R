@@ -33,6 +33,34 @@
   prior_var
 }
 
+.validate_local_shape <- function(local_shape) {
+  if (!is.numeric(local_shape) || !is.atomic(local_shape) ||
+      is.object(local_shape) || !is.null(dim(local_shape)) ||
+      length(local_shape) != 2L || anyNA(local_shape) ||
+      any(!is.finite(local_shape)) || any(local_shape <= 0)) {
+    stop(
+      "`local_shape` must contain two positive, finite numeric values.",
+      call. = FALSE
+    )
+  }
+  stats::setNames(as.numeric(local_shape), c("a", "b"))
+}
+
+.draw_gig <- function(n, lambda, chi, psi) {
+  values <- c(n = n, lambda = lambda, chi = chi, psi = psi)
+  if (!is.numeric(values) || anyNA(values) || any(!is.finite(values)) ||
+      n != floor(n) || n < 1 || chi <= 0 || psi <= 0) {
+    stop(
+      paste0(
+        "GIG parameters require a positive integer `n`, finite `lambda`, ",
+        "and positive finite `chi` and `psi`."
+      ),
+      call. = FALSE
+    )
+  }
+  GIGrvg::rgig(n = n, lambda = lambda, chi = chi, psi = psi)
+}
+
 .as_predictor_matrix <- function(x, number_of_observations) {
   if (is.data.frame(x)) {
     if (ncol(x) < 1L || !all(vapply(x, is.numeric, logical(1)))) {
@@ -114,7 +142,9 @@
                        iterations, burnin, thin, seed,
                        progress_callback = NULL,
                        coefficient_prior = "normal",
-                       pi_alpha = 1, pi_beta = 1) {
+                       pi_alpha = 1, pi_beta = 1,
+                       global_scale = 1, residual_var = NULL,
+                       local_shape = c(a = 1, b = 0.5)) {
   retained_iterations <- .validate_mcmc(iterations, burnin, thin, seed)
   number_of_predictors <- ncol(x)
   predictor_names <- colnames(x)
@@ -135,6 +165,7 @@
   intercept_samples <- numeric(number_of_draws)
   residual_var_samples <- numeric(number_of_draws)
   use_spike_slab <- coefficient_prior == "spike_slab"
+  use_global_local <- coefficient_prior == "global_local"
   if (use_spike_slab) {
     inclusion_samples <- matrix(
       NA_integer_,
@@ -146,11 +177,29 @@
     inclusion <- rep.int(1L, number_of_predictors)
     pi <- pi_alpha / (pi_alpha + pi_beta)
   }
+  if (use_global_local) {
+    local_var_samples <- matrix(
+      NA_real_,
+      nrow = number_of_draws,
+      ncol = number_of_predictors,
+      dimnames = list(NULL, predictor_names)
+    )
+    tau_sq_samples <- numeric(number_of_draws)
+    local_var <- rep(1, number_of_predictors)
+    local_aux <- rep(1, number_of_predictors)
+    tau_sq <- global_scale^2
+    global_aux <- 1
+    local_a <- local_shape[1L]
+    local_b <- local_shape[2L]
+  }
 
   coefficient <- numeric(number_of_predictors)
   residuals <- y_centered
-  residual_var <- residual_scale / (residual_shape + 1)
-  residual_posterior_shape <- residual_shape + (length(y) - 1) / 2
+  learn_residual_var <- is.null(residual_var)
+  if (learn_residual_var) {
+    residual_var <- residual_scale / (residual_shape + 1)
+    residual_posterior_shape <- residual_shape + (length(y) - 1) / 2
+  }
   retained_index <- 1L
   progress_thresholds <- if (!is.null(progress_callback)) {
     unique(pmax(
@@ -167,8 +216,13 @@
     for (predictor in seq_len(number_of_predictors)) {
       partial_residuals <- residuals +
         x_centered[, predictor] * coefficient[predictor]
+      prior_precision <- if (use_global_local) {
+        1 / tau_sq / local_var[predictor]
+      } else {
+        1 / prior_var[predictor]
+      }
       conditional_var <- 1 / (
-        x_squared[predictor] / residual_var + 1 / prior_var[predictor]
+        x_squared[predictor] / residual_var + prior_precision
       )
       conditional_mean <- conditional_var *
         sum(x_centered[, predictor] * partial_residuals) / residual_var
@@ -208,13 +262,46 @@
       )
     }
 
-    residual_posterior_scale <- residual_scale +
-      0.5 * sum(residuals^2)
-    residual_var <- 1 / stats::rgamma(
-      1L,
-      shape = residual_posterior_shape,
-      rate = residual_posterior_scale
-    )
+    if (use_global_local) {
+      gig_chi <- pmax(
+        coefficient^2 / tau_sq,
+        .Machine$double.xmin
+      )
+      local_var <- vapply(seq_len(number_of_predictors), function(predictor) {
+        .draw_gig(
+          n = 1L,
+          lambda = local_a - 0.5,
+          chi = gig_chi[predictor],
+          psi = 2 * local_aux[predictor]
+        )
+      }, numeric(1))
+      local_aux <- stats::rgamma(
+        number_of_predictors,
+        shape = local_a + local_b,
+        rate = 1 + local_var
+      )
+      tau_sq <- 1 / stats::rgamma(
+        1L,
+        shape = (number_of_predictors + 1) / 2,
+        rate = 1 / global_aux +
+          sum(coefficient^2 / local_var) / 2
+      )
+      global_aux <- 1 / stats::rgamma(
+        1L,
+        shape = 1,
+        rate = 1 / global_scale^2 + 1 / tau_sq
+      )
+    }
+
+    if (learn_residual_var) {
+      residual_posterior_scale <- residual_scale +
+        0.5 * sum(residuals^2)
+      residual_var <- 1 / stats::rgamma(
+        1L,
+        shape = residual_posterior_shape,
+        rate = residual_posterior_scale
+      )
+    }
 
     if (retained_index <= number_of_draws &&
         iteration == retained_iterations[retained_index]) {
@@ -228,6 +315,10 @@
       if (use_spike_slab) {
         inclusion_samples[retained_index, ] <- inclusion
         pi_samples[retained_index] <- pi
+      }
+      if (use_global_local) {
+        local_var_samples[retained_index, ] <- local_var
+        tau_sq_samples[retained_index] <- tau_sq
       }
       retained_index <- retained_index + 1L
     }
@@ -252,6 +343,10 @@
     samples$inclusion_samples <- inclusion_samples
     samples$pi_samples <- pi_samples
   }
+  if (use_global_local) {
+    samples$local_var_samples <- local_var_samples
+    samples$tau_sq_samples <- tau_sq_samples
+  }
   samples
 }
 
@@ -259,7 +354,9 @@
                             iterations, burnin, thin, seed,
                             progress_callback = NULL,
                             coefficient_prior = "normal",
-                            pi_alpha = 1, pi_beta = 1) {
+                            pi_alpha = 1, pi_beta = 1,
+                            global_scale = 1, residual_var = NULL,
+                            local_shape = c(a = 1, b = 0.5)) {
   .validate_mcmc(iterations, burnin, thin, seed)
   if (is.null(progress_callback)) {
     progress_callback <- function(amount, iteration) invisible(NULL)
@@ -275,8 +372,14 @@
     thin = thin,
     progress_callback = progress_callback,
     use_spike_slab = coefficient_prior == "spike_slab",
+    use_global_local = coefficient_prior == "global_local",
     pi_alpha = pi_alpha,
-    pi_beta = pi_beta
+    pi_beta = pi_beta,
+    global_scale = global_scale,
+    local_a = local_shape[1L],
+    local_b = local_shape[2L],
+    learn_residual_var = is.null(residual_var),
+    fixed_residual_var = if (is.null(residual_var)) 1 else residual_var
   )
   colnames(samples$coefficient_samples) <- colnames(x)
   if (coefficient_prior == "spike_slab") {
@@ -284,6 +387,12 @@
   } else {
     samples$inclusion_samples <- NULL
     samples$pi_samples <- NULL
+  }
+  if (coefficient_prior == "global_local") {
+    colnames(samples$local_var_samples) <- colnames(x)
+  } else {
+    samples$local_var_samples <- NULL
+    samples$tau_sq_samples <- NULL
   }
   samples
 }
@@ -309,7 +418,7 @@
 }
 
 .run_blm_chains <- function(sampler_arguments, version, nchains, seed,
-                            use_spike_slab, progressor = NULL) {
+                            coefficient_prior, progressor = NULL) {
   if (nchains == 1L) {
     sampler <- if (version == "Rcpp") .blm_gibbs_rcpp else .blm_gibbs
     return(do.call(
@@ -360,10 +469,18 @@
     }, seed = TRUE)
   })
   chain_samples <- lapply(chain_futures, future::value)
-  .combine_blm_chains(chain_samples, use_spike_slab = use_spike_slab)
+  .combine_blm_chains(
+    chain_samples,
+    coefficient_prior = coefficient_prior
+  )
 }
 
-.combine_blm_chains <- function(chain_samples, use_spike_slab) {
+.combine_blm_chains <- function(chain_samples,
+                                coefficient_prior = "normal",
+                                use_spike_slab = NULL) {
+  if (!is.null(use_spike_slab)) {
+    coefficient_prior <- if (use_spike_slab) "spike_slab" else "normal"
+  }
   number_of_draws <- vapply(
     chain_samples,
     function(samples) nrow(samples$coefficient_samples),
@@ -384,13 +501,23 @@
     ),
     chain_id = rep.int(seq_along(chain_samples), number_of_draws)
   )
-  if (use_spike_slab) {
+  if (coefficient_prior == "spike_slab") {
     combined$inclusion_samples <- do.call(
       rbind,
       lapply(chain_samples, `[[`, "inclusion_samples")
     )
     combined$pi_samples <- unlist(
       lapply(chain_samples, `[[`, "pi_samples"),
+      use.names = FALSE
+    )
+  }
+  if (coefficient_prior == "global_local") {
+    combined$local_var_samples <- do.call(
+      rbind,
+      lapply(chain_samples, `[[`, "local_var_samples")
+    )
+    combined$tau_sq_samples <- unlist(
+      lapply(chain_samples, `[[`, "tau_sq_samples"),
       use.names = FALSE
     )
   }

@@ -10,7 +10,8 @@ known_fit <- multiple_blm(
   y = y,
   X = x,
   prior_var = 10,
-  residual_var = 1
+  residual_var = 1,
+  standardize = FALSE
 )
 expected_cov <- diag(c(1 / 10.1, 1 / 1.3))
 dimnames(expected_cov) <- list(colnames(x), colnames(x))
@@ -34,18 +35,51 @@ stopifnot(
 )
 
 # A scalar prior variance and a repeated vector are equivalent.
-vector_prior_fit <- multiple_blm(y, x, c(10, 10), residual_var = 1)
+vector_prior_fit <- multiple_blm(
+  y, x, c(10, 10), residual_var = 1, standardize = FALSE
+)
 stopifnot(isTRUE(all.equal(known_fit, vector_prior_fit)))
 
 # Data-frame inputs retain their predictor names.
-data_frame_fit <- multiple_blm(y, as.data.frame(x), 10, residual_var = 1)
+data_frame_fit <- multiple_blm(
+  y, as.data.frame(x), 10, residual_var = 1, standardize = FALSE
+)
 stopifnot(isTRUE(all.equal(known_fit, data_frame_fit)))
 
 # With one predictor, multiple_blm agrees with simple_blm.
 simple_y <- 1 + 2 * x[, "first"]
 simple_fit <- simple_blm(simple_y, x[, "first"], 10, residual_var = 1)
 one_predictor_fit <- multiple_blm(
-  simple_y, x[, "first", drop = FALSE], 10, residual_var = 1
+  simple_y, x[, "first", drop = FALSE], 10, residual_var = 1,
+  standardize = FALSE
+)
+
+# Standardized fits return coefficients and their covariance on the original
+# predictor scale.
+predictor_sd <- apply(x, 2L, stats::sd)
+working_x <- sweep(x, 2L, predictor_sd, FUN = "/")
+manual_standardized_fit <- multiple_blm(
+  y, working_x, 10, residual_var = 1, standardize = FALSE
+)
+automatic_standardized_fit <- multiple_blm(y, x, 10, residual_var = 1)
+stopifnot(
+  isTRUE(all.equal(
+    automatic_standardized_fit$coefficient_mean,
+    manual_standardized_fit$coefficient_mean / predictor_sd
+  )),
+  isTRUE(all.equal(
+    automatic_standardized_fit$coefficient_cov,
+    manual_standardized_fit$coefficient_cov /
+      outer(predictor_sd, predictor_sd)
+  )),
+  isTRUE(all.equal(
+    automatic_standardized_fit$intercept_mean,
+    manual_standardized_fit$intercept_mean
+  )),
+  isTRUE(all.equal(
+    automatic_standardized_fit$intercept_var,
+    manual_standardized_fit$intercept_var
+  ))
 )
 stopifnot(
   isTRUE(all.equal(
@@ -124,6 +158,22 @@ mock_combined <- blm:::.combine_blm_chains(
 stopifnot(
   identical(mock_combined$chain_id, c(1L, 1L, 2L, 2L)),
   identical(dim(mock_combined$coefficient_samples), c(4L, 2L))
+)
+
+mock_global_local_chain <- c(
+  mock_chain,
+  list(
+    local_var_samples = matrix(1:4, ncol = 2),
+    tau_sq_samples = c(1, 2)
+  )
+)
+mock_global_local_combined <- blm:::.combine_blm_chains(
+  list(mock_global_local_chain, mock_global_local_chain),
+  coefficient_prior = "global_local"
+)
+stopifnot(
+  identical(dim(mock_global_local_combined$local_var_samples), c(4L, 2L)),
+  identical(mock_global_local_combined$tau_sq_samples, c(1, 2, 1, 2))
 )
 
 # Socket-based multisession tests are enabled explicitly outside restricted
@@ -274,6 +324,128 @@ stopifnot(
   abs(selection_rcpp$pi_mean - selection_r$pi_mean) < 0.1
 )
 
+# The default global-local prior is Strawderman-Berger and learns both local
+# variances and the global tau squared. Coefficients remain on their original
+# scale after predictor standardization.
+global_local_n <- 80
+global_local_X <- cbind(
+  signal = seq(-20, 20, length.out = global_local_n),
+  noise1 = sin(seq_len(global_local_n)) / 10,
+  noise2 = cos(seq_len(global_local_n)) * 5,
+  noise3 = rep(c(-2, -1, 1, 2), 20)
+)
+global_local_y <- 0.75 + 0.4 * global_local_X[, "signal"] +
+  0.15 * rep(c(-1, 1), 40)
+global_local_rcpp <- multiple_blm(
+  global_local_y, global_local_X,
+  coefficient_prior = "global_local",
+  global_scale = 1,
+  residual_shape = 2,
+  residual_scale = 1,
+  iterations = 1600,
+  burnin = 600,
+  thin = 2,
+  seed = 109,
+  version = "Rcpp"
+)
+stopifnot(
+  identical(dim(global_local_rcpp$coefficient_samples), c(500L, 4L)),
+  identical(dim(global_local_rcpp$local_var_samples), c(500L, 4L)),
+  identical(
+    names(global_local_rcpp$local_var_mean),
+    colnames(global_local_X)
+  ),
+  identical(
+    names(global_local_rcpp$local_var_var),
+    colnames(global_local_X)
+  ),
+  all(is.finite(global_local_rcpp$local_var_samples)),
+  all(global_local_rcpp$local_var_samples > 0),
+  all(is.finite(global_local_rcpp$tau_sq_samples)),
+  all(global_local_rcpp$tau_sq_samples > 0),
+  abs(global_local_rcpp$coefficient_mean["signal"] - 0.4) < 0.05,
+  max(abs(global_local_rcpp$coefficient_mean[-1])) < 0.15,
+  identical(
+    global_local_rcpp$tau_sq_mean,
+    mean(global_local_rcpp$tau_sq_samples)
+  ),
+  identical(global_local_rcpp$local_shape, c(a = 1, b = 0.5))
+)
+
+global_local_r <- multiple_blm(
+  global_local_y, global_local_X,
+  coefficient_prior = "global_local",
+  residual_shape = 2,
+  residual_scale = 1,
+  iterations = 1600,
+  burnin = 600,
+  thin = 2,
+  seed = 109,
+  version = "R"
+)
+stopifnot(
+  max(abs(
+    global_local_rcpp$coefficient_mean - global_local_r$coefficient_mean
+  )) < 0.1,
+  abs(global_local_rcpp$residual_var_mean -
+    global_local_r$residual_var_mean) < 0.1
+)
+
+# The horseshoe is obtained using beta-prime shapes a = b = 1/2.
+horseshoe_fit <- multiple_blm(
+  global_local_y, global_local_X,
+  coefficient_prior = "global_local",
+  local_shape = c(a = 0.5, b = 0.5),
+  residual_shape = 2,
+  residual_scale = 1,
+  iterations = 600,
+  burnin = 200,
+  seed = 111
+)
+stopifnot(
+  identical(horseshoe_fit$local_shape, c(a = 0.5, b = 0.5)),
+  all(horseshoe_fit$local_var_samples > 0),
+  all(horseshoe_fit$tau_sq_samples > 0)
+)
+
+# A known residual variance still uses Gibbs sampling for global-local priors.
+fixed_global_local <- multiple_blm(
+  global_local_y, global_local_X,
+  coefficient_prior = "global_local",
+  residual_var = 0.25,
+  iterations = 400,
+  burnin = 200,
+  seed = 110
+)
+stopifnot(
+  identical(dim(fixed_global_local$coefficient_samples), c(200L, 4L)),
+  all(fixed_global_local$residual_var_samples == 0.25),
+  identical(fixed_global_local$residual_var_mean, 0.25),
+  identical(fixed_global_local$residual_var_var, 0)
+)
+
+# The R and Rcpp GIG entry points match known moments and remain finite for
+# challenging parameter combinations.
+gig_lambda <- 1
+gig_chi <- 2
+gig_psi <- 3
+gig_argument <- sqrt(gig_chi * gig_psi)
+gig_expected_mean <- sqrt(gig_chi / gig_psi) *
+  besselK(gig_argument, gig_lambda + 1) /
+  besselK(gig_argument, gig_lambda)
+set.seed(301)
+gig_r <- blm:::.draw_gig(20000L, gig_lambda, gig_chi, gig_psi)
+set.seed(302)
+gig_rcpp <- blm:::draw_gig_rcpp_cpp(
+  20000L, gig_lambda, gig_chi, gig_psi
+)
+stopifnot(
+  abs(mean(gig_r) - gig_expected_mean) / gig_expected_mean < 0.03,
+  abs(mean(gig_rcpp) - gig_expected_mean) / gig_expected_mean < 0.03,
+  all(is.finite(blm:::.draw_gig(100L, -0.4, 1e-8, 1e3))),
+  all(is.finite(blm:::draw_gig_rcpp_cpp(100L, 5, 1e3, 1e-4)))
+)
+
 # Both implementations report progress at 10-percent intervals.
 for (sampler_version in c("Rcpp", "R")) {
   progress_amounts <- integer()
@@ -315,6 +487,60 @@ stopifnot(
   inherits(
     try(
       multiple_blm(y, x, 10, residual_var = 1, nchains = 2),
+      silent = TRUE
+    ),
+    "try-error"
+  ),
+  inherits(
+    try(
+      multiple_blm(
+        y, x, prior_var = 10,
+        coefficient_prior = "global_local",
+        residual_shape = 2,
+        residual_scale = 1
+      ),
+      silent = TRUE
+    ),
+    "try-error"
+  ),
+  inherits(
+    try(
+      multiple_blm(
+        y, x,
+        coefficient_prior = "global_local",
+        global_scale = 0,
+        residual_shape = 2,
+        residual_scale = 1
+      ),
+      silent = TRUE
+    ),
+    "try-error"
+  ),
+  inherits(
+    try(
+      multiple_blm(
+        y, x,
+        coefficient_prior = "global_local",
+        local_shape = c(1, 0),
+        residual_shape = 2,
+        residual_scale = 1
+      ),
+      silent = TRUE
+    ),
+    "try-error"
+  ),
+  inherits(
+    try(
+      multiple_blm(y, x, 10, residual_var = 1, standardize = NA),
+      silent = TRUE
+    ),
+    "try-error"
+  ),
+  inherits(
+    try(
+      multiple_blm(
+        y, cbind(x, constant = 1), 10, residual_var = 1
+      ),
       silent = TRUE
     ),
     "try-error"

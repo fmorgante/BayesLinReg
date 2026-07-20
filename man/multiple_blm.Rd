@@ -7,11 +7,14 @@
 multiple_blm(
   y,
   X,
-  prior_var,
+  prior_var = NULL,
   residual_var = NULL,
-  coefficient_prior = c("normal", "spike_slab"),
+  coefficient_prior = c("normal", "spike_slab", "global_local"),
   pi_alpha = 1,
   pi_beta = 1,
+  local_shape = c(a = 1, b = 0.5),
+  global_scale = 1,
+  standardize = TRUE,
   residual_shape = NULL,
   residual_scale = NULL,
   iterations = 4000L,
@@ -29,17 +32,31 @@ multiple_blm(
 \item{X}{A numeric matrix or data frame with observations in rows and
 predictors in columns.}
 
-\item{prior_var}{A positive numeric scalar giving a common prior variance
+\item{prior_var}{For the normal and spike-and-slab priors, a positive numeric
+scalar giving a common prior variance
 for all coefficients, or a positive numeric vector with one variance per
-predictor.}
+predictor. Must be \code{NULL} for the global-local prior.}
 
-\item{coefficient_prior}{The coefficient-prior family. \code{"normal"} uses
-independent normal priors. \code{"spike_slab"} uses a mixture of a point mass
-at zero and the normal slab specified by \code{prior_var}, and requires
-\code{residual_var = NULL}.}
+\item{coefficient_prior}{The coefficient-prior family: \code{"normal"},
+\code{"spike_slab"}, or \code{"global_local"}. The global-local family uses
+beta-prime local variances and learns a shared global variance.}
 
 \item{pi_alpha, pi_beta}{Positive shape parameters for the Beta prior on the
 shared inclusion probability \eqn{\pi}. Used with the spike-and-slab prior.}
+
+\item{local_shape}{A positive numeric vector of length two containing the
+beta-prime shape parameters \code{a} and \code{b}. The default
+\code{c(1, 0.5)} gives the Strawderman-Berger prior; \code{c(0.5, 0.5)} gives
+the horseshoe prior. Used with the global-local prior.}
+
+\item{global_scale}{A positive numeric scalar giving the scale of the
+half-Cauchy prior on the global standard deviation \eqn{\tau}. The global
+variance \eqn{\tau^2} is learned from the data. Used with the global-local
+prior.}
+
+\item{standardize}{A logical scalar. If \code{TRUE}, the predictors are centered
+and scaled before fitting. Coefficients and intercepts are always returned on
+the original predictor scale.}
 
 \item{residual_var}{A positive numeric scalar giving the known residual
 variance, or \code{NULL} to learn it from the data.}
@@ -51,7 +68,7 @@ inverse-gamma prior. Required when \code{residual_var = NULL}.}
 inverse-gamma prior. Required when \code{residual_var = NULL}.}
 
 \item{iterations}{A positive integer giving the total number of Gibbs
-iterations when the residual variance is learned.}
+iterations when Gibbs sampling is used.}
 
 \item{burnin}{A non-negative integer giving the number of initial Gibbs
 iterations to discard.}
@@ -74,12 +91,18 @@ chains. Values greater than one run chains in parallel using a temporary
 }
 \value{
 A named list containing \code{coefficient_mean}, \code{coefficient_cov},
-\code{intercept_mean}, and \code{intercept_var}. When the residual variance is
-learned, the list additionally contains \code{residual_var_mean},
+\code{intercept_mean}, and \code{intercept_var}. When the model is sampled,
+the list additionally contains \code{residual_var_mean},
 \code{residual_var_var}, \code{coefficient_samples}, \code{intercept_samples},
 and \code{residual_var_samples}. With the spike-and-slab prior, the list also
 contains \code{inclusion_probability}, \code{pi_mean}, \code{pi_var},
-\code{inclusion_samples}, and \code{pi_samples}. When \code{nchains > 1},
+\code{inclusion_samples}, and \code{pi_samples}. With the global-local prior,
+it also contains \code{local_var_mean}, \code{local_var_var},
+\code{tau_sq_mean}, \code{tau_sq_var}, \code{local_var_samples},
+\code{tau_sq_samples}, and \code{local_shape}. These variance parameters refer
+to the internally standardized coefficient scale when
+\code{standardize = TRUE}. When
+\code{nchains > 1},
 retained draws are combined across chains and the result additionally contains
 \code{nchains} and a corresponding \code{chain_id} for each draw.
 }
@@ -99,6 +122,18 @@ univariate conditional normal distributions. For the spike-and-slab prior,
 inclusion indicators are sampled using the coefficient-marginalized
 conditional odds, and the shared inclusion probability is updated from its
 full conditional Beta distribution.
+The global-local hierarchy is
+\deqn{\beta_j \mid \tau^2, \psi_j \sim N(0, \tau^2\psi_j),}
+\deqn{\psi_j \sim \mathrm{BetaPrime}(a,b), \qquad
+\tau \sim C^+(0, \mathrm{global\_scale}).}
+The local variances are updated from generalized inverse Gaussian full
+conditionals, and \eqn{\tau^2} is updated from its inverse-gamma full
+conditional. This coefficient prior is independent of the residual variance.
+Global-local fits use Gibbs sampling even when \code{residual_var} is known.
+When \code{standardize = TRUE}, \code{prior_var} and \code{global_scale}
+describe the coefficient scale after predictor standardization. All returned
+regression coefficients, their covariance matrix, and intercept quantities are
+transformed to the scale of the supplied \code{X}.
 }
 \examples{
 X <- cbind(x1 = 1:5, x2 = c(0, 1, 0, 1, 0))
@@ -106,8 +141,8 @@ y <- 1 + 2 * X[, "x1"] - 3 * X[, "x2"]
 multiple_blm(y, X, prior_var = 10, residual_var = 1)
 multiple_blm(
   y, X,
-  prior_var = c(10, 5),
-  coefficient_prior = "spike_slab",
+  coefficient_prior = "global_local",
+  local_shape = c(a = 1, b = 0.5),
   residual_shape = 2,
   residual_scale = 1,
   seed = 123,
