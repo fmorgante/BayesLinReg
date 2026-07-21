@@ -31,18 +31,21 @@
 #'   `chain_id` identifies the origin of each retained draw.
 #'
 #' @details `ETA` may be a single-block specification such as
-#'   `list(X = X, model = "Normal", var = 10)`, or a named list of blocks.
+#'   `list(X = X, model = "Normal")`, or a named list of blocks.
 #'   A numeric vector supplied as a block's `X` is treated as a one-column
 #'   matrix.
 #'   Every block accepts `standardize`, which defaults to `TRUE`. Returned
 #'   coefficients are always transformed to the original scale of that block's
 #'   supplied `X`.
 #'
-#'   A `"Normal"` block requires `var`, a scalar or one value per predictor.
-#'   A `"SpikeSlab"` block requires `var`, optionally accepts
-#'   `pi = c(a = 1, b = 1)`, and requires the residual variance to be learned. A
-#'   `"GlobalLocal"` block optionally accepts `local_shape = c(a = 1, b = 0.5)`
-#'   and `global_scale = 1`. Its hierarchy is
+#'   A `"Normal"` block optionally accepts `var_shape = 2` and
+#'   `var_scale = 1`. Its coefficients share a variance sampled from an
+#'   inverse-gamma prior with the supplied shape and scale.
+#'   A `"SpikeSlab"` block optionally accepts `pi = c(a = 1, b = 1)`,
+#'   `slab_shape = 2`, and `slab_scale = 1`, and requires the residual variance
+#'   to be learned. Its shared slab variance has an inverse-gamma prior with
+#'   the supplied shape and scale. A `"GlobalLocal"` block optionally accepts
+#'   `local_shape = c(a = 1, b = 0.5)` and `global_scale = 1`. Its hierarchy is
 #'   \deqn{\beta_j \mid \tau^2,\psi_j \sim N(0,\tau^2\psi_j),\qquad
 #'   \psi_j \sim \mathrm{BetaPrime}(a,b),}
 #'   with \eqn{\tau \sim C^+(0,\mathrm{global\_scale})}. Thus the default is
@@ -55,7 +58,7 @@
 #' y <- 1 + 2 * X[, "x1"] - X[, "x2"]
 #' blm(
 #'   y,
-#'   ETA = list(X = X, model = "Normal", var = 10),
+#'   ETA = list(X = X, model = "Normal", var_shape = 2, var_scale = 10),
 #'   residual_var = 1
 #' )
 #' blm(
@@ -102,8 +105,6 @@ blm <- function(y, ETA, residual_var = NULL,
     )
     block_x
   }))
-  prior_var <- unlist(lapply(blocks, `[[`, "var"), use.names = FALSE)
-
   if (!is.null(residual_var)) {
     if (!is.null(residual_shape) || !is.null(residual_scale)) {
       stop(
@@ -126,63 +127,18 @@ blm <- function(y, ETA, residual_var = NULL,
     .validate_variance(residual_scale, "residual_scale")
   }
 
-  if (!is.null(residual_var) && all(block_model == 0L)) {
-    if (nchains > 1L) {
-      stop(
-        "`nchains > 1` is unavailable for an analytical Normal fit.",
-        call. = FALSE
-      )
-    }
-    x_mean <- colMeans(x)
-    x_centered <- sweep(x, 2L, x_mean, FUN = "-")
-    y_mean <- mean(y)
-    posterior_precision <- crossprod(x_centered) / residual_var +
-      diag(1 / prior_var, nrow = ncol(x))
-    working_cov <- chol2inv(chol(posterior_precision))
-    working_mean <- drop(
-      working_cov %*% crossprod(x_centered, y - y_mean) / residual_var
-    )
-    eta_result <- lapply(seq_along(blocks), function(block_index) {
-      block <- blocks[[block_index]]
-      indices <- block_indices[[block_index]]
-      coefficient_mean <- working_mean[indices] / block$predictor_scale
-      coefficient_cov <- working_cov[indices, indices, drop = FALSE] /
-        outer(block$predictor_scale, block$predictor_scale)
-      names(coefficient_mean) <- block$predictor_names
-      dimnames(coefficient_cov) <- list(
-        block$predictor_names,
-        block$predictor_names
-      )
-      list(
-        model = block$model,
-        standardize = block$standardize,
-        var = stats::setNames(block$var, block$predictor_names),
-        coefficient_mean = coefficient_mean,
-        coefficient_cov = coefficient_cov
-      )
-    })
-    names(eta_result) <- names(blocks)
-    intercept_mean <- drop(mean(y) - crossprod(x_mean, working_mean))
-    intercept_var <- drop(
-      residual_var / length(y) +
-        crossprod(x_mean, working_cov %*% x_mean)
-    )
-    return(list(
-      ETA = eta_result,
-      intercept_mean = intercept_mean,
-      intercept_var = intercept_var
-    ))
-  }
-
+  normal_shape <- vapply(blocks, `[[`, numeric(1), "normal_shape")
+  normal_scale <- vapply(blocks, `[[`, numeric(1), "normal_scale")
   pi_alpha <- vapply(blocks, `[[`, numeric(1), "pi_alpha")
   pi_beta <- vapply(blocks, `[[`, numeric(1), "pi_beta")
+  slab_shape <- vapply(blocks, `[[`, numeric(1), "slab_shape")
+  slab_scale <- vapply(blocks, `[[`, numeric(1), "slab_scale")
   global_scale <- vapply(blocks, `[[`, numeric(1), "global_scale")
   local_a <- vapply(blocks, function(block) block$local_shape[1L], numeric(1))
   local_b <- vapply(blocks, function(block) block$local_shape[2L], numeric(1))
   sampler_arguments <- list(
     y = y,
     x = x,
-    prior_var = prior_var,
     residual_shape = if (is.null(residual_shape)) 1 else residual_shape,
     residual_scale = if (is.null(residual_scale)) 1 else residual_scale,
     residual_var = residual_var,
@@ -191,8 +147,12 @@ blm <- function(y, ETA, residual_var = NULL,
     thin = thin,
     block_id = block_id,
     block_model = block_model,
+    normal_shape = normal_shape,
+    normal_scale = normal_scale,
     pi_alpha = pi_alpha,
     pi_beta = pi_beta,
+    slab_shape = slab_shape,
+    slab_scale = slab_scale,
     global_scale = global_scale,
     local_a = local_a,
     local_b = local_b
@@ -233,19 +193,30 @@ blm <- function(y, ETA, residual_var = NULL,
       coefficient_cov = stats::cov(coefficient_samples),
       coefficient_samples = coefficient_samples
     )
-    if (block$model %in% c("Normal", "SpikeSlab")) {
-      result$var <- stats::setNames(block$var, block$predictor_names)
+    if (block$model == "Normal") {
+      normal_var_samples <- samples$normal_var_samples[, block_index]
+      result$normal_var_mean <- mean(normal_var_samples)
+      result$normal_var_var <- stats::var(normal_var_samples)
+      result$normal_var_samples <- normal_var_samples
+      result$var_shape <- block$normal_shape
+      result$var_scale <- block$normal_scale
     }
     if (block$model == "SpikeSlab") {
       inclusion_samples <- samples$inclusion_samples[, indices, drop = FALSE]
       colnames(inclusion_samples) <- block$predictor_names
       pi_samples <- samples$pi_samples[, block_index]
+      slab_var_samples <- samples$slab_var_samples[, block_index]
       result$inclusion_probability <- colMeans(inclusion_samples)
       result$pi_mean <- mean(pi_samples)
       result$pi_var <- stats::var(pi_samples)
+      result$slab_var_mean <- mean(slab_var_samples)
+      result$slab_var_var <- stats::var(slab_var_samples)
       result$inclusion_samples <- inclusion_samples
       result$pi_samples <- pi_samples
+      result$slab_var_samples <- slab_var_samples
       result$pi <- c(a = block$pi_alpha, b = block$pi_beta)
+      result$slab_shape <- block$slab_shape
+      result$slab_scale <- block$slab_scale
     }
     if (block$model == "GlobalLocal") {
       local_var_samples <- samples$local_var_samples[, indices, drop = FALSE]

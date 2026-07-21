@@ -5,7 +5,7 @@ draw_gig_rcpp_cpp <- function(n, lambda, chi, psi) {
     .Call(`_BayesLinReg_draw_gig_rcpp_cpp`, n, lambda, chi, psi)
 }
 
-blm_gibbs_rcpp_cpp <- function(y, X, prior_var, residual_shape, residual_scale, iterations, burnin, thin, progress_callback, block_id, block_model, pi_alpha, pi_beta, global_scale, local_a, local_b, learn_residual_var, fixed_residual_var) {
-    .Call(`_BayesLinReg_blm_gibbs_rcpp_cpp`, y, X, prior_var, residual_shape, residual_scale, iterations, burnin, thin, progress_callback, block_id, block_model, pi_alpha, pi_beta, global_scale, local_a, local_b, learn_residual_var, fixed_residual_var)
+blm_gibbs_rcpp_cpp <- function(y, X, residual_shape, residual_scale, iterations, burnin, thin, progress_callback, block_id, block_model, normal_shape, normal_scale, pi_alpha, pi_beta, slab_shape, slab_scale, global_scale, local_a, local_b, learn_residual_var, fixed_residual_var) {
+    .Call(`_BayesLinReg_blm_gibbs_rcpp_cpp`, y, X, residual_shape, residual_scale, iterations, burnin, thin, progress_callback, block_id, block_model, normal_shape, normal_scale, pi_alpha, pi_beta, slab_shape, slab_scale, global_scale, local_a, local_b, learn_residual_var, fixed_residual_var)
 }
 

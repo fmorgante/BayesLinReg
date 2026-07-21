@@ -64,18 +64,21 @@ response and predictors.
 }
 \details{
 \code{ETA} may be a single-block specification such as
-\code{list(X = X, model = "Normal", var = 10)}, or a named list of blocks.
+\code{list(X = X, model = "Normal")}, or a named list of blocks.
 A numeric vector supplied as a block's \code{X} is treated as a one-column
 matrix.
 Every block accepts \code{standardize}, which defaults to \code{TRUE}. Returned
 coefficients are always transformed to the original scale of that block's
 supplied \code{X}.
 
-A \code{"Normal"} block requires \code{var}, a scalar or one value per predictor.
-A \code{"SpikeSlab"} block requires \code{var}, optionally accepts
-\code{pi = c(a = 1, b = 1)}, and requires the residual variance to be learned. A
-\code{"GlobalLocal"} block optionally accepts \code{local_shape = c(a = 1, b = 0.5)}
-and \code{global_scale = 1}. Its hierarchy is
+A \code{"Normal"} block optionally accepts \code{var_shape = 2} and
+\code{var_scale = 1}. Its coefficients share a variance sampled from an
+inverse-gamma prior with the supplied shape and scale.
+A \code{"SpikeSlab"} block optionally accepts \code{pi = c(a = 1, b = 1)},
+\code{slab_shape = 2}, and \code{slab_scale = 1}, and requires the residual variance
+to be learned. Its shared slab variance has an inverse-gamma prior with
+the supplied shape and scale. A \code{"GlobalLocal"} block optionally accepts
+\code{local_shape = c(a = 1, b = 0.5)} and \code{global_scale = 1}. Its hierarchy is
 \deqn{\beta_j \mid \tau^2,\psi_j \sim N(0,\tau^2\psi_j),\qquad
   \psi_j \sim \mathrm{BetaPrime}(a,b),}
 with \eqn{\tau \sim C^+(0,\mathrm{global\_scale})}. Thus the default is
@@ -87,7 +90,7 @@ X <- cbind(x1 = 1:20, x2 = rep(c(0, 1), 10))
 y <- 1 + 2 * X[, "x1"] - X[, "x2"]
 blm(
   y,
-  ETA = list(X = X, model = "Normal", var = 10),
+  ETA = list(X = X, model = "Normal", var_shape = 2, var_scale = 10),
   residual_var = 1
 )
 blm(

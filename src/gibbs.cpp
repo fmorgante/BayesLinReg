@@ -57,7 +57,6 @@ Rcpp::NumericVector draw_gig_rcpp_cpp(
 Rcpp::List blm_gibbs_rcpp_cpp(
     const Rcpp::NumericVector& y,
     const Rcpp::NumericMatrix& X,
-    const Rcpp::NumericVector& prior_var,
     const double residual_shape,
     const double residual_scale,
     const int iterations,
@@ -66,8 +65,12 @@ Rcpp::List blm_gibbs_rcpp_cpp(
     const Rcpp::Function& progress_callback,
     const Rcpp::IntegerVector& block_id,
     const Rcpp::IntegerVector& block_model,
+    const Rcpp::NumericVector& normal_shape,
+    const Rcpp::NumericVector& normal_scale,
     const Rcpp::NumericVector& pi_alpha,
     const Rcpp::NumericVector& pi_beta,
+    const Rcpp::NumericVector& slab_shape,
+    const Rcpp::NumericVector& slab_scale,
     const Rcpp::NumericVector& global_scale,
     const Rcpp::NumericVector& local_a,
     const Rcpp::NumericVector& local_b,
@@ -112,8 +115,10 @@ Rcpp::List blm_gibbs_rcpp_cpp(
   Rcpp::NumericMatrix coefficient_samples(number_of_draws, p);
   Rcpp::NumericVector intercept_samples(number_of_draws);
   Rcpp::NumericVector residual_var_samples(number_of_draws);
+  Rcpp::NumericMatrix normal_var_samples(number_of_draws, number_of_blocks);
   Rcpp::IntegerMatrix inclusion_samples(number_of_draws, p);
   Rcpp::NumericMatrix pi_samples(number_of_draws, number_of_blocks);
+  Rcpp::NumericMatrix slab_var_samples(number_of_draws, number_of_blocks);
   Rcpp::NumericMatrix local_var_samples(number_of_draws, p);
   Rcpp::NumericMatrix tau_sq_samples(number_of_draws, number_of_blocks);
   std::vector<double> coefficient(p, 0.0);
@@ -129,14 +134,23 @@ Rcpp::List blm_gibbs_rcpp_cpp(
     ? residual_scale / (residual_shape + 1.0)
     : fixed_residual_var;
   std::vector<double> pi(number_of_blocks, 0.5);
+  std::vector<double> normal_var(number_of_blocks, 1.0);
+  std::vector<double> slab_var(number_of_blocks, 1.0);
   std::vector<double> tau_sq(number_of_blocks, 1.0);
   std::vector<double> global_aux(number_of_blocks, 1.0);
+  bool has_normal = false;
   bool has_spike_slab = false;
   bool has_global_local = false;
   for (int block = 0; block < number_of_blocks; ++block) {
+    if (block_model[block] == 0) {
+      has_normal = true;
+      normal_var[block] =
+        normal_scale[block] / (normal_shape[block] + 1.0);
+    }
     if (block_model[block] == 1) {
       has_spike_slab = true;
       pi[block] = pi_alpha[block] / (pi_alpha[block] + pi_beta[block]);
+      slab_var[block] = slab_scale[block] / (slab_shape[block] + 1.0);
     }
     if (block_model[block] == 2) {
       has_global_local = true;
@@ -161,7 +175,7 @@ Rcpp::List blm_gibbs_rcpp_cpp(
       }
       const double prior_precision = model == 2
         ? 1.0 / tau_sq[block] / local_var[j]
-        : 1.0 / prior_var[j];
+        : (model == 1 ? 1.0 / slab_var[block] : 1.0 / normal_var[block]);
       const double conditional_var = 1.0 / (
         x_squared[j] / residual_var + prior_precision
       );
@@ -175,7 +189,7 @@ Rcpp::List blm_gibbs_rcpp_cpp(
         );
         const double log_inclusion_odds =
           std::log(bounded_pi) - std::log1p(-bounded_pi) +
-          0.5 * std::log(conditional_var / prior_var[j]) +
+          0.5 * std::log(conditional_var / slab_var[block]) +
           conditional_mean * conditional_mean / (2.0 * conditional_var);
         const double inclusion_probability =
           log_inclusion_odds >= 0.0
@@ -199,6 +213,28 @@ Rcpp::List blm_gibbs_rcpp_cpp(
       }
     }
 
+    if (has_normal) {
+      for (int block = 0; block < number_of_blocks; ++block) {
+        if (block_model[block] != 0) {
+          continue;
+        }
+        int block_size = 0;
+        double coefficient_sum_of_squares = 0.0;
+        for (int j = 0; j < p; ++j) {
+          if (block_id[j] - 1 == block) {
+            coefficient_sum_of_squares += coefficient[j] * coefficient[j];
+            ++block_size;
+          }
+        }
+        const double normal_posterior_scale =
+          normal_scale[block] + 0.5 * coefficient_sum_of_squares;
+        normal_var[block] = 1.0 / R::rgamma(
+          normal_shape[block] + 0.5 * block_size,
+          1.0 / normal_posterior_scale
+        );
+      }
+    }
+
     if (has_spike_slab) {
       for (int block = 0; block < number_of_blocks; ++block) {
         if (block_model[block] != 1) {
@@ -206,15 +242,25 @@ Rcpp::List blm_gibbs_rcpp_cpp(
         }
         int number_included = 0;
         int block_size = 0;
+        double included_sum_of_squares = 0.0;
         for (int j = 0; j < p; ++j) {
           if (block_id[j] - 1 == block) {
             number_included += inclusion[j];
+            if (inclusion[j] == 1) {
+              included_sum_of_squares += coefficient[j] * coefficient[j];
+            }
             ++block_size;
           }
         }
         pi[block] = R::rbeta(
           pi_alpha[block] + number_included,
           pi_beta[block] + block_size - number_included
+        );
+        const double slab_posterior_scale =
+          slab_scale[block] + 0.5 * included_sum_of_squares;
+        slab_var[block] = 1.0 / R::rgamma(
+          slab_shape[block] + 0.5 * number_included,
+          1.0 / slab_posterior_scale
         );
       }
     }
@@ -299,10 +345,18 @@ Rcpp::List blm_gibbs_rcpp_cpp(
         std::sqrt(residual_var / n)
       );
       residual_var_samples[retained_index] = residual_var;
+      if (has_normal) {
+        for (int block = 0; block < number_of_blocks; ++block) {
+          if (block_model[block] == 0) {
+            normal_var_samples(retained_index, block) = normal_var[block];
+          }
+        }
+      }
       if (has_spike_slab) {
         for (int block = 0; block < number_of_blocks; ++block) {
           if (block_model[block] == 1) {
             pi_samples(retained_index, block) = pi[block];
+            slab_var_samples(retained_index, block) = slab_var[block];
           }
         }
       }
@@ -347,8 +401,10 @@ Rcpp::List blm_gibbs_rcpp_cpp(
     Rcpp::Named("coefficient_samples") = coefficient_samples,
     Rcpp::Named("intercept_samples") = intercept_samples,
     Rcpp::Named("residual_var_samples") = residual_var_samples,
+    Rcpp::Named("normal_var_samples") = normal_var_samples,
     Rcpp::Named("inclusion_samples") = inclusion_samples,
     Rcpp::Named("pi_samples") = pi_samples,
+    Rcpp::Named("slab_var_samples") = slab_var_samples,
     Rcpp::Named("local_var_samples") = local_var_samples,
     Rcpp::Named("tau_sq_samples") = tau_sq_samples
   );

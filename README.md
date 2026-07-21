@@ -42,7 +42,7 @@ y <- drop(1 + X %*% beta + rnorm(n))
 
 fit <- blm(
   y,
-  ETA = list(X = X, model = "Normal", var = 10),
+  ETA = list(X = X, model = "Normal", var_shape = 2, var_scale = 10),
   residual_var = 1
 )
 

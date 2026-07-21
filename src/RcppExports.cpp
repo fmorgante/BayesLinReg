@@ -25,14 +25,13 @@ BEGIN_RCPP
 END_RCPP
 }
 // blm_gibbs_rcpp_cpp
-Rcpp::List blm_gibbs_rcpp_cpp(const Rcpp::NumericVector& y, const Rcpp::NumericMatrix& X, const Rcpp::NumericVector& prior_var, const double residual_shape, const double residual_scale, const int iterations, const int burnin, const int thin, const Rcpp::Function& progress_callback, const Rcpp::IntegerVector& block_id, const Rcpp::IntegerVector& block_model, const Rcpp::NumericVector& pi_alpha, const Rcpp::NumericVector& pi_beta, const Rcpp::NumericVector& global_scale, const Rcpp::NumericVector& local_a, const Rcpp::NumericVector& local_b, const bool learn_residual_var, const double fixed_residual_var);
-RcppExport SEXP _BayesLinReg_blm_gibbs_rcpp_cpp(SEXP ySEXP, SEXP XSEXP, SEXP prior_varSEXP, SEXP residual_shapeSEXP, SEXP residual_scaleSEXP, SEXP iterationsSEXP, SEXP burninSEXP, SEXP thinSEXP, SEXP progress_callbackSEXP, SEXP block_idSEXP, SEXP block_modelSEXP, SEXP pi_alphaSEXP, SEXP pi_betaSEXP, SEXP global_scaleSEXP, SEXP local_aSEXP, SEXP local_bSEXP, SEXP learn_residual_varSEXP, SEXP fixed_residual_varSEXP) {
+Rcpp::List blm_gibbs_rcpp_cpp(const Rcpp::NumericVector& y, const Rcpp::NumericMatrix& X, const double residual_shape, const double residual_scale, const int iterations, const int burnin, const int thin, const Rcpp::Function& progress_callback, const Rcpp::IntegerVector& block_id, const Rcpp::IntegerVector& block_model, const Rcpp::NumericVector& normal_shape, const Rcpp::NumericVector& normal_scale, const Rcpp::NumericVector& pi_alpha, const Rcpp::NumericVector& pi_beta, const Rcpp::NumericVector& slab_shape, const Rcpp::NumericVector& slab_scale, const Rcpp::NumericVector& global_scale, const Rcpp::NumericVector& local_a, const Rcpp::NumericVector& local_b, const bool learn_residual_var, const double fixed_residual_var);
+RcppExport SEXP _BayesLinReg_blm_gibbs_rcpp_cpp(SEXP ySEXP, SEXP XSEXP, SEXP residual_shapeSEXP, SEXP residual_scaleSEXP, SEXP iterationsSEXP, SEXP burninSEXP, SEXP thinSEXP, SEXP progress_callbackSEXP, SEXP block_idSEXP, SEXP block_modelSEXP, SEXP normal_shapeSEXP, SEXP normal_scaleSEXP, SEXP pi_alphaSEXP, SEXP pi_betaSEXP, SEXP slab_shapeSEXP, SEXP slab_scaleSEXP, SEXP global_scaleSEXP, SEXP local_aSEXP, SEXP local_bSEXP, SEXP learn_residual_varSEXP, SEXP fixed_residual_varSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< const Rcpp::NumericVector& >::type y(ySEXP);
     Rcpp::traits::input_parameter< const Rcpp::NumericMatrix& >::type X(XSEXP);
-    Rcpp::traits::input_parameter< const Rcpp::NumericVector& >::type prior_var(prior_varSEXP);
     Rcpp::traits::input_parameter< const double >::type residual_shape(residual_shapeSEXP);
     Rcpp::traits::input_parameter< const double >::type residual_scale(residual_scaleSEXP);
     Rcpp::traits::input_parameter< const int >::type iterations(iterationsSEXP);
@@ -41,21 +40,25 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const Rcpp::Function& >::type progress_callback(progress_callbackSEXP);
     Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type block_id(block_idSEXP);
     Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type block_model(block_modelSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::NumericVector& >::type normal_shape(normal_shapeSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::NumericVector& >::type normal_scale(normal_scaleSEXP);
     Rcpp::traits::input_parameter< const Rcpp::NumericVector& >::type pi_alpha(pi_alphaSEXP);
     Rcpp::traits::input_parameter< const Rcpp::NumericVector& >::type pi_beta(pi_betaSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::NumericVector& >::type slab_shape(slab_shapeSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::NumericVector& >::type slab_scale(slab_scaleSEXP);
     Rcpp::traits::input_parameter< const Rcpp::NumericVector& >::type global_scale(global_scaleSEXP);
     Rcpp::traits::input_parameter< const Rcpp::NumericVector& >::type local_a(local_aSEXP);
     Rcpp::traits::input_parameter< const Rcpp::NumericVector& >::type local_b(local_bSEXP);
     Rcpp::traits::input_parameter< const bool >::type learn_residual_var(learn_residual_varSEXP);
     Rcpp::traits::input_parameter< const double >::type fixed_residual_var(fixed_residual_varSEXP);
-    rcpp_result_gen = Rcpp::wrap(blm_gibbs_rcpp_cpp(y, X, prior_var, residual_shape, residual_scale, iterations, burnin, thin, progress_callback, block_id, block_model, pi_alpha, pi_beta, global_scale, local_a, local_b, learn_residual_var, fixed_residual_var));
+    rcpp_result_gen = Rcpp::wrap(blm_gibbs_rcpp_cpp(y, X, residual_shape, residual_scale, iterations, burnin, thin, progress_callback, block_id, block_model, normal_shape, normal_scale, pi_alpha, pi_beta, slab_shape, slab_scale, global_scale, local_a, local_b, learn_residual_var, fixed_residual_var));
     return rcpp_result_gen;
 END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
     {"_BayesLinReg_draw_gig_rcpp_cpp", (DL_FUNC) &_BayesLinReg_draw_gig_rcpp_cpp, 4},
-    {"_BayesLinReg_blm_gibbs_rcpp_cpp", (DL_FUNC) &_BayesLinReg_blm_gibbs_rcpp_cpp, 18},
+    {"_BayesLinReg_blm_gibbs_rcpp_cpp", (DL_FUNC) &_BayesLinReg_blm_gibbs_rcpp_cpp, 21},
     {NULL, NULL, 0}
 };
 

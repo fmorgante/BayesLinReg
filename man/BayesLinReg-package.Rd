@@ -9,12 +9,20 @@
 Bayesian linear regression with normal, spike-and-slab, and global-local
 coefficient priors.
 }
+\seealso{
+Useful links:
+\itemize{
+  \item \url{https://github.com/fmorgante/BayesLinReg}
+  \item Report bugs at \url{https://github.com/fmorgante/BayesLinReg/issues}
+}
+
+}
 \author{
-\strong{Maintainer}: First Last \email{first.last@example.com}
+\strong{Maintainer}: Fabio Morgante \email{fabiom@clemson.edu}
 
 Authors:
 \itemize{
-  \item First Last \email{first.last@example.com}
+  \item Fabio Morgante \email{fabiom@clemson.edu}
 }
 
 }

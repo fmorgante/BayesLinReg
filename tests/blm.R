@@ -6,50 +6,54 @@ x <- cbind(
 )
 y <- 1 + 2 * x[, "first"] - 3 * x[, "second"]
 
-normal_eta <- function(X, var = 10, standardize = TRUE) {
-  list(X = X, model = "Normal", var = var, standardize = standardize)
+normal_eta <- function(X, var_shape = 2, var_scale = 10,
+                       standardize = TRUE) {
+  list(
+    X = X, model = "Normal", var_shape = var_shape,
+    var_scale = var_scale, standardize = standardize
+  )
 }
 
-# A single block supports analytical Normal fits.
+# A Normal block samples one shared coefficient variance.
 known_fit <- blm(
   y,
   ETA = normal_eta(x, standardize = FALSE),
-  residual_var = 1
+  residual_var = 1,
+  iterations = 1000,
+  burnin = 400,
+  thin = 2,
+  seed = 41
 )
 known_block <- known_fit$ETA$ETA1
-expected_cov <- diag(c(1 / 10.1, 1 / 1.3))
-dimnames(expected_cov) <- list(colnames(x), colnames(x))
-expected_mean <- c(first = 20 / 10.1, second = -3.6 / 1.3)
-expected_intercept <- mean(y) - sum(colMeans(x) * expected_mean)
-expected_intercept_var <- 1 / 5 +
-  drop(crossprod(colMeans(x), expected_cov %*% colMeans(x)))
 stopifnot(
-  identical(names(known_fit), c("ETA", "intercept_mean", "intercept_var")),
   identical(names(known_fit$ETA), "ETA1"),
   identical(known_block$model, "Normal"),
   identical(known_block$standardize, FALSE),
-  identical(known_block$var, c(first = 10, second = 10)),
-  isTRUE(all.equal(known_block$coefficient_mean, expected_mean)),
-  isTRUE(all.equal(known_block$coefficient_cov, expected_cov)),
-  isTRUE(all.equal(known_fit$intercept_mean, expected_intercept)),
-  isTRUE(all.equal(known_fit$intercept_var, expected_intercept_var))
+  identical(known_block$var_shape, 2),
+  identical(known_block$var_scale, 10),
+  identical(dim(known_block$coefficient_samples), c(300L, 2L)),
+  length(known_block$normal_var_samples) == 300L,
+  all(known_block$normal_var_samples > 0),
+  identical(known_block$normal_var_mean, mean(known_block$normal_var_samples)),
+  all(known_fit$residual_var_samples == 1)
 )
 
-# Scalar and predictor-specific variances are equivalent when repeated.
+# Matrix and data-frame inputs use the same fitting engine.
 vector_fit <- blm(
   y,
   ETA = list(
-    X = x, model = "Normal", var = c(10, 10), standardize = FALSE
+    X = x, model = "Normal", var_shape = 2, var_scale = 10,
+    standardize = FALSE
   ),
-  residual_var = 1
+  residual_var = 1, iterations = 1000, burnin = 400, thin = 2, seed = 41
 )
 data_frame_fit <- blm(
   y,
   ETA = list(
-    X = as.data.frame(x), model = "Normal", var = 10,
+    X = as.data.frame(x), model = "Normal", var_shape = 2, var_scale = 10,
     standardize = FALSE
   ),
-  residual_var = 1
+  residual_var = 1, iterations = 1000, burnin = 400, thin = 2, seed = 41
 )
 stopifnot(
   isTRUE(all.equal(known_fit, vector_fit)),
@@ -61,15 +65,15 @@ simple_y <- 1 + 2 * x[, "first"]
 simple_fit <- blm(
   simple_y,
   ETA = list(
-    X = x[, "first"], model = "Normal", var = 10,
+    X = x[, "first"], model = "Normal", var_shape = 2, var_scale = 10,
     standardize = FALSE
   ),
-  residual_var = 1
+  residual_var = 1, iterations = 1000, burnin = 400, thin = 2, seed = 42
 )
 one_predictor_fit <- blm(
   simple_y,
   ETA = normal_eta(x[, "first", drop = FALSE], standardize = FALSE),
-  residual_var = 1
+  residual_var = 1, iterations = 1000, burnin = 400, thin = 2, seed = 42
 )
 stopifnot(
   isTRUE(all.equal(
@@ -91,9 +95,12 @@ working_x <- sweep(x, 2L, predictor_sd, FUN = "/")
 manual_fit <- blm(
   y,
   ETA = normal_eta(working_x, standardize = FALSE),
-  residual_var = 1
+  residual_var = 1, iterations = 1000, burnin = 400, thin = 2, seed = 43
 )
-automatic_fit <- blm(y, ETA = normal_eta(x), residual_var = 1)
+automatic_fit <- blm(
+  y, ETA = normal_eta(x), residual_var = 1,
+  iterations = 1000, burnin = 400, thin = 2, seed = 43
+)
 stopifnot(
   isTRUE(all.equal(
     automatic_fit$ETA$ETA1$coefficient_mean,
@@ -172,12 +179,14 @@ multi_eta <- list(
   fixed = list(
     X = multi_X[, "signal", drop = FALSE],
     model = "Normal",
-    var = 20
+    var_shape = 2,
+    var_scale = 20
   ),
   selection = list(
     X = multi_X[, c("nuisance", "noise1")],
     model = "SpikeSlab",
-    var = 10,
+    slab_shape = 2,
+    slab_scale = 10,
     pi = c(a = 1, b = 2)
   ),
   shrinkage = list(
@@ -214,17 +223,27 @@ stopifnot(
     c("Normal", "SpikeSlab", "GlobalLocal")
   ),
   identical(dim(multi_rcpp$ETA$fixed$coefficient_samples), c(400L, 1L)),
+  length(multi_rcpp$ETA$fixed$normal_var_samples) == 400L,
+  all(multi_rcpp$ETA$fixed$normal_var_samples > 0),
   identical(dim(multi_rcpp$ETA$selection$inclusion_samples), c(400L, 2L)),
   length(multi_rcpp$ETA$selection$pi_samples) == 400L,
+  length(multi_rcpp$ETA$selection$slab_var_samples) == 400L,
+  all(multi_rcpp$ETA$selection$slab_var_samples > 0),
   identical(dim(multi_rcpp$ETA$shrinkage$local_var_samples), c(400L, 1L)),
   length(multi_rcpp$ETA$shrinkage$tau_sq_samples) == 400L,
   identical(multi_rcpp$ETA$selection$pi, c(a = 1, b = 2)),
+  identical(multi_rcpp$ETA$selection$slab_shape, 2),
+  identical(multi_rcpp$ETA$selection$slab_scale, 10),
   identical(multi_rcpp$ETA$shrinkage$global_scale, 0.5),
   abs(multi_rcpp$ETA$fixed$coefficient_mean["signal"] - 2.5) < 0.1,
   max(abs(
     multi_rcpp$ETA$fixed$coefficient_mean -
       multi_r$ETA$fixed$coefficient_mean
   )) < 0.1,
+  abs(
+    multi_rcpp$ETA$selection$slab_var_mean -
+      multi_r$ETA$selection$slab_var_mean
+  ) < 5,
   abs(multi_rcpp$residual_var_mean - multi_r$residual_var_mean) < 0.1
 )
 
@@ -266,7 +285,8 @@ spike_fit <- blm(
   ETA = list(
     X = multi_X[, c("signal", "noise1")],
     model = "SpikeSlab",
-    var = 10,
+    slab_shape = 3,
+    slab_scale = 4,
     pi = c(a = 1, b = 2)
   ),
   residual_shape = 2,
@@ -278,6 +298,13 @@ spike_fit <- blm(
 stopifnot(
   identical(spike_fit$ETA$ETA1$model, "SpikeSlab"),
   identical(spike_fit$ETA$ETA1$pi, c(a = 1, b = 2)),
+  identical(spike_fit$ETA$ETA1$slab_shape, 3),
+  identical(spike_fit$ETA$ETA1$slab_scale, 4),
+  all(spike_fit$ETA$ETA1$slab_var_samples > 0),
+  identical(
+    spike_fit$ETA$ETA1$slab_var_mean,
+    mean(spike_fit$ETA$ETA1$slab_var_samples)
+  ),
   identical(dim(spike_fit$ETA$ETA1$coefficient_samples), c(300L, 2L))
 )
 
@@ -318,13 +345,14 @@ for (sampler_version in c("Rcpp", "R")) {
   invisible(sampler(
     y = y,
     x = x,
-    prior_var = c(10, 10),
     residual_shape = 2,
     residual_scale = 1,
     iterations = 100,
     burnin = 20,
     thin = 1,
     seed = 42,
+    normal_shape = 2,
+    normal_scale = 10,
     progress_callback = callback
   ))
   stopifnot(
@@ -338,8 +366,10 @@ mock_chain <- list(
   coefficient_samples = matrix(1:8, nrow = 2),
   intercept_samples = c(1, 2),
   residual_var_samples = c(3, 4),
+  normal_var_samples = matrix(c(4, NA, NA, 5, NA, NA), 2, 3, byrow = TRUE),
   inclusion_samples = matrix(1L, 2, 4),
   pi_samples = matrix(c(NA, 0.4, NA, NA, 0.5, NA), 2, 3, byrow = TRUE),
+  slab_var_samples = matrix(c(NA, 4, NA, NA, 5, NA), 2, 3, byrow = TRUE),
   local_var_samples = matrix(1, 2, 4),
   tau_sq_samples = matrix(c(NA, NA, 1, NA, NA, 2), 2, 3, byrow = TRUE)
 )
@@ -349,7 +379,9 @@ mock_combined <- BayesLinReg:::.combine_blm_chains(
 )
 stopifnot(
   identical(mock_combined$chain_id, c(1L, 1L, 2L, 2L)),
+  identical(dim(mock_combined$normal_var_samples), c(4L, 3L)),
   identical(dim(mock_combined$pi_samples), c(4L, 3L)),
+  identical(dim(mock_combined$slab_var_samples), c(4L, 3L)),
   identical(dim(mock_combined$tau_sq_samples), c(4L, 3L))
 )
 
@@ -384,6 +416,7 @@ if (any(parallel_test_flags == "true")) {
     identical(parallel_fit$chain_id, rep.int(1:2, c(80L, 80L))),
     identical(dim(parallel_fit$ETA$selection$pi_samples), NULL),
     length(parallel_fit$ETA$selection$pi_samples) == 160L,
+    length(parallel_fit$ETA$selection$slab_var_samples) == 160L,
     length(parallel_fit$ETA$shrinkage$tau_sq_samples) == 160L
   )
 }
@@ -397,20 +430,22 @@ invalid_calls <- list(
   function() blm(y, ETA = list(), residual_var = 1),
   function() blm(y, ETA = list(X = x), residual_var = 1),
   function() blm(
-    y, ETA = list(X = x, model = "normal", var = 10), residual_var = 1
+    y, ETA = list(X = x, model = "normal", var_scale = 10), residual_var = 1
   ),
   function() blm(
     y, ETA = list(X = x, model = "Normal", prior_var = 10), residual_var = 1
   ),
   function() blm(
-    y, ETA = list(X = x, model = "Normal"), residual_var = 1
+    y, ETA = list(X = x, model = "Normal", var_shape = 0), residual_var = 1
   ),
   function() blm(
-    y, ETA = list(X = x, model = "Normal", var = 0), residual_var = 1
+    y, ETA = list(X = x, model = "Normal", var_scale = 0), residual_var = 1
   ),
   function() blm(
     y,
-    ETA = list(X = cbind(x, constant = 1), model = "Normal", var = 10),
+    ETA = list(
+      X = cbind(x, constant = 1), model = "Normal", var_scale = 10
+    ),
     residual_var = 1
   ),
   function() blm(
@@ -421,14 +456,26 @@ invalid_calls <- list(
   function() blm(
     y,
     ETA = list(
-      X = x, model = "SpikeSlab", var = 10, pi_alpha = 1, pi_beta = 1
+      X = x, model = "SpikeSlab", pi_alpha = 1, pi_beta = 1
     ),
     residual_shape = 2,
     residual_scale = 1
   ),
   function() blm(
     y,
-    ETA = list(X = x, model = "SpikeSlab", var = 10, pi = c(1, 0)),
+    ETA = list(X = x, model = "SpikeSlab", pi = c(1, 0)),
+    residual_shape = 2,
+    residual_scale = 1
+  ),
+  function() blm(
+    y,
+    ETA = list(X = x, model = "SpikeSlab", slab_shape = 0),
+    residual_shape = 2,
+    residual_scale = 1
+  ),
+  function() blm(
+    y,
+    ETA = list(X = x, model = "SpikeSlab", slab_scale = 0),
     residual_shape = 2,
     residual_scale = 1
   ),
