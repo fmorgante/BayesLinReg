@@ -170,12 +170,6 @@
       .validate_variance(normal_scale, "var_scale")
     }
     if (model == "SpikeSlab") {
-      if (!is.null(residual_var)) {
-        stop(
-          "`SpikeSlab` ETA blocks require learning the residual variance.",
-          call. = FALSE
-        )
-      }
       pi <- if (is.null(specification$pi)) {
         c(a = 1, b = 1)
       } else {

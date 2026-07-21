@@ -419,6 +419,53 @@ stopifnot(
   identical(dim(spike_fit$ETA$ETA1$coefficient_samples), c(300L, 2L))
 )
 
+# SpikeSlab supports the same fixed residual-variance interface as other priors.
+fixed_spike_rcpp <- blm(
+  multi_y,
+  ETA = list(
+    X = multi_X[, c("signal", "noise1")],
+    model = "SpikeSlab",
+    slab_shape = 3,
+    slab_scale = 4,
+    pi = c(a = 1, b = 2)
+  ),
+  residual_var = 0.25,
+  iterations = 500,
+  burnin = 200,
+  seed = 112,
+  version = "Rcpp"
+)
+fixed_spike_r <- blm(
+  multi_y,
+  ETA = list(
+    X = multi_X[, c("signal", "noise1")],
+    model = "SpikeSlab",
+    slab_shape = 3,
+    slab_scale = 4,
+    pi = c(a = 1, b = 2)
+  ),
+  residual_var = 0.25,
+  iterations = 500,
+  burnin = 200,
+  seed = 112,
+  version = "R"
+)
+stopifnot(
+  all(fixed_spike_rcpp$residual_var_samples == 0.25),
+  identical(fixed_spike_rcpp$residual_var_mean, 0.25),
+  identical(fixed_spike_rcpp$residual_var_var, 0),
+  all(fixed_spike_rcpp$ETA$ETA1$slab_var_samples > 0),
+  all(fixed_spike_r$residual_var_samples == 0.25),
+  max(abs(
+    fixed_spike_rcpp$ETA$ETA1$coefficient_mean -
+      fixed_spike_r$ETA$ETA1$coefficient_mean
+  )) < 0.2,
+  abs(
+    fixed_spike_rcpp$ETA$ETA1$pi_mean -
+      fixed_spike_r$ETA$ETA1$pi_mean
+  ) < 0.2
+)
+
 # The R and Rcpp GIG entry points match a known moment and challenging cases.
 gig_lambda <- 1
 gig_chi <- 2

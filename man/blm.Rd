@@ -90,9 +90,9 @@ A \code{"Normal"} block optionally accepts \code{var_shape = 2} and
 \code{var_scale = 1}. Its coefficients share a variance sampled from an
 inverse-gamma prior with the supplied shape and scale.
 A \code{"SpikeSlab"} block optionally accepts \code{pi = c(a = 1, b = 1)},
-\code{slab_shape = 2}, and \code{slab_scale = 1}, and requires the residual variance
-to be learned. Its shared slab variance has an inverse-gamma prior with
-the supplied shape and scale. A \code{"GlobalLocal"} block optionally accepts
+\code{slab_shape = 2}, and \code{slab_scale = 1}. Its shared slab variance has an
+inverse-gamma prior with the supplied shape and scale. A \code{"GlobalLocal"}
+block optionally accepts
 \code{local_shape = c(a = 1, b = 0.5)} and \code{global_scale = 1}. Its hierarchy is
 \deqn{\beta_j \mid \tau^2,\psi_j \sim N(0,\tau^2\psi_j),\qquad
   \psi_j \sim \mathrm{BetaPrime}(a,b),}

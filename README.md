@@ -71,6 +71,8 @@ vector. Set `store_coefficient_cov = FALSE` to omit its full
 accumulator when `store_samples = FALSE`.
 
 The available models are `"Normal"`, `"SpikeSlab"`, and `"GlobalLocal"`.
+For every model, `residual_var` may be supplied as a fixed value or learned
+from `residual_shape` and `residual_scale`.
 For mixed priors, use a named `ETA` list whose blocks specify their own
 predictors, model, standardization, and prior parameters.
 

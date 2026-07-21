@@ -53,9 +53,9 @@
 #'   `var_scale = 1`. Its coefficients share a variance sampled from an
 #'   inverse-gamma prior with the supplied shape and scale.
 #'   A `"SpikeSlab"` block optionally accepts `pi = c(a = 1, b = 1)`,
-#'   `slab_shape = 2`, and `slab_scale = 1`, and requires the residual variance
-#'   to be learned. Its shared slab variance has an inverse-gamma prior with
-#'   the supplied shape and scale. A `"GlobalLocal"` block optionally accepts
+#'   `slab_shape = 2`, and `slab_scale = 1`. Its shared slab variance has an
+#'   inverse-gamma prior with the supplied shape and scale. A `"GlobalLocal"`
+#'   block optionally accepts
 #'   `local_shape = c(a = 1, b = 0.5)` and `global_scale = 1`. Its hierarchy is
 #'   \deqn{\beta_j \mid \tau^2,\psi_j \sim N(0,\tau^2\psi_j),\qquad
 #'   \psi_j \sim \mathrm{BetaPrime}(a,b),}
