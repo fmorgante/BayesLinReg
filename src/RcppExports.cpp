@@ -25,8 +25,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // blm_gibbs_rcpp_cpp
-Rcpp::List blm_gibbs_rcpp_cpp(const Rcpp::NumericVector& y, const Rcpp::NumericMatrix& X, const double residual_shape, const double residual_scale, const int iterations, const int burnin, const int thin, const Rcpp::Function& progress_callback, const Rcpp::IntegerVector& block_id, const Rcpp::IntegerVector& block_model, const Rcpp::NumericVector& normal_shape, const Rcpp::NumericVector& normal_scale, const Rcpp::NumericVector& pi_alpha, const Rcpp::NumericVector& pi_beta, const Rcpp::NumericVector& slab_shape, const Rcpp::NumericVector& slab_scale, const Rcpp::NumericVector& global_scale, const Rcpp::NumericVector& local_a, const Rcpp::NumericVector& local_b, const bool learn_residual_var, const double fixed_residual_var);
-RcppExport SEXP _BayesLinReg_blm_gibbs_rcpp_cpp(SEXP ySEXP, SEXP XSEXP, SEXP residual_shapeSEXP, SEXP residual_scaleSEXP, SEXP iterationsSEXP, SEXP burninSEXP, SEXP thinSEXP, SEXP progress_callbackSEXP, SEXP block_idSEXP, SEXP block_modelSEXP, SEXP normal_shapeSEXP, SEXP normal_scaleSEXP, SEXP pi_alphaSEXP, SEXP pi_betaSEXP, SEXP slab_shapeSEXP, SEXP slab_scaleSEXP, SEXP global_scaleSEXP, SEXP local_aSEXP, SEXP local_bSEXP, SEXP learn_residual_varSEXP, SEXP fixed_residual_varSEXP) {
+Rcpp::List blm_gibbs_rcpp_cpp(const Rcpp::NumericVector& y, const Rcpp::NumericMatrix& X, const double residual_shape, const double residual_scale, const int iterations, const int burnin, const int thin, const Rcpp::Function& progress_callback, const Rcpp::IntegerVector& block_id, const Rcpp::IntegerVector& block_model, const Rcpp::NumericVector& normal_shape, const Rcpp::NumericVector& normal_scale, const Rcpp::NumericVector& pi_alpha, const Rcpp::NumericVector& pi_beta, const Rcpp::NumericVector& slab_shape, const Rcpp::NumericVector& slab_scale, const Rcpp::NumericVector& global_scale, const Rcpp::NumericVector& local_a, const Rcpp::NumericVector& local_b, const bool learn_residual_var, const double fixed_residual_var, const bool store_samples, const bool store_coefficient_cov);
+RcppExport SEXP _BayesLinReg_blm_gibbs_rcpp_cpp(SEXP ySEXP, SEXP XSEXP, SEXP residual_shapeSEXP, SEXP residual_scaleSEXP, SEXP iterationsSEXP, SEXP burninSEXP, SEXP thinSEXP, SEXP progress_callbackSEXP, SEXP block_idSEXP, SEXP block_modelSEXP, SEXP normal_shapeSEXP, SEXP normal_scaleSEXP, SEXP pi_alphaSEXP, SEXP pi_betaSEXP, SEXP slab_shapeSEXP, SEXP slab_scaleSEXP, SEXP global_scaleSEXP, SEXP local_aSEXP, SEXP local_bSEXP, SEXP learn_residual_varSEXP, SEXP fixed_residual_varSEXP, SEXP store_samplesSEXP, SEXP store_coefficient_covSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -51,14 +51,16 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const Rcpp::NumericVector& >::type local_b(local_bSEXP);
     Rcpp::traits::input_parameter< const bool >::type learn_residual_var(learn_residual_varSEXP);
     Rcpp::traits::input_parameter< const double >::type fixed_residual_var(fixed_residual_varSEXP);
-    rcpp_result_gen = Rcpp::wrap(blm_gibbs_rcpp_cpp(y, X, residual_shape, residual_scale, iterations, burnin, thin, progress_callback, block_id, block_model, normal_shape, normal_scale, pi_alpha, pi_beta, slab_shape, slab_scale, global_scale, local_a, local_b, learn_residual_var, fixed_residual_var));
+    Rcpp::traits::input_parameter< const bool >::type store_samples(store_samplesSEXP);
+    Rcpp::traits::input_parameter< const bool >::type store_coefficient_cov(store_coefficient_covSEXP);
+    rcpp_result_gen = Rcpp::wrap(blm_gibbs_rcpp_cpp(y, X, residual_shape, residual_scale, iterations, burnin, thin, progress_callback, block_id, block_model, normal_shape, normal_scale, pi_alpha, pi_beta, slab_shape, slab_scale, global_scale, local_a, local_b, learn_residual_var, fixed_residual_var, store_samples, store_coefficient_cov));
     return rcpp_result_gen;
 END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
     {"_BayesLinReg_draw_gig_rcpp_cpp", (DL_FUNC) &_BayesLinReg_draw_gig_rcpp_cpp, 4},
-    {"_BayesLinReg_blm_gibbs_rcpp_cpp", (DL_FUNC) &_BayesLinReg_blm_gibbs_rcpp_cpp, 21},
+    {"_BayesLinReg_blm_gibbs_rcpp_cpp", (DL_FUNC) &_BayesLinReg_blm_gibbs_rcpp_cpp, 23},
     {NULL, NULL, 0}
 };
 

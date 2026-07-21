@@ -9,7 +9,7 @@
 #' variances, and spike-and-slab inclusion indicators, are intentionally
 #' excluded.
 #'
-#' @param fit A sampled fit returned by [blm()].
+#' @param fit A fit returned by [blm()] with `store_samples = TRUE`.
 #' @param plot A logical scalar indicating whether to draw trace plots for the
 #'   assessed parameters.
 #'

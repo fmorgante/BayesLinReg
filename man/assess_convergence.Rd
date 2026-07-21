@@ -7,7 +7,7 @@
 assess_convergence(fit, plot = TRUE)
 }
 \arguments{
-\item{fit}{A sampled fit returned by \code{\link[=blm]{blm()}}.}
+\item{fit}{A fit returned by \code{\link[=blm]{blm()}} with \code{store_samples = TRUE}.}
 
 \item{plot}{A logical scalar indicating whether to draw trace plots for the
 assessed parameters.}

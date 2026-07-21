@@ -125,8 +125,22 @@ known_fit <- blm(
   burnin = 40,
   seed = 103
 )
+summary_only_fit <- blm(
+  y,
+  ETA = list(X = X, model = "Normal"),
+  residual_var = 1,
+  iterations = 100,
+  burnin = 40,
+  seed = 104,
+  store_samples = FALSE
+)
 stopifnot(
   assess_convergence(known_fit, plot = FALSE)$nchains == 1L,
+  grepl(
+    "store_samples = TRUE",
+    as.character(try(assess_convergence(summary_only_fit), silent = TRUE)),
+    fixed = TRUE
+  ),
   inherits(
     try(assess_convergence(fit_one, plot = NA), silent = TRUE),
     "try-error"

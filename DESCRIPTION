@@ -12,8 +12,9 @@ Description: Fits Bayesian linear regression models with one or more predictor
     or beta-prime global-local priors, including Strawderman-Berger and
     horseshoe specifications. Supports known or inverse-gamma-modeled residual
     variance, sampled coefficient-prior variances, Gibbs sampling implemented
-    in R or 'Rcpp', optional parallel chains, predictor
-    standardization, and convergence diagnostics.
+    in R or 'Rcpp', optional parallel chains, memory-efficient online
+    posterior summaries, predictor standardization, and convergence
+    diagnostics.
 License: BSD_3_clause + file LICENSE
 URL: https://github.com/fmorgante/BayesLinReg
 BugReports: https://github.com/fmorgante/BayesLinReg/issues

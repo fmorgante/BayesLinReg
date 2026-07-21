@@ -75,7 +75,9 @@ Rcpp::List blm_gibbs_rcpp_cpp(
     const Rcpp::NumericVector& local_a,
     const Rcpp::NumericVector& local_b,
     const bool learn_residual_var,
-    const double fixed_residual_var) {
+    const double fixed_residual_var,
+    const bool store_samples,
+    const bool store_coefficient_cov) {
   Rcpp::RNGScope scope;
 
   const int n = y.size();
@@ -112,15 +114,37 @@ Rcpp::List blm_gibbs_rcpp_cpp(
     }
   }
 
-  Rcpp::NumericMatrix coefficient_samples(number_of_draws, p);
-  Rcpp::NumericVector intercept_samples(number_of_draws);
-  Rcpp::NumericVector residual_var_samples(number_of_draws);
-  Rcpp::NumericMatrix normal_var_samples(number_of_draws, number_of_blocks);
-  Rcpp::IntegerMatrix inclusion_samples(number_of_draws, p);
-  Rcpp::NumericMatrix pi_samples(number_of_draws, number_of_blocks);
-  Rcpp::NumericMatrix slab_var_samples(number_of_draws, number_of_blocks);
-  Rcpp::NumericMatrix local_var_samples(number_of_draws, p);
-  Rcpp::NumericMatrix tau_sq_samples(number_of_draws, number_of_blocks);
+  const int stored_rows = store_samples ? number_of_draws : 0;
+  Rcpp::NumericMatrix coefficient_samples(stored_rows, p);
+  Rcpp::NumericVector intercept_samples(stored_rows);
+  Rcpp::NumericVector residual_var_samples(stored_rows);
+  Rcpp::NumericMatrix normal_var_samples(stored_rows, number_of_blocks);
+  Rcpp::IntegerMatrix inclusion_samples(stored_rows, p);
+  Rcpp::NumericMatrix pi_samples(stored_rows, number_of_blocks);
+  Rcpp::NumericMatrix slab_var_samples(stored_rows, number_of_blocks);
+  Rcpp::NumericMatrix local_var_samples(stored_rows, p);
+  Rcpp::NumericMatrix tau_sq_samples(stored_rows, number_of_blocks);
+  Rcpp::NumericVector coefficient_sum(p);
+  Rcpp::NumericVector coefficient_sum_sq(p);
+  const int covariance_dimension = store_coefficient_cov ? p : 0;
+  Rcpp::NumericMatrix coefficient_crossprod(
+    covariance_dimension, covariance_dimension
+  );
+  double intercept_sum = 0.0;
+  double intercept_sum_sq = 0.0;
+  double residual_var_sum = 0.0;
+  double residual_var_sum_sq = 0.0;
+  Rcpp::NumericVector normal_var_sum(number_of_blocks);
+  Rcpp::NumericVector normal_var_sum_sq(number_of_blocks);
+  Rcpp::NumericVector inclusion_sum(p);
+  Rcpp::NumericVector pi_sum(number_of_blocks);
+  Rcpp::NumericVector pi_sum_sq(number_of_blocks);
+  Rcpp::NumericVector slab_var_sum(number_of_blocks);
+  Rcpp::NumericVector slab_var_sum_sq(number_of_blocks);
+  Rcpp::NumericVector local_var_sum(p);
+  Rcpp::NumericVector local_var_sum_sq(p);
+  Rcpp::NumericVector tau_sq_sum(number_of_blocks);
+  Rcpp::NumericVector tau_sq_sum_sq(number_of_blocks);
   std::vector<double> coefficient(p, 0.0);
   std::vector<int> inclusion(p, 1);
   std::vector<double> local_var(p, 1.0);
@@ -331,40 +355,72 @@ Rcpp::List blm_gibbs_rcpp_cpp(
       for (int j = 0; j < p; ++j) {
         const int block = block_id[j] - 1;
         const int model = block_model[block];
-        coefficient_samples(retained_index, j) = coefficient[j];
-        if (model == 1) {
-          inclusion_samples(retained_index, j) = inclusion[j];
-        }
-        if (model == 2) {
-          local_var_samples(retained_index, j) = local_var[j];
+        if (store_samples) {
+          coefficient_samples(retained_index, j) = coefficient[j];
+          if (model == 1) {
+            inclusion_samples(retained_index, j) = inclusion[j];
+          }
+          if (model == 2) {
+            local_var_samples(retained_index, j) = local_var[j];
+          }
         }
         intercept_mean -= x_mean[j] * coefficient[j];
       }
-      intercept_samples[retained_index] = R::rnorm(
+      const double intercept_draw = R::rnorm(
         intercept_mean,
         std::sqrt(residual_var / n)
       );
-      residual_var_samples[retained_index] = residual_var;
-      if (has_normal) {
-        for (int block = 0; block < number_of_blocks; ++block) {
-          if (block_model[block] == 0) {
-            normal_var_samples(retained_index, block) = normal_var[block];
+      if (store_samples) {
+        intercept_samples[retained_index] = intercept_draw;
+        residual_var_samples[retained_index] = residual_var;
+        if (has_normal) {
+          for (int block = 0; block < number_of_blocks; ++block) {
+            if (block_model[block] == 0) {
+              normal_var_samples(retained_index, block) = normal_var[block];
+            }
           }
         }
-      }
-      if (has_spike_slab) {
-        for (int block = 0; block < number_of_blocks; ++block) {
-          if (block_model[block] == 1) {
-            pi_samples(retained_index, block) = pi[block];
-            slab_var_samples(retained_index, block) = slab_var[block];
+        if (has_spike_slab) {
+          for (int block = 0; block < number_of_blocks; ++block) {
+            if (block_model[block] == 1) {
+              pi_samples(retained_index, block) = pi[block];
+              slab_var_samples(retained_index, block) = slab_var[block];
+            }
           }
         }
-      }
-      if (has_global_local) {
-        for (int block = 0; block < number_of_blocks; ++block) {
-          if (block_model[block] == 2) {
-            tau_sq_samples(retained_index, block) = tau_sq[block];
+        if (has_global_local) {
+          for (int block = 0; block < number_of_blocks; ++block) {
+            if (block_model[block] == 2) {
+              tau_sq_samples(retained_index, block) = tau_sq[block];
+            }
           }
+        }
+      } else {
+        for (int j = 0; j < p; ++j) {
+          coefficient_sum[j] += coefficient[j];
+          coefficient_sum_sq[j] += coefficient[j] * coefficient[j];
+          inclusion_sum[j] += inclusion[j];
+          local_var_sum[j] += local_var[j];
+          local_var_sum_sq[j] += local_var[j] * local_var[j];
+          if (store_coefficient_cov) {
+            for (int k = 0; k < p; ++k) {
+              coefficient_crossprod(j, k) += coefficient[j] * coefficient[k];
+            }
+          }
+        }
+        intercept_sum += intercept_draw;
+        intercept_sum_sq += intercept_draw * intercept_draw;
+        residual_var_sum += residual_var;
+        residual_var_sum_sq += residual_var * residual_var;
+        for (int block = 0; block < number_of_blocks; ++block) {
+          normal_var_sum[block] += normal_var[block];
+          normal_var_sum_sq[block] += normal_var[block] * normal_var[block];
+          pi_sum[block] += pi[block];
+          pi_sum_sq[block] += pi[block] * pi[block];
+          slab_var_sum[block] += slab_var[block];
+          slab_var_sum_sq[block] += slab_var[block] * slab_var[block];
+          tau_sq_sum[block] += tau_sq[block];
+          tau_sq_sum_sq[block] += tau_sq[block] * tau_sq[block];
         }
       }
       ++retained_index;
@@ -397,15 +453,41 @@ Rcpp::List blm_gibbs_rcpp_cpp(
     }
   }
 
-  return Rcpp::List::create(
-    Rcpp::Named("coefficient_samples") = coefficient_samples,
-    Rcpp::Named("intercept_samples") = intercept_samples,
-    Rcpp::Named("residual_var_samples") = residual_var_samples,
-    Rcpp::Named("normal_var_samples") = normal_var_samples,
-    Rcpp::Named("inclusion_samples") = inclusion_samples,
-    Rcpp::Named("pi_samples") = pi_samples,
-    Rcpp::Named("slab_var_samples") = slab_var_samples,
-    Rcpp::Named("local_var_samples") = local_var_samples,
-    Rcpp::Named("tau_sq_samples") = tau_sq_samples
+  if (store_samples) {
+    return Rcpp::List::create(
+      Rcpp::Named("coefficient_samples") = coefficient_samples,
+      Rcpp::Named("intercept_samples") = intercept_samples,
+      Rcpp::Named("residual_var_samples") = residual_var_samples,
+      Rcpp::Named("normal_var_samples") = normal_var_samples,
+      Rcpp::Named("inclusion_samples") = inclusion_samples,
+      Rcpp::Named("pi_samples") = pi_samples,
+      Rcpp::Named("slab_var_samples") = slab_var_samples,
+      Rcpp::Named("local_var_samples") = local_var_samples,
+      Rcpp::Named("tau_sq_samples") = tau_sq_samples
+    );
+  }
+  Rcpp::List summaries = Rcpp::List::create(
+    Rcpp::Named("number_of_draws") = number_of_draws,
+    Rcpp::Named("coefficient_sum") = coefficient_sum,
+    Rcpp::Named("coefficient_sum_sq") = coefficient_sum_sq,
+    Rcpp::Named("intercept_sum") = intercept_sum,
+    Rcpp::Named("intercept_sum_sq") = intercept_sum_sq,
+    Rcpp::Named("residual_var_sum") = residual_var_sum,
+    Rcpp::Named("residual_var_sum_sq") = residual_var_sum_sq,
+    Rcpp::Named("normal_var_sum") = normal_var_sum,
+    Rcpp::Named("normal_var_sum_sq") = normal_var_sum_sq,
+    Rcpp::Named("inclusion_sum") = inclusion_sum,
+    Rcpp::Named("pi_sum") = pi_sum,
+    Rcpp::Named("pi_sum_sq") = pi_sum_sq,
+    Rcpp::Named("slab_var_sum") = slab_var_sum,
+    Rcpp::Named("slab_var_sum_sq") = slab_var_sum_sq,
+    Rcpp::Named("local_var_sum") = local_var_sum,
+    Rcpp::Named("local_var_sum_sq") = local_var_sum_sq,
+    Rcpp::Named("tau_sq_sum") = tau_sq_sum,
+    Rcpp::Named("tau_sq_sum_sq") = tau_sq_sum_sq
   );
+  if (store_coefficient_cov) {
+    summaries["coefficient_crossprod"] = coefficient_crossprod;
+  }
+  return summaries;
 }

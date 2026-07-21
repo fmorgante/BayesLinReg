@@ -24,11 +24,22 @@
 #'   per chain using [progressr::with_progress()].
 #' @param nchains Number of independent chains. Multiple chains use a temporary
 #'   [future::multisession] plan.
+#' @param store_samples If `TRUE` (the default), retain and return individual
+#'   posterior draws. If `FALSE`, compute posterior summaries online without
+#'   allocating draw matrices. Fits without stored samples cannot be passed to
+#'   [assess_convergence()].
+#' @param store_coefficient_cov If `TRUE` (the default), return the full
+#'   posterior coefficient covariance matrix for each `ETA` block. If `FALSE`,
+#'   return only the named vector of marginal coefficient variances and avoid
+#'   the quadratic-size covariance accumulator when samples are not stored.
 #'
 #' @return A list containing `ETA`, a named list of block-specific posterior
-#'   summaries, plus intercept and residual-variance summaries. Sampled fits
-#'   also contain intercept and residual-variance draws. With multiple chains,
-#'   `chain_id` identifies the origin of each retained draw.
+#'   summaries, plus intercept and residual-variance summaries. Every block
+#'   contains a named `coefficient_var` vector; `coefficient_cov` is included
+#'   when `store_coefficient_cov = TRUE`. When
+#'   `store_samples = TRUE`, the corresponding posterior draws are also
+#'   returned. With multiple chains, `chain_id` identifies the origin of each
+#'   retained draw when samples are stored.
 #'
 #' @details `ETA` may be a single-block specification such as
 #'   `list(X = X, model = "Normal")`, or a named list of blocks.
@@ -74,11 +85,20 @@ blm <- function(y, ETA, residual_var = NULL,
                 residual_shape = NULL, residual_scale = NULL,
                 iterations = 4000L, burnin = 1000L, thin = 1L,
                 seed = NULL, version = c("Rcpp", "R"),
-                verbose = FALSE, nchains = 1L) {
+                verbose = FALSE, nchains = 1L, store_samples = TRUE,
+                store_coefficient_cov = TRUE) {
   version <- match.arg(version)
   nchains <- .validate_nchains(nchains)
   if (!is.logical(verbose) || length(verbose) != 1L || is.na(verbose)) {
     stop("`verbose` must be TRUE or FALSE.", call. = FALSE)
+  }
+  if (!is.logical(store_samples) || length(store_samples) != 1L ||
+      is.na(store_samples)) {
+    stop("`store_samples` must be TRUE or FALSE.", call. = FALSE)
+  }
+  if (!is.logical(store_coefficient_cov) ||
+      length(store_coefficient_cov) != 1L || is.na(store_coefficient_cov)) {
+    stop("`store_coefficient_cov` must be TRUE or FALSE.", call. = FALSE)
   }
   if (!is.numeric(y) || !is.atomic(y) || is.object(y) || !is.null(dim(y))) {
     stop("`y` must be a numeric vector.", call. = FALSE)
@@ -155,7 +175,9 @@ blm <- function(y, ETA, residual_var = NULL,
     slab_scale = slab_scale,
     global_scale = global_scale,
     local_a = local_a,
-    local_b = local_b
+    local_b = local_b,
+    store_samples = store_samples,
+    store_coefficient_cov = store_coefficient_cov
   )
   run_chains <- function(progressor = NULL) {
     .run_blm_chains(
@@ -179,55 +201,135 @@ blm <- function(y, ETA, residual_var = NULL,
   eta_result <- lapply(seq_along(blocks), function(block_index) {
     block <- blocks[[block_index]]
     indices <- block_indices[[block_index]]
-    coefficient_samples <- sweep(
-      samples$coefficient_samples[, indices, drop = FALSE],
-      2L,
-      block$predictor_scale,
-      FUN = "/"
-    )
-    colnames(coefficient_samples) <- block$predictor_names
+    if (store_samples) {
+      coefficient_samples <- sweep(
+        samples$coefficient_samples[, indices, drop = FALSE],
+        2L,
+        block$predictor_scale,
+        FUN = "/"
+      )
+      colnames(coefficient_samples) <- block$predictor_names
+      coefficient_mean <- colMeans(coefficient_samples)
+      coefficient_var <- apply(coefficient_samples, 2L, stats::var)
+      if (store_coefficient_cov) {
+        coefficient_cov <- stats::cov(coefficient_samples)
+      }
+    } else {
+      coefficient_mean <- samples$coefficient_sum[indices] /
+        samples$number_of_draws / block$predictor_scale
+      coefficient_var <- vapply(indices, function(index) {
+        .variance_from_sums(
+          samples$coefficient_sum[index],
+          samples$coefficient_sum_sq[index],
+          samples$number_of_draws
+        )
+      }, numeric(1)) / block$predictor_scale^2
+      if (store_coefficient_cov) {
+        coefficient_cov <- .covariance_from_sums(
+          samples$coefficient_sum[indices],
+          samples$coefficient_crossprod[indices, indices, drop = FALSE],
+          samples$number_of_draws
+        ) / outer(block$predictor_scale, block$predictor_scale)
+      }
+      names(coefficient_mean) <- block$predictor_names
+      names(coefficient_var) <- block$predictor_names
+      if (store_coefficient_cov) {
+        dimnames(coefficient_cov) <- list(
+          block$predictor_names,
+          block$predictor_names
+        )
+      }
+    }
     result <- list(
       model = block$model,
       standardize = block$standardize,
-      coefficient_mean = colMeans(coefficient_samples),
-      coefficient_cov = stats::cov(coefficient_samples),
-      coefficient_samples = coefficient_samples
+      coefficient_mean = coefficient_mean,
+      coefficient_var = coefficient_var
     )
+    if (store_coefficient_cov) result$coefficient_cov <- coefficient_cov
+    if (store_samples) result$coefficient_samples <- coefficient_samples
     if (block$model == "Normal") {
-      normal_var_samples <- samples$normal_var_samples[, block_index]
-      result$normal_var_mean <- mean(normal_var_samples)
-      result$normal_var_var <- stats::var(normal_var_samples)
-      result$normal_var_samples <- normal_var_samples
+      if (store_samples) {
+        normal_var_samples <- samples$normal_var_samples[, block_index]
+        result$normal_var_mean <- mean(normal_var_samples)
+        result$normal_var_var <- stats::var(normal_var_samples)
+        result$normal_var_samples <- normal_var_samples
+      } else {
+        result$normal_var_mean <- samples$normal_var_sum[block_index] /
+          samples$number_of_draws
+        result$normal_var_var <- .variance_from_sums(
+          samples$normal_var_sum[block_index],
+          samples$normal_var_sum_sq[block_index],
+          samples$number_of_draws
+        )
+      }
       result$var_shape <- block$normal_shape
       result$var_scale <- block$normal_scale
     }
     if (block$model == "SpikeSlab") {
-      inclusion_samples <- samples$inclusion_samples[, indices, drop = FALSE]
-      colnames(inclusion_samples) <- block$predictor_names
-      pi_samples <- samples$pi_samples[, block_index]
-      slab_var_samples <- samples$slab_var_samples[, block_index]
-      result$inclusion_probability <- colMeans(inclusion_samples)
-      result$pi_mean <- mean(pi_samples)
-      result$pi_var <- stats::var(pi_samples)
-      result$slab_var_mean <- mean(slab_var_samples)
-      result$slab_var_var <- stats::var(slab_var_samples)
-      result$inclusion_samples <- inclusion_samples
-      result$pi_samples <- pi_samples
-      result$slab_var_samples <- slab_var_samples
+      if (store_samples) {
+        inclusion_samples <- samples$inclusion_samples[, indices, drop = FALSE]
+        colnames(inclusion_samples) <- block$predictor_names
+        pi_samples <- samples$pi_samples[, block_index]
+        slab_var_samples <- samples$slab_var_samples[, block_index]
+        result$inclusion_probability <- colMeans(inclusion_samples)
+        result$pi_mean <- mean(pi_samples)
+        result$pi_var <- stats::var(pi_samples)
+        result$slab_var_mean <- mean(slab_var_samples)
+        result$slab_var_var <- stats::var(slab_var_samples)
+        result$inclusion_samples <- inclusion_samples
+        result$pi_samples <- pi_samples
+        result$slab_var_samples <- slab_var_samples
+      } else {
+        result$inclusion_probability <- samples$inclusion_sum[indices] /
+          samples$number_of_draws
+        names(result$inclusion_probability) <- block$predictor_names
+        result$pi_mean <- samples$pi_sum[block_index] /
+          samples$number_of_draws
+        result$pi_var <- .variance_from_sums(
+          samples$pi_sum[block_index], samples$pi_sum_sq[block_index],
+          samples$number_of_draws
+        )
+        result$slab_var_mean <- samples$slab_var_sum[block_index] /
+          samples$number_of_draws
+        result$slab_var_var <- .variance_from_sums(
+          samples$slab_var_sum[block_index],
+          samples$slab_var_sum_sq[block_index], samples$number_of_draws
+        )
+      }
       result$pi <- c(a = block$pi_alpha, b = block$pi_beta)
       result$slab_shape <- block$slab_shape
       result$slab_scale <- block$slab_scale
     }
     if (block$model == "GlobalLocal") {
-      local_var_samples <- samples$local_var_samples[, indices, drop = FALSE]
-      colnames(local_var_samples) <- block$predictor_names
-      tau_sq_samples <- samples$tau_sq_samples[, block_index]
-      result$local_var_mean <- colMeans(local_var_samples)
-      result$local_var_var <- apply(local_var_samples, 2L, stats::var)
-      result$tau_sq_mean <- mean(tau_sq_samples)
-      result$tau_sq_var <- stats::var(tau_sq_samples)
-      result$local_var_samples <- local_var_samples
-      result$tau_sq_samples <- tau_sq_samples
+      if (store_samples) {
+        local_var_samples <- samples$local_var_samples[, indices, drop = FALSE]
+        colnames(local_var_samples) <- block$predictor_names
+        tau_sq_samples <- samples$tau_sq_samples[, block_index]
+        result$local_var_mean <- colMeans(local_var_samples)
+        result$local_var_var <- apply(local_var_samples, 2L, stats::var)
+        result$tau_sq_mean <- mean(tau_sq_samples)
+        result$tau_sq_var <- stats::var(tau_sq_samples)
+        result$local_var_samples <- local_var_samples
+        result$tau_sq_samples <- tau_sq_samples
+      } else {
+        result$local_var_mean <- samples$local_var_sum[indices] /
+          samples$number_of_draws
+        result$local_var_var <- vapply(indices, function(index) {
+          .variance_from_sums(
+            samples$local_var_sum[index], samples$local_var_sum_sq[index],
+            samples$number_of_draws
+          )
+        }, numeric(1))
+        names(result$local_var_mean) <- block$predictor_names
+        names(result$local_var_var) <- block$predictor_names
+        result$tau_sq_mean <- samples$tau_sq_sum[block_index] /
+          samples$number_of_draws
+        result$tau_sq_var <- .variance_from_sums(
+          samples$tau_sq_sum[block_index],
+          samples$tau_sq_sum_sq[block_index], samples$number_of_draws
+        )
+      }
       result$local_shape <- block$local_shape
       result$global_scale <- block$global_scale
     }
@@ -235,18 +337,39 @@ blm <- function(y, ETA, residual_var = NULL,
   })
   names(eta_result) <- names(blocks)
 
+  if (store_samples) {
+    intercept_mean <- mean(samples$intercept_samples)
+    intercept_var <- stats::var(samples$intercept_samples)
+    residual_var_mean <- mean(samples$residual_var_samples)
+    residual_var_var <- stats::var(samples$residual_var_samples)
+  } else {
+    intercept_mean <- samples$intercept_sum / samples$number_of_draws
+    intercept_var <- .variance_from_sums(
+      samples$intercept_sum, samples$intercept_sum_sq,
+      samples$number_of_draws
+    )
+    residual_var_mean <- samples$residual_var_sum / samples$number_of_draws
+    residual_var_var <- .variance_from_sums(
+      samples$residual_var_sum, samples$residual_var_sum_sq,
+      samples$number_of_draws
+    )
+  }
   result <- list(
     ETA = eta_result,
-    intercept_mean = mean(samples$intercept_samples),
-    intercept_var = stats::var(samples$intercept_samples),
-    residual_var_mean = mean(samples$residual_var_samples),
-    residual_var_var = stats::var(samples$residual_var_samples),
-    intercept_samples = samples$intercept_samples,
-    residual_var_samples = samples$residual_var_samples
+    intercept_mean = intercept_mean,
+    intercept_var = intercept_var,
+    residual_var_mean = residual_var_mean,
+    residual_var_var = residual_var_var,
+    store_samples = store_samples,
+    store_coefficient_cov = store_coefficient_cov
   )
+  if (store_samples) {
+    result$intercept_samples <- samples$intercept_samples
+    result$residual_var_samples <- samples$residual_var_samples
+  }
   if (nchains > 1L) {
     result$nchains <- nchains
-    result$chain_id <- samples$chain_id
+    if (store_samples) result$chain_id <- samples$chain_id
   }
   result
 }

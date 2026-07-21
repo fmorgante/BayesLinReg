@@ -10,6 +10,15 @@
   }
 }
 
+.variance_from_sums <- function(sum, sum_sq, number_of_draws) {
+  variance <- (sum_sq - sum^2 / number_of_draws) / (number_of_draws - 1)
+  max(0, variance)
+}
+
+.covariance_from_sums <- function(sum, crossprod, number_of_draws) {
+  (crossprod - tcrossprod(sum) / number_of_draws) / (number_of_draws - 1)
+}
+
 .validate_local_shape <- function(local_shape) {
   if (!is.numeric(local_shape) || !is.atomic(local_shape) ||
       is.object(local_shape) || !is.null(dim(local_shape)) ||
@@ -323,7 +332,9 @@
                        pi_alpha = 1, pi_beta = 1,
                        slab_shape = 2, slab_scale = 1,
                        global_scale = 1, residual_var = NULL,
-                       local_a = 1, local_b = 0.5) {
+                       local_a = 1, local_b = 0.5,
+                       store_samples = TRUE,
+                       store_coefficient_cov = TRUE) {
   retained_iterations <- .validate_mcmc(iterations, burnin, thin, seed)
   number_of_predictors <- ncol(x)
   predictor_names <- colnames(x)
@@ -339,42 +350,69 @@
   x_squared <- colSums(x_centered^2)
 
   number_of_draws <- length(retained_iterations)
-  coefficient_samples <- matrix(
-    NA_real_,
-    nrow = number_of_draws,
-    ncol = number_of_predictors,
-    dimnames = list(NULL, predictor_names)
-  )
-  intercept_samples <- numeric(number_of_draws)
-  residual_var_samples <- numeric(number_of_draws)
-  has_normal <- any(block_model == 0L)
-  has_spike_slab <- any(block_model == 1L)
-  has_global_local <- any(block_model == 2L)
-  if (has_normal) {
-    normal_var_samples <- matrix(NA_real_, number_of_draws, number_of_blocks)
-    normal_var <- normal_scale / (normal_shape + 1)
-  }
-  if (has_spike_slab) {
-    inclusion_samples <- matrix(
-      NA_integer_,
-      nrow = number_of_draws,
-      ncol = number_of_predictors,
-      dimnames = list(NULL, predictor_names)
-    )
-    pi_samples <- matrix(NA_real_, number_of_draws, number_of_blocks)
-    slab_var_samples <- matrix(NA_real_, number_of_draws, number_of_blocks)
-    inclusion <- rep.int(1L, number_of_predictors)
-    pi <- pi_alpha / (pi_alpha + pi_beta)
-    slab_var <- slab_scale / (slab_shape + 1)
-  }
-  if (has_global_local) {
-    local_var_samples <- matrix(
+  if (store_samples) {
+    coefficient_samples <- matrix(
       NA_real_,
       nrow = number_of_draws,
       ncol = number_of_predictors,
       dimnames = list(NULL, predictor_names)
     )
-    tau_sq_samples <- matrix(NA_real_, number_of_draws, number_of_blocks)
+    intercept_samples <- numeric(number_of_draws)
+    residual_var_samples <- numeric(number_of_draws)
+  } else {
+    coefficient_sum <- numeric(number_of_predictors)
+    coefficient_sum_sq <- numeric(number_of_predictors)
+    if (store_coefficient_cov) {
+      coefficient_crossprod <- matrix(
+        0, number_of_predictors, number_of_predictors
+      )
+    }
+    intercept_sum <- intercept_sum_sq <- 0
+    residual_var_sum <- residual_var_sum_sq <- 0
+  }
+  has_normal <- any(block_model == 0L)
+  has_spike_slab <- any(block_model == 1L)
+  has_global_local <- any(block_model == 2L)
+  if (has_normal) {
+    if (store_samples) {
+      normal_var_samples <- matrix(NA_real_, number_of_draws, number_of_blocks)
+    } else {
+      normal_var_sum <- normal_var_sum_sq <- numeric(number_of_blocks)
+    }
+    normal_var <- normal_scale / (normal_shape + 1)
+  }
+  if (has_spike_slab) {
+    if (store_samples) {
+      inclusion_samples <- matrix(
+        NA_integer_,
+        nrow = number_of_draws,
+        ncol = number_of_predictors,
+        dimnames = list(NULL, predictor_names)
+      )
+      pi_samples <- matrix(NA_real_, number_of_draws, number_of_blocks)
+      slab_var_samples <- matrix(NA_real_, number_of_draws, number_of_blocks)
+    } else {
+      inclusion_sum <- numeric(number_of_predictors)
+      pi_sum <- pi_sum_sq <- numeric(number_of_blocks)
+      slab_var_sum <- slab_var_sum_sq <- numeric(number_of_blocks)
+    }
+    inclusion <- rep.int(1L, number_of_predictors)
+    pi <- pi_alpha / (pi_alpha + pi_beta)
+    slab_var <- slab_scale / (slab_shape + 1)
+  }
+  if (has_global_local) {
+    if (store_samples) {
+      local_var_samples <- matrix(
+        NA_real_,
+        nrow = number_of_draws,
+        ncol = number_of_predictors,
+        dimnames = list(NULL, predictor_names)
+      )
+      tau_sq_samples <- matrix(NA_real_, number_of_draws, number_of_blocks)
+    } else {
+      local_var_sum <- local_var_sum_sq <- numeric(number_of_predictors)
+      tau_sq_sum <- tau_sq_sum_sq <- numeric(number_of_blocks)
+    }
     local_var <- rep(1, number_of_predictors)
     local_aux <- rep(1, number_of_predictors)
     tau_sq <- global_scale^2
@@ -526,24 +564,55 @@
 
     if (retained_index <= number_of_draws &&
         iteration == retained_iterations[retained_index]) {
-      coefficient_samples[retained_index, ] <- coefficient
-      intercept_samples[retained_index] <- stats::rnorm(
+      intercept_draw <- stats::rnorm(
         1L,
         mean = y_mean - sum(x_mean * coefficient),
         sd = sqrt(residual_var / length(y))
       )
-      residual_var_samples[retained_index] <- residual_var
-      if (has_normal) {
-        normal_var_samples[retained_index, ] <- normal_var
-      }
-      if (has_spike_slab) {
-        inclusion_samples[retained_index, ] <- inclusion
-        pi_samples[retained_index, ] <- pi
-        slab_var_samples[retained_index, ] <- slab_var
-      }
-      if (has_global_local) {
-        local_var_samples[retained_index, ] <- local_var
-        tau_sq_samples[retained_index, ] <- tau_sq
+      if (store_samples) {
+        coefficient_samples[retained_index, ] <- coefficient
+        intercept_samples[retained_index] <- intercept_draw
+        residual_var_samples[retained_index] <- residual_var
+        if (has_normal) {
+          normal_var_samples[retained_index, ] <- normal_var
+        }
+        if (has_spike_slab) {
+          inclusion_samples[retained_index, ] <- inclusion
+          pi_samples[retained_index, ] <- pi
+          slab_var_samples[retained_index, ] <- slab_var
+        }
+        if (has_global_local) {
+          local_var_samples[retained_index, ] <- local_var
+          tau_sq_samples[retained_index, ] <- tau_sq
+        }
+      } else {
+        coefficient_sum <- coefficient_sum + coefficient
+        coefficient_sum_sq <- coefficient_sum_sq + coefficient^2
+        if (store_coefficient_cov) {
+          coefficient_crossprod <- coefficient_crossprod +
+            tcrossprod(coefficient)
+        }
+        intercept_sum <- intercept_sum + intercept_draw
+        intercept_sum_sq <- intercept_sum_sq + intercept_draw^2
+        residual_var_sum <- residual_var_sum + residual_var
+        residual_var_sum_sq <- residual_var_sum_sq + residual_var^2
+        if (has_normal) {
+          normal_var_sum <- normal_var_sum + normal_var
+          normal_var_sum_sq <- normal_var_sum_sq + normal_var^2
+        }
+        if (has_spike_slab) {
+          inclusion_sum <- inclusion_sum + inclusion
+          pi_sum <- pi_sum + pi
+          pi_sum_sq <- pi_sum_sq + pi^2
+          slab_var_sum <- slab_var_sum + slab_var
+          slab_var_sum_sq <- slab_var_sum_sq + slab_var^2
+        }
+        if (has_global_local) {
+          local_var_sum <- local_var_sum + local_var
+          local_var_sum_sq <- local_var_sum_sq + local_var^2
+          tau_sq_sum <- tau_sq_sum + tau_sq
+          tau_sq_sum_sq <- tau_sq_sum_sq + tau_sq^2
+        }
       }
       retained_index <- retained_index + 1L
     }
@@ -559,22 +628,57 @@
     }
   }
 
-  samples <- list(
-    coefficient_samples = coefficient_samples,
-    intercept_samples = intercept_samples,
-    residual_var_samples = residual_var_samples
-  )
+  samples <- if (store_samples) {
+    list(
+      coefficient_samples = coefficient_samples,
+      intercept_samples = intercept_samples,
+      residual_var_samples = residual_var_samples
+    )
+  } else {
+    list(
+      number_of_draws = number_of_draws,
+      coefficient_sum = coefficient_sum,
+      coefficient_sum_sq = coefficient_sum_sq,
+      intercept_sum = intercept_sum,
+      intercept_sum_sq = intercept_sum_sq,
+      residual_var_sum = residual_var_sum,
+      residual_var_sum_sq = residual_var_sum_sq
+    )
+  }
+  if (!store_samples && store_coefficient_cov) {
+    samples$coefficient_crossprod <- coefficient_crossprod
+  }
   if (has_normal) {
-    samples$normal_var_samples <- normal_var_samples
+    if (store_samples) {
+      samples$normal_var_samples <- normal_var_samples
+    } else {
+      samples$normal_var_sum <- normal_var_sum
+      samples$normal_var_sum_sq <- normal_var_sum_sq
+    }
   }
   if (has_spike_slab) {
-    samples$inclusion_samples <- inclusion_samples
-    samples$pi_samples <- pi_samples
-    samples$slab_var_samples <- slab_var_samples
+    if (store_samples) {
+      samples$inclusion_samples <- inclusion_samples
+      samples$pi_samples <- pi_samples
+      samples$slab_var_samples <- slab_var_samples
+    } else {
+      samples$inclusion_sum <- inclusion_sum
+      samples$pi_sum <- pi_sum
+      samples$pi_sum_sq <- pi_sum_sq
+      samples$slab_var_sum <- slab_var_sum
+      samples$slab_var_sum_sq <- slab_var_sum_sq
+    }
   }
   if (has_global_local) {
-    samples$local_var_samples <- local_var_samples
-    samples$tau_sq_samples <- tau_sq_samples
+    if (store_samples) {
+      samples$local_var_samples <- local_var_samples
+      samples$tau_sq_samples <- tau_sq_samples
+    } else {
+      samples$local_var_sum <- local_var_sum
+      samples$local_var_sum_sq <- local_var_sum_sq
+      samples$tau_sq_sum <- tau_sq_sum
+      samples$tau_sq_sum_sq <- tau_sq_sum_sq
+    }
   }
   samples
 }
@@ -587,7 +691,9 @@
                             pi_alpha = 1, pi_beta = 1,
                             slab_shape = 2, slab_scale = 1,
                             global_scale = 1, residual_var = NULL,
-                            local_a = 1, local_b = 0.5) {
+                            local_a = 1, local_b = 0.5,
+                            store_samples = TRUE,
+                            store_coefficient_cov = TRUE) {
   .validate_mcmc(iterations, burnin, thin, seed)
   if (is.null(block_id)) {
     block_id <- rep.int(1L, ncol(x))
@@ -616,24 +722,28 @@
     local_a = local_a,
     local_b = local_b,
     learn_residual_var = is.null(residual_var),
-    fixed_residual_var = if (is.null(residual_var)) 1 else residual_var
+    fixed_residual_var = if (is.null(residual_var)) 1 else residual_var,
+    store_samples = store_samples,
+    store_coefficient_cov = store_coefficient_cov
   )
-  colnames(samples$coefficient_samples) <- colnames(x)
-  if (!any(block_model == 0L)) {
-    samples$normal_var_samples <- NULL
-  }
-  if (any(block_model == 1L)) {
-    colnames(samples$inclusion_samples) <- colnames(x)
-  } else {
-    samples$inclusion_samples <- NULL
-    samples$pi_samples <- NULL
-    samples$slab_var_samples <- NULL
-  }
-  if (any(block_model == 2L)) {
-    colnames(samples$local_var_samples) <- colnames(x)
-  } else {
-    samples$local_var_samples <- NULL
-    samples$tau_sq_samples <- NULL
+  if (store_samples) {
+    colnames(samples$coefficient_samples) <- colnames(x)
+    if (!any(block_model == 0L)) {
+      samples$normal_var_samples <- NULL
+    }
+    if (any(block_model == 1L)) {
+      colnames(samples$inclusion_samples) <- colnames(x)
+    } else {
+      samples$inclusion_samples <- NULL
+      samples$pi_samples <- NULL
+      samples$slab_var_samples <- NULL
+    }
+    if (any(block_model == 2L)) {
+      colnames(samples$local_var_samples) <- colnames(x)
+    } else {
+      samples$local_var_samples <- NULL
+      samples$tau_sq_samples <- NULL
+    }
   }
   samples
 }
@@ -712,11 +822,43 @@
   chain_samples <- lapply(chain_futures, future::value)
   .combine_blm_chains(
     chain_samples,
-    block_model = block_model
+    block_model = block_model,
+    store_samples = sampler_arguments$store_samples,
+    store_coefficient_cov = sampler_arguments$store_coefficient_cov
   )
 }
 
-.combine_blm_chains <- function(chain_samples, block_model = 0L) {
+.combine_blm_chains <- function(chain_samples, block_model = 0L,
+                                store_samples = TRUE,
+                                store_coefficient_cov = TRUE) {
+  if (!store_samples) {
+    summary_names <- c(
+      "number_of_draws", "coefficient_sum", "coefficient_sum_sq",
+      "intercept_sum", "intercept_sum_sq", "residual_var_sum",
+      "residual_var_sum_sq"
+    )
+    if (store_coefficient_cov) {
+      summary_names <- c(summary_names, "coefficient_crossprod")
+    }
+    if (any(block_model == 0L)) {
+      summary_names <- c(summary_names, "normal_var_sum", "normal_var_sum_sq")
+    }
+    if (any(block_model == 1L)) {
+      summary_names <- c(
+        summary_names, "inclusion_sum", "pi_sum", "pi_sum_sq",
+        "slab_var_sum", "slab_var_sum_sq"
+      )
+    }
+    if (any(block_model == 2L)) {
+      summary_names <- c(
+        summary_names, "local_var_sum", "local_var_sum_sq",
+        "tau_sq_sum", "tau_sq_sum_sq"
+      )
+    }
+    return(stats::setNames(lapply(summary_names, function(name) {
+      Reduce(`+`, lapply(chain_samples, `[[`, name))
+    }), summary_names))
+  }
   number_of_draws <- vapply(
     chain_samples,
     function(samples) nrow(samples$coefficient_samples),
@@ -771,6 +913,15 @@
 }
 
 .fit_sample_matrix <- function(fit) {
+  if (is.list(fit) && identical(fit$store_samples, FALSE)) {
+    stop(
+      paste0(
+        "Convergence diagnostics require individual posterior draws; ",
+        "refit with `store_samples = TRUE`."
+      ),
+      call. = FALSE
+    )
+  }
   required <- c("ETA", "intercept_samples", "residual_var_samples")
   if (!is.list(fit) || !all(required %in% names(fit))) {
     stop(

@@ -16,7 +16,9 @@ blm(
   seed = NULL,
   version = c("Rcpp", "R"),
   verbose = FALSE,
-  nchains = 1L
+  nchains = 1L,
+  store_samples = TRUE,
+  store_coefficient_cov = TRUE
 )
 }
 \arguments{
@@ -48,12 +50,25 @@ per chain using \code{\link[progressr:with_progress]{progressr::with_progress()}
 
 \item{nchains}{Number of independent chains. Multiple chains use a temporary
 \link[future:multisession]{future::multisession} plan.}
+
+\item{store_samples}{If \code{TRUE} (the default), retain and return individual
+posterior draws. If \code{FALSE}, compute posterior summaries online without
+allocating draw matrices. Fits without stored samples cannot be passed to
+\code{\link[=assess_convergence]{assess_convergence()}}.}
+
+\item{store_coefficient_cov}{If \code{TRUE} (the default), return the full
+posterior coefficient covariance matrix for each \code{ETA} block. If \code{FALSE},
+return only the named vector of marginal coefficient variances and avoid
+the quadratic-size covariance accumulator when samples are not stored.}
 }
 \value{
 A list containing \code{ETA}, a named list of block-specific posterior
-summaries, plus intercept and residual-variance summaries. Sampled fits
-also contain intercept and residual-variance draws. With multiple chains,
-\code{chain_id} identifies the origin of each retained draw.
+summaries, plus intercept and residual-variance summaries. Every block
+contains a named \code{coefficient_var} vector; \code{coefficient_cov} is included
+when \code{store_coefficient_cov = TRUE}. When
+\code{store_samples = TRUE}, the corresponding posterior draws are also
+returned. With multiple chains, \code{chain_id} identifies the origin of each
+retained draw when samples are stored.
 }
 \description{
 Fits a Bayesian linear regression with one or more predictor blocks using a

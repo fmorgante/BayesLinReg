@@ -50,6 +50,26 @@ fit$ETA$ETA1$coefficient_mean
 fit$intercept_mean
 ```
 
+By default, `blm()` returns the retained posterior draws. For large models,
+use `store_samples = FALSE` to compute posterior summaries online and keep the
+fitted object smaller:
+
+```r
+fit_summary <- blm(
+  y,
+  ETA = list(X = X, model = "Normal"),
+  residual_var = 1,
+  store_samples = FALSE,
+  store_coefficient_cov = FALSE
+)
+```
+
+Individual draws and convergence diagnostics are unavailable for a
+summary-only fit. Every `ETA` block always returns a named `coefficient_var`
+vector. Set `store_coefficient_cov = FALSE` to omit its full
+`coefficient_cov` matrix; this also avoids the quadratic-size covariance
+accumulator when `store_samples = FALSE`.
+
 The available models are `"Normal"`, `"SpikeSlab"`, and `"GlobalLocal"`.
 For mixed priors, use a named `ETA` list whose blocks specify their own
 predictors, model, standardization, and prior parameters.

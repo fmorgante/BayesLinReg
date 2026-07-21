@@ -31,6 +31,10 @@ stopifnot(
   identical(known_block$standardize, FALSE),
   identical(known_block$var_shape, 2),
   identical(known_block$var_scale, 10),
+  isTRUE(all.equal(
+    known_block$coefficient_var,
+    diag(known_block$coefficient_cov)
+  )),
   identical(dim(known_block$coefficient_samples), c(300L, 2L)),
   length(known_block$normal_var_samples) == 300L,
   all(known_block$normal_var_samples > 0),
@@ -245,6 +249,113 @@ stopifnot(
       multi_r$ETA$selection$slab_var_mean
   ) < 5,
   abs(multi_rcpp$residual_var_mean - multi_r$residual_var_mean) < 0.1
+)
+
+# Summary-only fits match stored-draw summaries without returning samples.
+for (sampler_version in c("Rcpp", "R")) {
+  stored_fit <- if (sampler_version == "Rcpp") multi_rcpp else multi_r
+  summary_fit <- blm(
+    multi_y, ETA = multi_eta,
+    residual_shape = 2,
+    residual_scale = 1,
+    iterations = 1200,
+    burnin = 400,
+    thin = 2,
+    seed = 77,
+    version = sampler_version,
+    store_samples = FALSE
+  )
+  variance_only_fit <- blm(
+    multi_y, ETA = multi_eta,
+    residual_shape = 2,
+    residual_scale = 1,
+    iterations = 1200,
+    burnin = 400,
+    thin = 2,
+    seed = 77,
+    version = sampler_version,
+    store_samples = FALSE,
+    store_coefficient_cov = FALSE
+  )
+  stopifnot(
+    identical(stored_fit$store_samples, TRUE),
+    identical(summary_fit$store_samples, FALSE),
+    is.null(summary_fit$intercept_samples),
+    is.null(summary_fit$residual_var_samples),
+    is.null(summary_fit$chain_id),
+    is.null(summary_fit$ETA$fixed$coefficient_samples),
+    is.null(summary_fit$ETA$fixed$normal_var_samples),
+    is.null(summary_fit$ETA$selection$inclusion_samples),
+    is.null(summary_fit$ETA$selection$pi_samples),
+    is.null(summary_fit$ETA$selection$slab_var_samples),
+    is.null(summary_fit$ETA$shrinkage$local_var_samples),
+    is.null(summary_fit$ETA$shrinkage$tau_sq_samples),
+    identical(summary_fit$store_coefficient_cov, TRUE),
+    identical(variance_only_fit$store_coefficient_cov, FALSE),
+    is.null(variance_only_fit$ETA$fixed$coefficient_cov),
+    is.null(variance_only_fit$ETA$selection$coefficient_cov),
+    is.null(variance_only_fit$ETA$shrinkage$coefficient_cov),
+    isTRUE(all.equal(
+      stored_fit$ETA$fixed$coefficient_mean,
+      summary_fit$ETA$fixed$coefficient_mean,
+      tolerance = 1e-10
+    )),
+    isTRUE(all.equal(
+      stored_fit$ETA$selection$coefficient_cov,
+      summary_fit$ETA$selection$coefficient_cov,
+      tolerance = 1e-10
+    )),
+    isTRUE(all.equal(
+      stored_fit$ETA$selection$coefficient_var,
+      diag(stored_fit$ETA$selection$coefficient_cov),
+      tolerance = 1e-10
+    )),
+    isTRUE(all.equal(
+      stored_fit$ETA$selection$coefficient_var,
+      variance_only_fit$ETA$selection$coefficient_var,
+      tolerance = 1e-10
+    )),
+    isTRUE(all.equal(
+      stored_fit$ETA$selection$inclusion_probability,
+      summary_fit$ETA$selection$inclusion_probability,
+      tolerance = 1e-10
+    )),
+    isTRUE(all.equal(
+      stored_fit$ETA$shrinkage$local_var_mean,
+      summary_fit$ETA$shrinkage$local_var_mean,
+      tolerance = 1e-10
+    )),
+    isTRUE(all.equal(
+      stored_fit$residual_var_var,
+      summary_fit$residual_var_var,
+      tolerance = 1e-10
+    )),
+    object.size(summary_fit) < object.size(stored_fit),
+    object.size(variance_only_fit) < object.size(summary_fit)
+  )
+}
+
+# Covariance storage can be disabled while retaining individual draws.
+stored_variance_only_fit <- blm(
+  y,
+  ETA = normal_eta(x),
+  residual_var = 1,
+  iterations = 100,
+  burnin = 40,
+  seed = 78,
+  store_coefficient_cov = FALSE
+)
+stopifnot(
+  !is.null(stored_variance_only_fit$ETA$ETA1$coefficient_samples),
+  is.null(stored_variance_only_fit$ETA$ETA1$coefficient_cov),
+  isTRUE(all.equal(
+    stored_variance_only_fit$ETA$ETA1$coefficient_var,
+    apply(
+      stored_variance_only_fit$ETA$ETA1$coefficient_samples,
+      2L,
+      stats::var
+    )
+  ))
 )
 
 # GlobalLocal defaults to Strawderman-Berger and can recover the horseshoe.
@@ -493,6 +604,13 @@ invalid_calls <- list(
   ),
   function() blm(
     y, ETA = normal_eta(x), residual_var = 1, residual_shape = 2
+  ),
+  function() blm(
+    y, ETA = normal_eta(x), residual_var = 1, store_samples = NA
+  ),
+  function() blm(
+    y, ETA = normal_eta(x), residual_var = 1,
+    store_coefficient_cov = NA
   )
 )
 stopifnot(all(vapply(
