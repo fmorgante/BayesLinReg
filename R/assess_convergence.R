@@ -44,7 +44,7 @@ assess_convergence <- function(fit, plot = TRUE) {
   number_of_chains <- coda::nchain(chains)
 
   if (plot) {
-    coda::traceplot(chains)
+    .plot_blm_traces(chains)
   }
 
   geweke <- vapply(chains, function(chain) {
@@ -79,4 +79,16 @@ assess_convergence <- function(fit, plot = TRUE) {
     nchains = number_of_chains,
     draws_per_chain = coda::niter(chains)
   )
+}
+
+.plot_blm_traces <- function(chains) {
+  parameter_names <- coda::varnames(chains)
+  titles <- paste("Trace of", parameter_names)
+  for (parameter_index in seq_along(parameter_names)) {
+    coda::traceplot(
+      chains[, parameter_index, drop = FALSE],
+      main = titles[parameter_index]
+    )
+  }
+  invisible(titles)
 }

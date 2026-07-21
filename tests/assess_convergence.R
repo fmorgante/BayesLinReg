@@ -107,9 +107,18 @@ stopifnot(
 # Trace plotting covers every assessed parameter.
 trace_file <- tempfile(fileext = ".pdf")
 grDevices::pdf(trace_file)
+trace_titles <- BayesLinReg:::.plot_blm_traces(
+  BayesLinReg:::.as_blm_mcmc_list(combined_fit)
+)
 invisible(assess_convergence(combined_fit, plot = TRUE))
 grDevices::dev.off()
-stopifnot(file.info(trace_file)$size > 0)
+stopifnot(
+  file.info(trace_file)$size > 0,
+  identical(trace_titles, paste("Trace of", expected_parameters)),
+  "Trace of normal_var_normal" %in% trace_titles,
+  "Trace of pi_selection" %in% trace_titles,
+  "Trace of slab_var_selection" %in% trace_titles
+)
 
 single_chain_diagnostics <- assess_convergence(fit_one, plot = FALSE)
 stopifnot(
