@@ -130,6 +130,21 @@
       )
     }
     x_centered <- sweep(X, 2L, colMeans(X), FUN = "-")
+    constant_predictors <- vapply(
+      seq_len(ncol(X)),
+      function(index) all(X[, index] == X[1L, index]),
+      logical(1)
+    )
+    if (any(constant_predictors)) {
+      stop(
+        sprintf(
+          "ETA block `%s` contains constant predictor(s): %s.",
+          block_name,
+          paste(colnames(X)[constant_predictors], collapse = ", ")
+        ),
+        call. = FALSE
+      )
+    }
     predictor_scale <- if (standardize) {
       sqrt(colSums(x_centered^2) / (nrow(X) - 1))
     } else {
@@ -139,8 +154,7 @@
       stop(
         sprintf(
           paste0(
-            "ETA block `%s` cannot contain constant predictors when ",
-            "`standardize = TRUE`."
+            "ETA block `%s` contains a predictor with nonpositive variance."
           ),
           block_name
         ),

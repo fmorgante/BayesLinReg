@@ -126,6 +126,23 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
     yty
   }
 
+  variance_reference <- if (fit_intercept) {
+    pmax(1, abs(diag(XtX)), abs(n * X_means^2))
+  } else {
+    pmax(1, abs(diag(XtX)))
+  }
+  variance_tolerance <- 100 * .Machine$double.eps * variance_reference
+  constant_predictors <- diag(centered_XtX) <= variance_tolerance
+  if (any(constant_predictors)) {
+    stop(
+      sprintf(
+        "The sufficient statistics contain constant predictor(s): %s.",
+        paste(predictor_names[constant_predictors], collapse = ", ")
+      ),
+      call. = FALSE
+    )
+  }
+
   predictor_scales <- lapply(seq_along(blocks), function(block_index) {
     indices <- source_indices[[block_index]]
     if (!blocks[[block_index]]$standardize) return(rep(1, length(indices)))
