@@ -63,12 +63,15 @@ class DenseSummaryMatrix {
       const std::vector<double>& coefficient,
       std::vector<double>& fitted) const {
     const int p = matrix_.ncol();
-    std::fill(fitted.begin(), fitted.end(), 0.0);
-    for (int j = 0; j < p; ++j) {
-      for (int k = 0; k < p; ++k) {
-        fitted[j] += matrix_(j, k) * coefficient[k];
-      }
-    }
+    const Eigen::Map<const Eigen::MatrixXd> matrix(
+      matrix_.begin(), p, p
+    );
+    const Eigen::Map<const Eigen::VectorXd> coefficient_vector(
+      coefficient.data(), p
+    );
+    Eigen::Map<Eigen::VectorXd> fitted_vector(fitted.data(), p);
+    fitted_vector.noalias() =
+      matrix.selfadjointView<Eigen::Upper>() * coefficient_vector;
   }
 
   double center_dot(const std::vector<double>&) const { return 0.0; }
@@ -414,10 +417,14 @@ Rcpp::List blm_gibbs_core(
         ) + x_squared[j] * old_coefficient;
         conditional_numerator = partial_rhs;
       } else {
-        for (int i = 0; i < n; ++i) {
-          residuals[i] += x_centered(i, j) * old_coefficient;
-          conditional_numerator += x_centered(i, j) * residuals[i];
-        }
+        const Eigen::Map<const Eigen::VectorXd> x_column(
+          x_centered.begin() + static_cast<std::size_t>(n) * j, n
+        );
+        const Eigen::Map<const Eigen::VectorXd> residual(
+          residuals.data(), n
+        );
+        conditional_numerator = x_column.dot(residual) +
+          x_squared[j] * old_coefficient;
       }
       if (model == 3) {
         const int component_count = multi_gamma[block].size();
@@ -509,8 +516,8 @@ Rcpp::List blm_gibbs_core(
           coefficient[j] = 0.0;
         }
       }
+      const double coefficient_change = coefficient[j] - old_coefficient;
       if (use_sufficient_statistics) {
-        const double coefficient_change = coefficient[j] - old_coefficient;
         if (coefficient_change != 0.0) {
           summary_XtX.update(corrected_rhs, j, coefficient_change);
           summary_XtX.update_center_dot(center_dot, j, coefficient_change);
@@ -520,10 +527,12 @@ Rcpp::List blm_gibbs_core(
                old_coefficient * old_coefficient) * x_squared[j];
           }
         }
-      } else {
-        for (int i = 0; i < n; ++i) {
-          residuals[i] -= x_centered(i, j) * coefficient[j];
-        }
+      } else if (coefficient_change != 0.0) {
+        const Eigen::Map<const Eigen::VectorXd> x_column(
+          x_centered.begin() + static_cast<std::size_t>(n) * j, n
+        );
+        Eigen::Map<Eigen::VectorXd> residual(residuals.data(), n);
+        residual.noalias() -= coefficient_change * x_column;
       }
     }
 
@@ -686,10 +695,10 @@ Rcpp::List blm_gibbs_core(
     if (learn_residual_var) {
       double sum_squared_residuals = residual_sse;
       if (!use_sufficient_statistics) {
-        sum_squared_residuals = 0.0;
-        for (int i = 0; i < n; ++i) {
-          sum_squared_residuals += residuals[i] * residuals[i];
-        }
+        const Eigen::Map<const Eigen::VectorXd> residual(
+          residuals.data(), n
+        );
+        sum_squared_residuals = residual.squaredNorm();
       }
       const double posterior_scale =
         residual_scale + 0.5 * std::max(0.0, sum_squared_residuals);
@@ -781,11 +790,16 @@ Rcpp::List blm_gibbs_core(
               multi_local_index[j], multi_component[j]
             ) += 1.0;
           }
-          if (store_coefficient_cov) {
-            for (int k = 0; k < p; ++k) {
-              coefficient_crossprod(j, k) += coefficient[j] * coefficient[k];
-            }
-          }
+        }
+        if (store_coefficient_cov) {
+          Eigen::Map<Eigen::MatrixXd> crossproduct(
+            coefficient_crossprod.begin(), p, p
+          );
+          const Eigen::Map<const Eigen::VectorXd> coefficient_vector(
+            coefficient.data(), p
+          );
+          crossproduct.noalias() +=
+            coefficient_vector * coefficient_vector.transpose();
         }
         intercept_sum += intercept_draw;
         intercept_sum_sq += intercept_draw * intercept_draw;
