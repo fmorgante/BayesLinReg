@@ -33,7 +33,8 @@
 #'   return only the named vector of marginal coefficient variances and avoid
 #'   the quadratic-size covariance accumulator when samples are not stored.
 #'
-#' @return A list containing `ETA`, a named list of block-specific posterior
+#' @return An object of class `blm_fit`: a list containing `ETA`, a named list
+#'   of block-specific posterior
 #'   summaries, plus intercept and residual-variance summaries. Every block
 #'   contains a named `coefficient_var` vector; `coefficient_cov` is included
 #'   when `store_coefficient_cov = TRUE`. When

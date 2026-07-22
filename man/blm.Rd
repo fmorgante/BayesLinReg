@@ -62,7 +62,8 @@ return only the named vector of marginal coefficient variances and avoid
 the quadratic-size covariance accumulator when samples are not stored.}
 }
 \value{
-A list containing \code{ETA}, a named list of block-specific posterior
+An object of class \code{blm_fit}: a list containing \code{ETA}, a named list
+of block-specific posterior
 summaries, plus intercept and residual-variance summaries. Every block
 contains a named \code{coefficient_var} vector; \code{coefficient_cov} is included
 when \code{store_coefficient_cov = TRUE}. When

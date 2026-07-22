@@ -171,5 +171,5 @@
     result$nchains <- nchains
     if (store_samples) result$chain_id <- samples$chain_id
   }
-  result
+  structure(result, class = "blm_fit")
 }
