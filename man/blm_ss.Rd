@@ -30,7 +30,9 @@ blm_ss(
 \arguments{
 \item{n}{Number of observations used to form the sufficient statistics.}
 
-\item{XtX}{A finite, symmetric predictor cross-product matrix.}
+\item{XtX}{A finite, symmetric predictor cross-product matrix. Dense base-R
+matrices and compressed sparse \code{Matrix} objects of class \code{dgCMatrix} or
+\code{dsCMatrix} are supported. Sparse matrices require \code{version = "Rcpp"}.}
 
 \item{Xty}{A finite predictor-response cross-product vector.}
 
@@ -51,7 +53,8 @@ intercept.}
 centered \code{XtX} is positive semidefinite and that \code{Xty} and \code{yty} are
 jointly compatible with it. The default, \code{FALSE}, avoids this
 \eqn{O(p^3)} validation cost. Symmetry and basic input checks are always
-performed.}
+performed. Sparse \code{XtX} is converted to a dense matrix for this optional
+validation.}
 
 \item{residual_var}{A positive known residual variance, or \code{NULL} to learn
 it using an inverse-gamma prior.}
@@ -103,6 +106,10 @@ means, a warning reminds the user that the supplied cross-products should
 already represent centered or standardized variables.
 Coefficients are sampled with a right-hand-side update that maintains
 \eqn{X'y-X'X\beta}; individual-level pseudo-observations are not formed.
+For sparse \code{XtX}, the Rcpp sampler traverses only stored entries. A
+symmetric \code{dsCMatrix} is expanded once to a general \code{dgCMatrix}, and the
+dense rank-one centering correction is maintained separately rather than
+materialized.
 Set \code{check_psd = TRUE} when the supplied statistics are not known to come
 from a valid common data matrix and response vector.
 }

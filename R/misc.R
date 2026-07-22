@@ -418,7 +418,7 @@
                        store_coefficient_cov = TRUE,
                        effective_n = NULL, fit_intercept = TRUE,
                        intercept_x_mean = NULL, intercept_y_mean = NULL,
-                       XtX = NULL, Xty = NULL, yty = NULL) {
+                       XtX = NULL, XtX_center = NULL, Xty = NULL, yty = NULL) {
   retained_iterations <- .validate_mcmc(iterations, burnin, thin, seed)
   use_sufficient_statistics <- !is.null(XtX)
   number_of_predictors <- if (use_sufficient_statistics) {
@@ -973,7 +973,8 @@
                             effective_n = NULL, fit_intercept = TRUE,
                             intercept_x_mean = NULL,
                             intercept_y_mean = NULL,
-                            XtX = NULL, Xty = NULL, yty = NULL) {
+                            XtX = NULL, XtX_center = NULL, Xty = NULL,
+                            yty = NULL) {
   .validate_mcmc(iterations, burnin, thin, seed)
   use_sufficient_statistics <- !is.null(XtX)
   if (is.null(block_id)) {
@@ -987,7 +988,7 @@
   if (is.null(effective_n)) effective_n <- length(y)
   if (is.null(intercept_x_mean)) intercept_x_mean <- colMeans(x)
   if (is.null(intercept_y_mean)) intercept_y_mean <- mean(y)
-  samples <- blm_gibbs_rcpp_cpp(
+  common_arguments <- list(
     y = y,
     X = x,
     residual_shape = residual_shape,
@@ -1020,10 +1021,39 @@
     intercept_x_mean = intercept_x_mean,
     intercept_y_mean = intercept_y_mean,
     use_sufficient_statistics = use_sufficient_statistics,
-    summary_XtX = if (use_sufficient_statistics) XtX else matrix(0, 0L, 0L),
     summary_Xty = if (use_sufficient_statistics) Xty else numeric(),
     summary_yty = if (use_sufficient_statistics && !is.null(yty)) yty else 0
   )
+  samples <- if (inherits(XtX, "dgCMatrix")) {
+    do.call(
+      blm_gibbs_sparse_rcpp_cpp,
+      c(
+        common_arguments[c(
+          "residual_shape", "residual_scale", "iterations", "burnin", "thin",
+          "progress_callback", "block_id", "block_model", "normal_shape",
+          "normal_scale", "pi_alpha", "pi_beta", "spike_var_shape",
+          "spike_var_scale", "global_scale", "local_a", "local_b",
+          "multi_gamma_list", "multi_pi_alpha_list", "multi_var_shape",
+          "multi_var_scale", "learn_residual_var", "fixed_residual_var",
+          "store_samples", "store_coefficient_cov", "effective_n",
+          "fit_intercept", "intercept_x_mean", "intercept_y_mean"
+        )],
+        list(
+          summary_XtX = XtX,
+          summary_center = XtX_center,
+          summary_Xty = Xty,
+          summary_yty = if (is.null(yty)) 0 else yty
+        )
+      )
+    )
+  } else {
+    common_arguments$summary_XtX <- if (use_sufficient_statistics) {
+      XtX
+    } else {
+      matrix(0, 0L, 0L)
+    }
+    do.call(blm_gibbs_rcpp_cpp, common_arguments)
+  }
   if (store_samples) {
     predictor_names <- if (use_sufficient_statistics) {
       colnames(XtX)

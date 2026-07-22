@@ -1,4 +1,4 @@
-#include <Rcpp.h>
+#include <RcppEigen.h>
 #include <R_ext/Rdynload.h>
 #include <GIGrvg.h>
 #include <algorithm>
@@ -34,7 +34,132 @@ double draw_gig(const double lambda, const double chi, const double psi) {
   return draw;
 }
 
+class DenseSummaryMatrix {
+ public:
+  explicit DenseSummaryMatrix(const Rcpp::NumericMatrix& matrix)
+    : matrix_(matrix) {}
+
+  int cols() const { return matrix_.ncol(); }
+
+  double diagonal(const int j) const { return matrix_(j, j); }
+
+  double corrected_value(
+      const std::vector<double>& rhs,
+      const int j,
+      const double) const {
+    return rhs[j];
+  }
+
+  void update(
+      std::vector<double>& rhs,
+      const int j,
+      const double change) const {
+    for (int k = 0; k < matrix_.nrow(); ++k) {
+      rhs[k] -= matrix_(k, j) * change;
+    }
+  }
+
+  void multiply(
+      const std::vector<double>& coefficient,
+      std::vector<double>& fitted) const {
+    const int p = matrix_.ncol();
+    std::fill(fitted.begin(), fitted.end(), 0.0);
+    for (int j = 0; j < p; ++j) {
+      for (int k = 0; k < p; ++k) {
+        fitted[j] += matrix_(j, k) * coefficient[k];
+      }
+    }
+  }
+
+  double center_dot(const std::vector<double>&) const { return 0.0; }
+
+  double centered_fitted(
+      const double fitted,
+      const int,
+      const double) const {
+    return fitted;
+  }
+
+  void update_center_dot(double&, const int, const double) const {}
+
+ private:
+  const Rcpp::NumericMatrix& matrix_;
+};
+
+class SparseSummaryMatrix {
+ public:
+  SparseSummaryMatrix(
+      const Eigen::MappedSparseMatrix<double>& matrix,
+      const Rcpp::NumericVector& center)
+    : matrix_(matrix), center_(center) {
+    if (center_.size() != matrix_.cols()) {
+      Rcpp::stop("Sparse centering vector does not match `XtX`.");
+    }
+  }
+
+  int cols() const { return matrix_.cols(); }
+
+  double diagonal(const int j) const {
+    return matrix_.coeff(j, j) - center_[j] * center_[j];
+  }
+
+  double corrected_value(
+      const std::vector<double>& rhs,
+      const int j,
+      const double center_dot) const {
+    return rhs[j] + center_[j] * center_dot;
+  }
+
+  void update(
+      std::vector<double>& rhs,
+      const int j,
+      const double change) const {
+    for (Eigen::MappedSparseMatrix<double>::InnerIterator entry(matrix_, j);
+         entry; ++entry) {
+      rhs[entry.row()] -= entry.value() * change;
+    }
+  }
+
+  void multiply(
+      const std::vector<double>& coefficient,
+      std::vector<double>& fitted) const {
+    Eigen::Map<const Eigen::VectorXd> coefficient_map(
+      coefficient.data(), coefficient.size()
+    );
+    Eigen::Map<Eigen::VectorXd> fitted_map(fitted.data(), fitted.size());
+    fitted_map.noalias() = matrix_ * coefficient_map;
+  }
+
+  double center_dot(const std::vector<double>& coefficient) const {
+    double result = 0.0;
+    for (int j = 0; j < center_.size(); ++j) {
+      result += center_[j] * coefficient[j];
+    }
+    return result;
+  }
+
+  double centered_fitted(
+      const double fitted,
+      const int j,
+      const double center_dot) const {
+    return fitted - center_[j] * center_dot;
+  }
+
+  void update_center_dot(
+      double& center_dot,
+      const int j,
+      const double change) const {
+    center_dot += center_[j] * change;
+  }
+
+ private:
+  const Eigen::MappedSparseMatrix<double>& matrix_;
+  const Rcpp::NumericVector& center_;
+};
+
 }  // namespace
+
+// [[Rcpp::depends(RcppEigen)]]
 
 // [[Rcpp::export]]
 Rcpp::NumericVector draw_gig_rcpp_cpp(
@@ -53,8 +178,8 @@ Rcpp::NumericVector draw_gig_rcpp_cpp(
   return draws;
 }
 
-// [[Rcpp::export]]
-Rcpp::List blm_gibbs_rcpp_cpp(
+template <typename SummaryMatrix>
+Rcpp::List blm_gibbs_core(
     const Rcpp::NumericVector& y,
     const Rcpp::NumericMatrix& X,
     const double residual_shape,
@@ -87,13 +212,13 @@ Rcpp::List blm_gibbs_rcpp_cpp(
     const Rcpp::NumericVector& intercept_x_mean,
     const double intercept_y_mean,
     const bool use_sufficient_statistics,
-    const Rcpp::NumericMatrix& summary_XtX,
+    const SummaryMatrix& summary_XtX,
     const Rcpp::NumericVector& summary_Xty,
     const double summary_yty) {
   Rcpp::RNGScope scope;
 
   const int n = y.size();
-  const int p = use_sufficient_statistics ? summary_XtX.ncol() : X.ncol();
+  const int p = use_sufficient_statistics ? summary_XtX.cols() : X.ncol();
   const int number_of_blocks = block_model.size();
   const int number_of_draws = (iterations - burnin - 1) / thin + 1;
 
@@ -126,7 +251,7 @@ Rcpp::List blm_gibbs_rcpp_cpp(
   std::vector<double> x_squared(p, 0.0);
   for (int j = 0; j < p; ++j) {
     if (use_sufficient_statistics) {
-      x_squared[j] = summary_XtX(j, j);
+      x_squared[j] = summary_XtX.diagonal(j);
     } else {
       for (int i = 0; i < n; ++i) {
         x_squared[j] += x_centered(i, j) * x_centered(i, j);
@@ -181,6 +306,8 @@ Rcpp::List blm_gibbs_rcpp_cpp(
   std::vector<double> local_aux(p, 1.0);
   std::vector<double> residuals(n);
   std::vector<double> corrected_rhs(p, 0.0);
+  std::vector<double> fitted_crossproduct(p, 0.0);
+  double center_dot = 0.0;
   double residual_sse = summary_yty;
   if (use_sufficient_statistics) {
     for (int j = 0; j < p; ++j) {
@@ -282,7 +409,9 @@ Rcpp::List blm_gibbs_rcpp_cpp(
       double conditional_numerator = 0.0;
       double partial_rhs = 0.0;
       if (use_sufficient_statistics) {
-        partial_rhs = corrected_rhs[j] + x_squared[j] * old_coefficient;
+        partial_rhs = summary_XtX.corrected_value(
+          corrected_rhs, j, center_dot
+        ) + x_squared[j] * old_coefficient;
         conditional_numerator = partial_rhs;
       } else {
         for (int i = 0; i < n; ++i) {
@@ -383,9 +512,8 @@ Rcpp::List blm_gibbs_rcpp_cpp(
       if (use_sufficient_statistics) {
         const double coefficient_change = coefficient[j] - old_coefficient;
         if (coefficient_change != 0.0) {
-          for (int k = 0; k < p; ++k) {
-            corrected_rhs[k] -= summary_XtX(k, j) * coefficient_change;
-          }
+          summary_XtX.update(corrected_rhs, j, coefficient_change);
+          summary_XtX.update_center_dot(center_dot, j, coefficient_change);
           if (learn_residual_var) {
             residual_sse += -2.0 * coefficient_change * partial_rhs +
               (coefficient[j] * coefficient[j] -
@@ -402,14 +530,14 @@ Rcpp::List blm_gibbs_rcpp_cpp(
     if (use_sufficient_statistics && iteration % 100 == 0) {
       double quadratic = 0.0;
       double linear = 0.0;
+      summary_XtX.multiply(coefficient, fitted_crossproduct);
+      center_dot = summary_XtX.center_dot(coefficient);
       for (int j = 0; j < p; ++j) {
-        double fitted_crossproduct = 0.0;
-        for (int k = 0; k < p; ++k) {
-          fitted_crossproduct += summary_XtX(j, k) * coefficient[k];
-        }
-        corrected_rhs[j] = summary_Xty[j] - fitted_crossproduct;
+        corrected_rhs[j] = summary_Xty[j] - fitted_crossproduct[j];
         linear += coefficient[j] * summary_Xty[j];
-        quadratic += coefficient[j] * fitted_crossproduct;
+        quadratic += coefficient[j] * summary_XtX.centered_fitted(
+          fitted_crossproduct[j], j, center_dot
+        );
       }
       if (learn_residual_var) {
         residual_sse = summary_yty - 2.0 * linear + quadratic;
@@ -762,4 +890,103 @@ Rcpp::List blm_gibbs_rcpp_cpp(
     summaries["coefficient_crossprod"] = coefficient_crossprod;
   }
   return summaries;
+}
+
+// [[Rcpp::export]]
+Rcpp::List blm_gibbs_rcpp_cpp(
+    const Rcpp::NumericVector& y,
+    const Rcpp::NumericMatrix& X,
+    const double residual_shape,
+    const double residual_scale,
+    const int iterations,
+    const int burnin,
+    const int thin,
+    const Rcpp::Function& progress_callback,
+    const Rcpp::IntegerVector& block_id,
+    const Rcpp::IntegerVector& block_model,
+    const Rcpp::NumericVector& normal_shape,
+    const Rcpp::NumericVector& normal_scale,
+    const Rcpp::NumericVector& pi_alpha,
+    const Rcpp::NumericVector& pi_beta,
+    const Rcpp::NumericVector& spike_var_shape,
+    const Rcpp::NumericVector& spike_var_scale,
+    const Rcpp::NumericVector& global_scale,
+    const Rcpp::NumericVector& local_a,
+    const Rcpp::NumericVector& local_b,
+    const Rcpp::List& multi_gamma_list,
+    const Rcpp::List& multi_pi_alpha_list,
+    const Rcpp::NumericVector& multi_var_shape,
+    const Rcpp::NumericVector& multi_var_scale,
+    const bool learn_residual_var,
+    const double fixed_residual_var,
+    const bool store_samples,
+    const bool store_coefficient_cov,
+    const int effective_n,
+    const bool fit_intercept,
+    const Rcpp::NumericVector& intercept_x_mean,
+    const double intercept_y_mean,
+    const bool use_sufficient_statistics,
+    const Rcpp::NumericMatrix& summary_XtX,
+    const Rcpp::NumericVector& summary_Xty,
+    const double summary_yty) {
+  const DenseSummaryMatrix summary_matrix(summary_XtX);
+  return blm_gibbs_core(
+    y, X, residual_shape, residual_scale, iterations, burnin, thin,
+    progress_callback, block_id, block_model, normal_shape, normal_scale,
+    pi_alpha, pi_beta, spike_var_shape, spike_var_scale, global_scale,
+    local_a, local_b, multi_gamma_list, multi_pi_alpha_list, multi_var_shape,
+    multi_var_scale, learn_residual_var, fixed_residual_var, store_samples,
+    store_coefficient_cov, effective_n, fit_intercept, intercept_x_mean,
+    intercept_y_mean, use_sufficient_statistics, summary_matrix, summary_Xty,
+    summary_yty
+  );
+}
+
+// [[Rcpp::export]]
+Rcpp::List blm_gibbs_sparse_rcpp_cpp(
+    const double residual_shape,
+    const double residual_scale,
+    const int iterations,
+    const int burnin,
+    const int thin,
+    const Rcpp::Function& progress_callback,
+    const Rcpp::IntegerVector& block_id,
+    const Rcpp::IntegerVector& block_model,
+    const Rcpp::NumericVector& normal_shape,
+    const Rcpp::NumericVector& normal_scale,
+    const Rcpp::NumericVector& pi_alpha,
+    const Rcpp::NumericVector& pi_beta,
+    const Rcpp::NumericVector& spike_var_shape,
+    const Rcpp::NumericVector& spike_var_scale,
+    const Rcpp::NumericVector& global_scale,
+    const Rcpp::NumericVector& local_a,
+    const Rcpp::NumericVector& local_b,
+    const Rcpp::List& multi_gamma_list,
+    const Rcpp::List& multi_pi_alpha_list,
+    const Rcpp::NumericVector& multi_var_shape,
+    const Rcpp::NumericVector& multi_var_scale,
+    const bool learn_residual_var,
+    const double fixed_residual_var,
+    const bool store_samples,
+    const bool store_coefficient_cov,
+    const int effective_n,
+    const bool fit_intercept,
+    const Rcpp::NumericVector& intercept_x_mean,
+    const double intercept_y_mean,
+    const Eigen::MappedSparseMatrix<double>& summary_XtX,
+    const Rcpp::NumericVector& summary_center,
+    const Rcpp::NumericVector& summary_Xty,
+    const double summary_yty) {
+  const Rcpp::NumericVector empty_y;
+  const Rcpp::NumericMatrix empty_X(0, 0);
+  const SparseSummaryMatrix summary_matrix(summary_XtX, summary_center);
+  return blm_gibbs_core(
+    empty_y, empty_X, residual_shape, residual_scale, iterations, burnin, thin,
+    progress_callback, block_id, block_model, normal_shape, normal_scale,
+    pi_alpha, pi_beta, spike_var_shape, spike_var_scale, global_scale,
+    local_a, local_b, multi_gamma_list, multi_pi_alpha_list, multi_var_shape,
+    multi_var_scale, learn_residual_var, fixed_residual_var, store_samples,
+    store_coefficient_cov, effective_n, fit_intercept, intercept_x_mean,
+    intercept_y_mean, true, summary_matrix, summary_Xty, summary_yty
+  );
 }

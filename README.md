@@ -98,9 +98,12 @@ blocks, each `ETA` block uses `indices` to select a disjoint set of columns from
 
 `blm_ss()` samples directly from these cross-products by maintaining the
 corrected right-hand side `Xty - XtX %*% beta`; it does not construct
-pseudo-observations. Full eigenvalue-based validation is optional through
+pseudo-observations. `XtX` may also be a compressed sparse `dgCMatrix` or
+`dsCMatrix`; the RcppEigen sampler then updates only stored entries and keeps
+the rank-one intercept-centering correction implicit. Sparse input requires
+`version = "Rcpp"`. Full eigenvalue-based validation is optional through
 `check_psd = TRUE` and is disabled by default to avoid its cubic initialization
-cost.
+cost; requesting it for sparse input temporarily constructs a dense matrix.
 
 The available models are `"Normal"`, `"SpikeSlab"`, `"SpikeMultiSlab"`, and
 `"GlobalLocal"`.

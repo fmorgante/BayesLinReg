@@ -4,7 +4,9 @@
 #' of the original response and predictor matrix.
 #'
 #' @param n Number of observations used to form the sufficient statistics.
-#' @param XtX A finite, symmetric predictor cross-product matrix.
+#' @param XtX A finite, symmetric predictor cross-product matrix. Dense base-R
+#'   matrices and compressed sparse `Matrix` objects of class `dgCMatrix` or
+#'   `dsCMatrix` are supported. Sparse matrices require `version = "Rcpp"`.
 #' @param Xty A finite predictor-response cross-product vector.
 #' @param ETA A prior specification or named list of prior blocks. Each block
 #'   must contain `model` and may contain `indices`, an integer or character
@@ -20,7 +22,8 @@
 #'   centered `XtX` is positive semidefinite and that `Xty` and `yty` are
 #'   jointly compatible with it. The default, `FALSE`, avoids this
 #'   \eqn{O(p^3)} validation cost. Symmetry and basic input checks are always
-#'   performed.
+#'   performed. Sparse `XtX` is converted to a dense matrix for this optional
+#'   validation.
 #' @inheritParams blm
 #'
 #' @return A fitted object with the same block-specific posterior summaries as
@@ -35,6 +38,10 @@
 #'
 #'   Coefficients are sampled with a right-hand-side update that maintains
 #'   \eqn{X'y-X'X\beta}; individual-level pseudo-observations are not formed.
+#'   For sparse `XtX`, the Rcpp sampler traverses only stored entries. A
+#'   symmetric `dsCMatrix` is expanded once to a general `dgCMatrix`, and the
+#'   dense rank-one centering correction is maintained separately rather than
+#'   materialized.
 #'   Set `check_psd = TRUE` when the supplied statistics are not known to come
 #'   from a valid common data matrix and response vector.
 #'
@@ -64,6 +71,10 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
                    nchains = 1L, store_samples = TRUE,
                    store_coefficient_cov = TRUE, check_psd = FALSE) {
   version <- match.arg(version)
+  sparse_XtX <- inherits(XtX, "sparseMatrix")
+  if (sparse_XtX && version != "Rcpp") {
+    stop("Sparse `XtX` requires `version = \"Rcpp\"`.", call. = FALSE)
+  }
   nchains <- .validate_nchains(nchains)
   if (!is.logical(verbose) || length(verbose) != 1L || is.na(verbose)) {
     stop("`verbose` must be TRUE or FALSE.", call. = FALSE)
@@ -121,7 +132,15 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
     }
   }
 
-  centered_XtX <- if (fit_intercept) {
+  XtX_diagonal <- if (sparse_XtX) Matrix::diag(XtX) else diag(XtX)
+  centered_diagonal <- if (fit_intercept) {
+    XtX_diagonal - n * X_means^2
+  } else {
+    XtX_diagonal
+  }
+  centered_XtX <- if (sparse_XtX) {
+    NULL
+  } else if (fit_intercept) {
     XtX - n * tcrossprod(X_means)
   } else {
     XtX
@@ -140,12 +159,12 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
   }
 
   variance_reference <- if (fit_intercept) {
-    pmax(1, abs(diag(XtX)), abs(n * X_means^2))
+    pmax(1, abs(XtX_diagonal), abs(n * X_means^2))
   } else {
-    pmax(1, abs(diag(XtX)))
+    pmax(1, abs(XtX_diagonal))
   }
   variance_tolerance <- 100 * .Machine$double.eps * variance_reference
-  constant_predictors <- diag(centered_XtX) <= variance_tolerance
+  constant_predictors <- centered_diagonal <= variance_tolerance
   if (any(constant_predictors)) {
     stop(
       sprintf(
@@ -159,7 +178,7 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
   predictor_scales <- lapply(seq_along(blocks), function(block_index) {
     indices <- source_indices[[block_index]]
     if (!blocks[[block_index]]$standardize) return(rep(1, length(indices)))
-    variances <- diag(centered_XtX)[indices] / (n - 1)
+    variances <- centered_diagonal[indices] / (n - 1)
     if (any(!is.finite(variances)) || any(variances <= 0)) {
       stop(
         sprintf(
@@ -177,8 +196,27 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
 
   source_order <- unlist(source_indices, use.names = FALSE)
   scale_order <- unlist(predictor_scales, use.names = FALSE)
-  working_XtX <- centered_XtX[source_order, source_order, drop = FALSE] /
-    outer(scale_order, scale_order)
+  if (sparse_XtX) {
+    working_XtX <- XtX[source_order, source_order, drop = FALSE]
+    if (inherits(working_XtX, "symmetricMatrix")) {
+      working_XtX <- methods::as(working_XtX, "generalMatrix")
+    }
+    inverse_scale <- 1 / scale_order
+    scaling <- Matrix::Diagonal(x = inverse_scale)
+    working_XtX <- scaling %*% working_XtX %*% scaling
+    if (!inherits(working_XtX, "dgCMatrix")) {
+      working_XtX <- methods::as(working_XtX, "dgCMatrix")
+    }
+    working_center <- if (fit_intercept) {
+      sqrt(n) * X_means[source_order] / scale_order
+    } else {
+      numeric(length(source_order))
+    }
+  } else {
+    working_XtX <- centered_XtX[source_order, source_order, drop = FALSE] /
+      outer(scale_order, scale_order)
+    working_center <- numeric(length(source_order))
+  }
   working_Xty <- centered_Xty[source_order] / scale_order
 
   block_sizes <- lengths(source_indices)
@@ -193,7 +231,14 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
   dimnames(working_XtX) <- list(internal_names, internal_names)
   names(working_Xty) <- internal_names
   if (check_psd) {
-    .validate_working_crossproducts(working_XtX, working_Xty, centered_yty)
+    validation_XtX <- if (sparse_XtX) {
+      as.matrix(working_XtX) - tcrossprod(working_center)
+    } else {
+      working_XtX
+    }
+    .validate_working_crossproducts(
+      validation_XtX, working_Xty, centered_yty
+    )
   }
 
   normal_shape <- vapply(blocks, `[[`, numeric(1), "normal_shape")
@@ -213,6 +258,7 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
     y = numeric(),
     x = matrix(numeric(), nrow = 0L, ncol = ncol(working_XtX)),
     XtX = working_XtX,
+    XtX_center = working_center,
     Xty = working_Xty,
     yty = centered_yty,
     residual_shape = if (is.null(residual_shape)) 1 else residual_shape,
@@ -298,15 +344,46 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
       n != floor(n) || n < 2) {
     stop("`n` must be an integer of at least two.", call. = FALSE)
   }
-  if (!is.matrix(XtX) || !is.numeric(XtX) || nrow(XtX) < 1L ||
-      nrow(XtX) != ncol(XtX) || anyNA(XtX) || any(!is.finite(XtX))) {
+  sparse_XtX <- inherits(XtX, "sparseMatrix")
+  supported_sparse <- inherits(XtX, c("dgCMatrix", "dsCMatrix"))
+  valid_dense <- is.matrix(XtX) && is.numeric(XtX)
+  finite_XtX <- if (sparse_XtX) {
+    supported_sparse && !anyNA(XtX@x) && all(is.finite(XtX@x))
+  } else {
+    valid_dense && !anyNA(XtX) && all(is.finite(XtX))
+  }
+  if ((!valid_dense && !supported_sparse) || nrow(XtX) < 1L ||
+      nrow(XtX) != ncol(XtX) || !finite_XtX) {
     stop("`XtX` must be a finite numeric square matrix.", call. = FALSE)
   }
-  tolerance <- sqrt(.Machine$double.eps) * max(1, max(abs(XtX)))
-  if (max(abs(XtX - t(XtX))) > tolerance) {
+  maximum_XtX <- if (sparse_XtX && length(XtX@x) == 0L) {
+    0
+  } else if (sparse_XtX) {
+    max(abs(XtX@x))
+  } else {
+    max(abs(XtX))
+  }
+  tolerance <- sqrt(.Machine$double.eps) * max(1, maximum_XtX)
+  asymmetry <- if (inherits(XtX, "dsCMatrix")) {
+    0
+  } else {
+    difference <- if (sparse_XtX) {
+      XtX - Matrix::t(XtX)
+    } else {
+      XtX - t(XtX)
+    }
+    if (sparse_XtX && length(difference@x) == 0L) 0 else max(abs(difference))
+  }
+  if (asymmetry > tolerance) {
     stop("`XtX` must be symmetric.", call. = FALSE)
   }
-  XtX <- (XtX + t(XtX)) / 2
+  if (!inherits(XtX, "dsCMatrix")) {
+    XtX <- if (sparse_XtX) {
+      (XtX + Matrix::t(XtX)) / 2
+    } else {
+      (XtX + t(XtX)) / 2
+    }
+  }
   p <- ncol(XtX)
   if (is.matrix(Xty) && is.numeric(Xty) &&
       identical(dim(Xty), c(p, 1L))) {

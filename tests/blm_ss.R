@@ -67,6 +67,135 @@ ss_multi <- blm_ss(
 )
 stopifnot(isTRUE(all.equal(raw_multi, ss_multi, tolerance = 1e-8)))
 
+# Compressed sparse cross-products use the separate RcppEigen path. Centering
+# is represented implicitly even when it makes the logical Gram matrix dense.
+set.seed(511)
+sparse_n <- 80
+sparse_p <- 5
+sparse_group <- sample(c(seq_len(sparse_p), NA_integer_), sparse_n, TRUE)
+sparse_X <- Matrix::sparseMatrix(
+  i = which(!is.na(sparse_group)),
+  j = sparse_group[!is.na(sparse_group)],
+  x = runif(sum(!is.na(sparse_group)), 0.5, 1.5),
+  dims = c(sparse_n, sparse_p),
+  dimnames = list(NULL, paste0("s", seq_len(sparse_p)))
+)
+sparse_y <- drop(
+  0.75 + as.matrix(sparse_X) %*% c(1, -0.5, 0, 0.25, -0.75) +
+    rnorm(sparse_n, sd = 0.5)
+)
+sparse_XtX <- Matrix::crossprod(sparse_X)
+sparse_Xty <- as.numeric(Matrix::crossprod(sparse_X, sparse_y))
+sparse_yty <- sum(sparse_y^2)
+sparse_args <- list(
+  n = sparse_n,
+  Xty = sparse_Xty,
+  yty = sparse_yty,
+  X_means = Matrix::colMeans(sparse_X),
+  y_mean = mean(sparse_y),
+  ETA = list(
+    first = list(indices = c("s3", "s1"), model = "Normal"),
+    second = list(
+      indices = c("s2", "s4", "s5"), model = "SpikeMultiSlab"
+    )
+  ),
+  residual_shape = 2,
+  residual_scale = 1,
+  iterations = 180,
+  burnin = 60,
+  seed = 512,
+  version = "Rcpp"
+)
+sparse_dense_fit <- do.call(
+  blm_ss,
+  c(list(XtX = as.matrix(sparse_XtX)), sparse_args)
+)
+sparse_symmetric_fit <- do.call(
+  blm_ss,
+  c(list(XtX = sparse_XtX), sparse_args)
+)
+sparse_general_fit <- do.call(
+  blm_ss,
+  c(list(XtX = methods::as(sparse_XtX, "generalMatrix")), sparse_args)
+)
+stopifnot(
+  inherits(sparse_XtX, "dsCMatrix"),
+  isTRUE(all.equal(
+    sparse_dense_fit, sparse_symmetric_fit, tolerance = 1e-8
+  )),
+  isTRUE(all.equal(
+    sparse_dense_fit, sparse_general_fit, tolerance = 1e-8
+  ))
+)
+
+for (sparse_model in c(
+  "Normal", "SpikeSlab", "GlobalLocal", "SpikeMultiSlab"
+)) {
+  model_args <- utils::modifyList(sparse_args, list(
+    residual_var = 1,
+    residual_shape = NULL,
+    residual_scale = NULL,
+    iterations = 120,
+    burnin = 40,
+    seed = 513
+  ))
+  model_args$ETA <- list(model = sparse_model)
+  dense_model_fit <- do.call(
+    blm_ss,
+    c(list(XtX = as.matrix(sparse_XtX)), model_args)
+  )
+  sparse_model_fit <- do.call(
+    blm_ss,
+    c(list(XtX = sparse_XtX), model_args)
+  )
+  stopifnot(isTRUE(all.equal(
+    dense_model_fit, sparse_model_fit, tolerance = 1e-8
+  )))
+}
+
+# Optional dense PSD validation and summary-only storage also work through the
+# sparse entry point.
+sparse_checked <- do.call(
+  blm_ss,
+  c(
+    list(XtX = sparse_XtX),
+    utils::modifyList(sparse_args, list(
+      check_psd = TRUE,
+      store_samples = FALSE,
+      store_coefficient_cov = FALSE,
+      iterations = 100,
+      burnin = 40
+    ))
+  )
+)
+stopifnot(
+  identical(sparse_checked$store_samples, FALSE),
+  is.null(sparse_checked$ETA$first$coefficient_cov)
+)
+
+sparse_r_error <- try(do.call(
+  blm_ss,
+  c(
+    list(XtX = sparse_XtX),
+    utils::modifyList(sparse_args, list(version = "R"))
+  )
+), silent = TRUE)
+stopifnot(
+  inherits(sparse_r_error, "try-error"),
+  grepl("requires `version = \\\"Rcpp\\\"`", sparse_r_error)
+)
+
+asymmetric_sparse <- methods::as(sparse_XtX, "generalMatrix")
+asymmetric_sparse[1, 2] <- 0.25
+sparse_symmetry_error <- try(do.call(
+  blm_ss,
+  c(list(XtX = asymmetric_sparse), sparse_args)
+), silent = TRUE)
+stopifnot(
+  inherits(sparse_symmetry_error, "try-error"),
+  grepl("must be symmetric", sparse_symmetry_error)
+)
+
 # yty is unnecessary when the residual variance is fixed, including when
 # means are used to fit an intercept.
 raw_fixed <- blm(
