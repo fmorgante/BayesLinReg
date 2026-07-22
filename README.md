@@ -27,7 +27,9 @@ Then load the package with:
 library(BayesLinReg)
 ```
 
-## Example
+## Examples
+
+### Raw data
 
 `blm()` always receives predictors and coefficient priors through `ETA`. The
 following example fits a ten-predictor model with normal coefficient priors and
@@ -73,7 +75,7 @@ vector. Set `store_coefficient_cov = FALSE` to omit its full
 `coefficient_cov` matrix; this also avoids the quadratic-size covariance
 accumulator when `store_samples = FALSE`.
 
-## Sufficient statistics
+### Sufficient statistics
 
 Use `blm_ss()` when the original response and predictor matrix are unavailable:
 
@@ -96,12 +98,8 @@ otherwise `blm_ss()` fits a no-intercept model and warns. For multiple prior
 blocks, each `ETA` block uses `indices` to select a disjoint set of columns from
 `XtX`.
 
-`blm_ss()` samples directly from these cross-products by maintaining the
-corrected right-hand side `Xty - XtX %*% beta`; it does not construct
-pseudo-observations. `XtX` may also be a compressed sparse `dgCMatrix` or
-`dsCMatrix`; the RcppEigen sampler then updates only stored entries and keeps
-the rank-one intercept-centering correction implicit. Sparse input requires
-`version = "Rcpp"`. Full eigenvalue-based validation is optional through
+`XtX` may also be a compressed sparse `dgCMatrix` or `dsCMatrix`. Sparse input 
+requires`version = "Rcpp"`. Full eigenvalue-based validation is optional through
 `check_psd = TRUE` and is disabled by default to avoid its cubic initialization
 cost; requesting it for sparse input temporarily constructs a dense matrix.
 
