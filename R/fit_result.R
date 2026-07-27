@@ -131,6 +131,11 @@
       }
       result$local_shape <- block$local_shape
       result$global_scale <- block$global_scale
+      result$global_scale_calibrated <- block$global_scale_calibrated
+      if (block$global_scale_calibrated) {
+        result$expected_nonzero <- block$expected_nonzero
+        result$reference_residual_var <- block$reference_residual_var
+      }
     }
     if (block$model == "SpikeMultiSlab") {
       component_names <- c(

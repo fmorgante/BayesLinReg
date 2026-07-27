@@ -62,6 +62,30 @@ from `residual_shape` and `residual_scale`.
 For mixed priors, use a named `ETA` list whose blocks specify their own
 predictors, model, standardization, and prior parameters.
 
+For a high-dimensional global-local block, the half-Cauchy global-scale prior
+can be calibrated from an expected number of nonzero coefficients and a
+reference residual standard deviation:
+
+```r
+fit_global_local <- blm(
+  y,
+  ETA = list(
+    X = X,
+    model = "GlobalLocal",
+    local_shape = c(a = 0.5, b = 0.5),
+    expected_nonzero = 2,
+    reference_residual_var = 1
+  ),
+  residual_shape = 2,
+  residual_scale = 1
+)
+```
+
+For a block with `p` predictors, this sets `global_scale` to
+`expected_nonzero / (p - expected_nonzero) *
+sqrt(reference_residual_var / n)`. Supply either the two calibration fields or
+an explicit `global_scale`, not both.
+
 By default, `blm()` returns the retained posterior draws. For large models,
 use `store_samples = FALSE` to compute posterior summaries online and keep the
 fitted object smaller:

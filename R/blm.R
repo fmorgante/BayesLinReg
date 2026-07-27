@@ -61,7 +61,17 @@
 #'   `var_shape = 2`, and `var_scale = 1`. Its shared slab variance has an
 #'   inverse-gamma prior with the supplied shape and scale. A `"GlobalLocal"`
 #'   block optionally accepts
-#'   `local_shape = c(a = 1, b = 0.5)` and `global_scale = 1`. Its hierarchy is
+#'   `local_shape = c(a = 1, b = 0.5)` and `global_scale = 1`. Alternatively,
+#'   supply `expected_nonzero` and `reference_residual_var` together to calibrate
+#'   the global scale as
+#'   \deqn{\mathrm{global\_scale} =
+#'     \frac{p_0}{p-p_0}\frac{\sigma_0}{\sqrt{n}},}
+#'   where \eqn{p_0} is `expected_nonzero`, \eqn{\sigma_0} is
+#'   the square root of `reference_residual_var`, and \eqn{p} is the number of
+#'   predictors in that
+#'   block. The calibrated fields are mutually exclusive with `global_scale`.
+#'   This expected-sparsity calibration is derived for the horseshoe and is a
+#'   useful scale heuristic for other beta-prime local priors. Its hierarchy is
 #'   \deqn{\beta_j \mid \tau^2,\psi_j \sim N(0,\tau^2\psi_j),\qquad
 #'   \psi_j \sim \mathrm{BetaPrime}(a,b),}
 #'   with \eqn{\tau \sim C^+(0,\mathrm{global\_scale})}. Thus the default is

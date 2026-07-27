@@ -113,7 +113,7 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
     residual_var, residual_shape, residual_scale
   )
 
-  normalized <- .normalize_ss_eta(ETA, predictor_names, residual_var)
+  normalized <- .normalize_ss_eta(ETA, predictor_names, residual_var, n)
   blocks <- normalized$blocks
   source_indices <- normalized$source_indices
   if (!fit_intercept) {
@@ -432,7 +432,7 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
   )
 }
 
-.normalize_ss_eta <- function(ETA, predictor_names, residual_var) {
+.normalize_ss_eta <- function(ETA, predictor_names, residual_var, n) {
   if (!is.list(ETA) || length(ETA) < 1L) {
     stop("`ETA` must be a non-empty list.", call. = FALSE)
   }
@@ -498,7 +498,9 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
     specification
   })
   names(parser_eta) <- block_names
-  blocks <- .normalize_eta(parser_eta, 2L, residual_var)
+  blocks <- .normalize_eta(
+    parser_eta, 2L, residual_var, calibration_n = n
+  )
   for (block_index in seq_along(blocks)) {
     blocks[[block_index]]$standardize <- unname(standardize[block_index])
     blocks[[block_index]]$predictor_names <-

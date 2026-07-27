@@ -75,7 +75,8 @@
   as.numeric(gamma)
 }
 
-.normalize_eta <- function(ETA, number_of_observations, residual_var) {
+.normalize_eta <- function(ETA, number_of_observations, residual_var,
+                           calibration_n = number_of_observations) {
   if (!is.list(ETA) || length(ETA) < 1L) {
     stop("`ETA` must be a non-empty list.", call. = FALSE)
   }
@@ -133,7 +134,8 @@
         "X", "model", "standardize", "var_shape", "var_scale", "pi"
       ),
       GlobalLocal = c(
-        "X", "model", "standardize", "local_shape", "global_scale"
+        "X", "model", "standardize", "local_shape", "global_scale",
+        "expected_nonzero", "reference_residual_var"
       ),
       SpikeMultiSlab = c(
         "X", "model", "standardize", "gamma", "alpha", "var_shape",
@@ -205,6 +207,9 @@
     spike_var_scale <- 1
     local_shape <- c(a = 1, b = 0.5)
     global_scale <- 1
+    expected_nonzero <- NULL
+    reference_residual_var <- NULL
+    global_scale_calibrated <- FALSE
     multi_gamma <- c(0, 0.01, 0.1, 1)
     multi_pi_alpha <- rep(1, length(multi_gamma))
     multi_var_shape <- 2
@@ -250,9 +255,64 @@
       } else {
         .validate_local_shape(specification$local_shape)
       }
-      global_scale <- if (is.null(specification$global_scale)) 1 else
-        specification$global_scale
-      .validate_variance(global_scale, "global_scale")
+      has_global_scale <- !is.null(specification$global_scale)
+      has_expected_nonzero <- !is.null(specification$expected_nonzero)
+      has_reference_residual_var <-
+        !is.null(specification$reference_residual_var)
+      if (has_global_scale &&
+          (has_expected_nonzero || has_reference_residual_var)) {
+        stop(
+          sprintf(
+            paste0(
+              "ETA block `%s`: supply either `global_scale` or ",
+              "`expected_nonzero` with `reference_residual_var`, not both."
+            ),
+            block_name
+          ),
+          call. = FALSE
+        )
+      }
+      if (xor(has_expected_nonzero, has_reference_residual_var)) {
+        stop(
+          sprintf(
+            paste0(
+              "ETA block `%s`: `expected_nonzero` and ",
+              "`reference_residual_var` must be supplied together."
+            ),
+            block_name
+          ),
+          call. = FALSE
+        )
+      }
+      if (has_expected_nonzero) {
+        expected_nonzero <- specification$expected_nonzero
+        if (!is.numeric(expected_nonzero) ||
+            length(expected_nonzero) != 1L || is.na(expected_nonzero) ||
+            !is.finite(expected_nonzero) || expected_nonzero <= 0 ||
+            expected_nonzero >= ncol(X)) {
+          stop(
+            sprintf(
+              paste0(
+                "ETA block `%s`: `expected_nonzero` must be a positive ",
+                "finite number smaller than the block's %d predictors."
+              ),
+              block_name, ncol(X)
+            ),
+            call. = FALSE
+          )
+        }
+        reference_residual_var <- specification$reference_residual_var
+        .validate_variance(
+          reference_residual_var, "reference_residual_var"
+        )
+        global_scale <- expected_nonzero /
+          (ncol(X) - expected_nonzero) *
+          sqrt(reference_residual_var / calibration_n)
+        global_scale_calibrated <- TRUE
+      } else {
+        global_scale <- if (has_global_scale) specification$global_scale else 1
+        .validate_variance(global_scale, "global_scale")
+      }
     }
     if (model == "SpikeMultiSlab") {
       multi_gamma <- if (is.null(specification$gamma)) {
@@ -298,6 +358,9 @@
       spike_var_scale = spike_var_scale,
       local_shape = local_shape,
       global_scale = global_scale,
+      expected_nonzero = expected_nonzero,
+      reference_residual_var = reference_residual_var,
+      global_scale_calibrated = global_scale_calibrated,
       multi_gamma = multi_gamma,
       multi_pi_alpha = multi_pi_alpha,
       multi_var_shape = multi_var_shape,

@@ -383,11 +383,54 @@ horseshoe_fit <- blm(
 )
 stopifnot(
   identical(global_fit$ETA$ETA1$local_shape, c(a = 1, b = 0.5)),
+  identical(global_fit$ETA$ETA1$global_scale_calibrated, FALSE),
   all(global_fit$ETA$ETA1$local_var_samples > 0),
   all(global_fit$ETA$ETA1$tau_sq_samples > 0),
   identical(horseshoe_fit$ETA$ETA1$local_shape, c(a = 0.5, b = 0.5)),
   all(horseshoe_fit$residual_var_samples == 0.25),
   identical(horseshoe_fit$residual_var_var, 0)
+)
+
+# GlobalLocal can calibrate its global scale from expected sparsity.
+calibrated_scale <- 1 / (ncol(multi_X) - 1) * 0.5 / sqrt(multi_n)
+calibrated_fit <- blm(
+  multi_y,
+  ETA = list(
+    X = multi_X,
+    model = "GlobalLocal",
+    expected_nonzero = 1,
+    reference_residual_var = 0.25
+  ),
+  residual_var = 0.25,
+  iterations = 100,
+  burnin = 40,
+  seed = 110
+)
+explicit_scale_fit <- blm(
+  multi_y,
+  ETA = list(
+    X = multi_X,
+    model = "GlobalLocal",
+    global_scale = calibrated_scale
+  ),
+  residual_var = 0.25,
+  iterations = 100,
+  burnin = 40,
+  seed = 110
+)
+stopifnot(
+  identical(
+    calibrated_fit$ETA$ETA1$coefficient_samples,
+    explicit_scale_fit$ETA$ETA1$coefficient_samples
+  ),
+  identical(
+    calibrated_fit$ETA$ETA1$tau_sq_samples,
+    explicit_scale_fit$ETA$ETA1$tau_sq_samples
+  ),
+  identical(calibrated_fit$ETA$ETA1$global_scale, calibrated_scale),
+  identical(calibrated_fit$ETA$ETA1$global_scale_calibrated, TRUE),
+  identical(calibrated_fit$ETA$ETA1$expected_nonzero, 1),
+  identical(calibrated_fit$ETA$ETA1$reference_residual_var, 0.25)
 )
 
 # A single SpikeSlab block accepts a vector or matrix of predictors.
@@ -644,6 +687,37 @@ invalid_calls <- list(
     ),
     residual_shape = 2,
     residual_scale = 1
+  ),
+  function() blm(
+    y,
+    ETA = list(
+      X = x, model = "GlobalLocal", expected_nonzero = 1
+    ),
+    residual_var = 1
+  ),
+  function() blm(
+    y,
+    ETA = list(
+      X = x, model = "GlobalLocal", expected_nonzero = 2,
+      reference_residual_var = 1
+    ),
+    residual_var = 1
+  ),
+  function() blm(
+    y,
+    ETA = list(
+      X = x, model = "GlobalLocal", global_scale = 1,
+      expected_nonzero = 1, reference_residual_var = 1
+    ),
+    residual_var = 1
+  ),
+  function() blm(
+    y,
+    ETA = list(
+      X = x, model = "GlobalLocal", expected_nonzero = 1,
+      reference_residual_var = 0
+    ),
+    residual_var = 1
   ),
   function() blm(
     y, ETA = normal_eta(x), residual_shape = 2, residual_scale = 1,

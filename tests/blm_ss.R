@@ -67,6 +67,32 @@ ss_multi <- blm_ss(
 )
 stopifnot(isTRUE(all.equal(raw_multi, ss_multi, tolerance = 1e-8)))
 
+# Expected-sparsity calibration uses the original `n`, not the parser's
+# two-row placeholder, and is identical for raw and sufficient-statistic fits.
+calibration_eta_raw <- list(
+  X = X, model = "GlobalLocal", expected_nonzero = 1.5,
+  reference_residual_var = 0.64
+)
+calibration_eta_ss <- list(
+  model = "GlobalLocal", expected_nonzero = 1.5,
+  reference_residual_var = 0.64
+)
+calibration_scale <- 1.5 / (ncol(X) - 1.5) * 0.8 / sqrt(n)
+calibrated_raw <- blm(
+  y, ETA = calibration_eta_raw, residual_var = 1,
+  iterations = 80, burnin = 30, seed = 503
+)
+calibrated_ss <- blm_ss(
+  n, XtX, Xty, ETA = calibration_eta_ss, yty = yty,
+  X_means = colMeans(X), y_mean = mean(y), residual_var = 1,
+  iterations = 80, burnin = 30, seed = 503
+)
+stopifnot(
+  identical(calibrated_raw$ETA$ETA1$global_scale, calibration_scale),
+  identical(calibrated_ss$ETA$ETA1$global_scale, calibration_scale),
+  isTRUE(all.equal(calibrated_raw, calibrated_ss, tolerance = 1e-8))
+)
+
 # Compressed sparse cross-products use the separate RcppEigen path. Centering
 # is represented implicitly even when it makes the logical Gram matrix dense.
 set.seed(511)
