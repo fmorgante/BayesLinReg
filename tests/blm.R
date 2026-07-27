@@ -141,6 +141,9 @@ repeated_fit <- blm(
 )
 stopifnot(
   isTRUE(all.equal(learned_fit, repeated_fit)),
+  identical(learned_fit$residual_shape, 2),
+  identical(learned_fit$residual_scale, 1),
+  identical(learned_fit$residual_scale_calibrated, FALSE),
   identical(dim(learned_fit$ETA$ETA1$coefficient_samples), c(500L, 2L)),
   all(learned_fit$residual_var_samples > 0),
   isTRUE(all.equal(
@@ -497,6 +500,40 @@ stopifnot(
     logical(1)
   ))
 )
+
+# Omitting `residual_scale` matches its inverse-gamma prior mean to the
+# response variance left after every block's expected PVE.
+residual_pve_fits <- lapply(
+  c("Normal", "SpikeSlab", "SpikeMultiSlab", "GlobalLocal"),
+  function(model) {
+    specification <- list(
+      X = multi_X, model = model, expected_pve = pve_target
+    )
+    if (model == "GlobalLocal") specification$expected_nonzero <- 1
+    blm(
+      multi_y, ETA = specification,
+      residual_shape = 3,
+      reference_response_var = pve_reference_var,
+      iterations = 60, burnin = 20, seed = 114
+    )
+  }
+)
+expected_residual_var <- (1 - pve_target) * pve_reference_var
+expected_residual_scale <- (3 - 1) * expected_residual_var
+stopifnot(all(vapply(
+  residual_pve_fits,
+  function(fit) {
+    identical(fit$residual_shape, 3) &&
+      isTRUE(all.equal(fit$residual_scale, expected_residual_scale)) &&
+      identical(fit$residual_scale_calibrated, TRUE) &&
+      identical(fit$expected_pve_total, pve_target) &&
+      identical(fit$reference_response_var, pve_reference_var) &&
+      isTRUE(all.equal(
+        fit$reference_residual_var, expected_residual_var
+      ))
+  },
+  logical(1)
+)))
 
 # With multiple blocks, GlobalLocal uses the residual share left after summing
 # every block's expected PVE.
@@ -870,6 +907,27 @@ invalid_calls <- list(
   function() blm(
     y, ETA = normal_eta(x), residual_var = 1,
     reference_response_var = 1
+  ),
+  function() blm(
+    y, ETA = normal_eta(x), residual_shape = 2
+  ),
+  function() blm(
+    y,
+    ETA = list(
+      first = list(
+        X = x[, "first", drop = FALSE], model = "Normal",
+        expected_pve = 0.2
+      ),
+      second = list(
+        X = x[, "second", drop = FALSE], model = "Normal"
+      )
+    ),
+    residual_shape = 2
+  ),
+  function() blm(
+    y,
+    ETA = list(X = x, model = "Normal", expected_pve = 0.2),
+    residual_shape = 1
   ),
   function() blm(
     y, ETA = normal_eta(x), residual_shape = 2, residual_scale = 1,

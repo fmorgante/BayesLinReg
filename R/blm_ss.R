@@ -42,6 +42,8 @@
 #'   When `expected_pve` is used and `reference_response_var` is omitted, the
 #'   response variance is recovered from `yty` and `y_mean`; otherwise an
 #'   explicit positive `reference_response_var` is required.
+#'   When every block supplies `expected_pve`, omitting `residual_scale`
+#'   calibrates it from their total expected PVE exactly as in [blm()].
 #'
 #'   Coefficients are sampled with a right-hand-side update that maintains
 #'   \eqn{X'y-X'X\beta}; individual-level pseudo-observations are not formed.
@@ -117,10 +119,6 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
       call. = FALSE
     )
   }
-  .validate_residual_specification(
-    residual_var, residual_shape, residual_scale
-  )
-
   normalized <- .normalize_ss_eta(ETA, predictor_names, residual_var, n)
   blocks <- normalized$blocks
   source_indices <- normalized$source_indices
@@ -245,6 +243,13 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
       blocks, predictor_variance_sums, reference_response_var, n
     )
   }
+  residual_prior <- .prepare_residual_prior(
+    residual_var, residual_shape, residual_scale, blocks,
+    reference_response_var
+  )
+  residual_var <- residual_prior$residual_var
+  residual_shape <- residual_prior$residual_shape
+  residual_scale <- residual_prior$residual_scale
 
   source_order <- unlist(source_indices, use.names = FALSE)
   scale_order <- unlist(predictor_scales, use.names = FALSE)
@@ -361,33 +366,15 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
 
   .assemble_blm_result(
     blocks, block_indices, samples, nchains, store_samples,
-    store_coefficient_cov, fit_intercept
+    store_coefficient_cov, fit_intercept,
+    residual_shape = residual_shape,
+    residual_scale = residual_scale,
+    residual_scale_calibrated =
+      residual_prior$residual_scale_calibrated,
+    expected_pve_total = residual_prior$expected_pve_total,
+    reference_response_var = reference_response_var,
+    reference_residual_var = residual_prior$reference_residual_var
   )
-}
-
-.validate_residual_specification <- function(residual_var, residual_shape,
-                                             residual_scale) {
-  if (!is.null(residual_var)) {
-    if (!is.null(residual_shape) || !is.null(residual_scale)) {
-      stop(
-        "Supply either `residual_var` or the inverse-gamma prior, not both.",
-        call. = FALSE
-      )
-    }
-    .validate_variance(residual_var, "residual_var")
-  } else {
-    if (is.null(residual_shape) || is.null(residual_scale)) {
-      stop(
-        paste0(
-          "`residual_shape` and `residual_scale` are required when ",
-          "`residual_var` is NULL."
-        ),
-        call. = FALSE
-      )
-    }
-    .validate_variance(residual_shape, "residual_shape")
-    .validate_variance(residual_scale, "residual_scale")
-  }
 }
 
 .validate_sufficient_statistics <- function(n, XtX, Xty, yty, X_means,

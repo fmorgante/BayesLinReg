@@ -14,8 +14,10 @@
 #' @param residual_var A positive known residual variance, or `NULL` to learn
 #'   it using an inverse-gamma prior.
 #' @param residual_shape,residual_scale Positive shape and scale parameters for
-#'   the inverse-gamma residual-variance prior. Required when
-#'   `residual_var = NULL`.
+#'   the inverse-gamma residual-variance prior. `residual_shape` is required
+#'   when `residual_var = NULL`. `residual_scale` is also required unless every
+#'   `ETA` block supplies `expected_pve`, in which case omitting it calibrates
+#'   its value from the response variance not assigned to the blocks.
 #' @param reference_response_var Optional positive reference response variance
 #'   used to calibrate blocks that specify `expected_pve`. When omitted,
 #'   [stats::var()] of `y` is used.
@@ -44,7 +46,11 @@
 #'   when `store_coefficient_cov = TRUE`. When
 #'   `store_samples = TRUE`, the corresponding posterior draws are also
 #'   returned. With multiple chains, `chain_id` identifies the origin of each
-#'   retained draw when samples are stored. `SpikeMultiSlab` blocks additionally
+#'   retained draw when samples are stored. When the residual variance is
+#'   learned, the result also records `residual_shape`, `residual_scale`, and
+#'   `residual_scale_calibrated`. A calibrated residual prior additionally
+#'   records `expected_pve_total`, `reference_response_var`, and
+#'   `reference_residual_var`. `SpikeMultiSlab` blocks additionally
 #'   return per-predictor `component_probability` values, an
 #'   `inclusion_probability` vector, and summaries of the mixture probabilities
 #'   and shared variance.
@@ -63,6 +69,14 @@
 #'   calibrated blocks, the supplied proportions must sum to less than one.
 #'   Let \eqn{D=\sum_j\mathrm{Var}(X_j)} after applying the block's
 #'   standardization; thus \eqn{D=p} by default.
+#'   If every block supplies `expected_pve` and `residual_scale` is omitted,
+#'   their sum \eqn{R^2} also calibrates the inverse-gamma residual prior:
+#'   \deqn{\mathrm{residual\_scale} =
+#'     (\mathrm{residual\_shape}-1)(1-R^2)V_y.}
+#'   This makes the prior mean residual variance equal to
+#'   \eqn{(1-R^2)V_y} and therefore requires `residual_shape > 1`. It matches
+#'   the ratio of prior mean variance components, rather than the prior mean
+#'   of the random PVE ratio itself.
 #'
 #'   A `"Normal"` block optionally accepts `var_shape = 2` and
 #'   `var_scale = 1`. Its coefficients share a variance sampled from an
@@ -207,27 +221,13 @@ blm <- function(y, ETA, residual_var = NULL,
     )
     block_x
   }))
-  if (!is.null(residual_var)) {
-    if (!is.null(residual_shape) || !is.null(residual_scale)) {
-      stop(
-        "Supply either `residual_var` or the inverse-gamma prior, not both.",
-        call. = FALSE
-      )
-    }
-    .validate_variance(residual_var, "residual_var")
-  } else {
-    if (is.null(residual_shape) || is.null(residual_scale)) {
-      stop(
-        paste0(
-          "`residual_shape` and `residual_scale` are required when ",
-          "`residual_var` is NULL."
-        ),
-        call. = FALSE
-      )
-    }
-    .validate_variance(residual_shape, "residual_shape")
-    .validate_variance(residual_scale, "residual_scale")
-  }
+  residual_prior <- .prepare_residual_prior(
+    residual_var, residual_shape, residual_scale, blocks,
+    reference_response_var
+  )
+  residual_var <- residual_prior$residual_var
+  residual_shape <- residual_prior$residual_shape
+  residual_scale <- residual_prior$residual_scale
 
   normal_shape <- vapply(blocks, `[[`, numeric(1), "normal_shape")
   normal_scale <- vapply(blocks, `[[`, numeric(1), "normal_scale")
@@ -290,6 +290,13 @@ blm <- function(y, ETA, residual_var = NULL,
 
   .assemble_blm_result(
     blocks, block_indices, samples, nchains, store_samples,
-    store_coefficient_cov, fit_intercept = TRUE
+    store_coefficient_cov, fit_intercept = TRUE,
+    residual_shape = residual_shape,
+    residual_scale = residual_scale,
+    residual_scale_calibrated =
+      residual_prior$residual_scale_calibrated,
+    expected_pve_total = residual_prior$expected_pve_total,
+    reference_response_var = reference_response_var,
+    reference_residual_var = residual_prior$reference_residual_var
   )
 }

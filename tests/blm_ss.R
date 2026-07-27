@@ -94,7 +94,7 @@ stopifnot(
 )
 
 # Raw and sufficient-statistic expected-PVE calibration agree for every model,
-# whether response variance is supplied explicitly or recovered from yty.
+# including calibration of the residual inverse-gamma scale from centered yty.
 for (model in c(
   "Normal", "SpikeSlab", "GlobalLocal", "SpikeMultiSlab"
 )) {
@@ -107,15 +107,27 @@ for (model in c(
     ss_specification$expected_nonzero <- 1
   }
   pve_raw <- blm(
-    y, ETA = raw_specification, residual_var = 1,
+    y, ETA = raw_specification, residual_shape = 3,
     iterations = 80, burnin = 30, seed = 504
   )
   pve_ss <- blm_ss(
     n, XtX, Xty, ETA = ss_specification, yty = yty,
-    X_means = colMeans(X), y_mean = mean(y), residual_var = 1,
+    X_means = colMeans(X), y_mean = mean(y), residual_shape = 3,
     iterations = 80, burnin = 30, seed = 504
   )
-  stopifnot(isTRUE(all.equal(pve_raw, pve_ss, tolerance = 1e-8)))
+  expected_residual_var <- 0.75 * stats::var(y)
+  stopifnot(
+    isTRUE(all.equal(pve_raw, pve_ss, tolerance = 1e-8)),
+    isTRUE(all.equal(
+      pve_raw$residual_scale, (3 - 1) * expected_residual_var
+    )),
+    identical(pve_raw$residual_scale_calibrated, TRUE),
+    identical(pve_ss$residual_scale_calibrated, TRUE),
+    identical(pve_raw$expected_pve_total, 0.25),
+    isTRUE(all.equal(
+      pve_ss$reference_residual_var, expected_residual_var
+    ))
+  )
 }
 
 # Compressed sparse cross-products use the separate RcppEigen path. Centering
@@ -425,6 +437,17 @@ invalid_calls <- list(
     n, XtX, Xty,
     ETA = list(model = "Normal", expected_pve = 0.2),
     residual_var = 1
+  ),
+  function() blm_ss(
+    n, XtX, Xty, yty = yty,
+    X_means = colMeans(X), y_mean = mean(y),
+    ETA = list(model = "Normal"), residual_shape = 2
+  ),
+  function() blm_ss(
+    n, XtX, Xty, yty = yty,
+    X_means = colMeans(X), y_mean = mean(y),
+    ETA = list(model = "Normal", expected_pve = 0.2),
+    residual_shape = 1
   )
 )
 stopifnot(all(vapply(

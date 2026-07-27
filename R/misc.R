@@ -570,6 +570,87 @@
   blocks
 }
 
+.prepare_residual_prior <- function(residual_var, residual_shape,
+                                    residual_scale, blocks,
+                                    reference_response_var) {
+  if (!is.null(residual_var)) {
+    if (!is.null(residual_shape) || !is.null(residual_scale)) {
+      stop(
+        "Supply either `residual_var` or the inverse-gamma prior, not both.",
+        call. = FALSE
+      )
+    }
+    .validate_variance(residual_var, "residual_var")
+    return(list(
+      residual_var = residual_var,
+      residual_shape = NULL,
+      residual_scale = NULL,
+      residual_scale_calibrated = FALSE,
+      expected_pve_total = NULL,
+      reference_residual_var = NULL
+    ))
+  }
+
+  if (is.null(residual_shape)) {
+    stop(
+      "`residual_shape` is required when `residual_var` is NULL.",
+      call. = FALSE
+    )
+  }
+  .validate_variance(residual_shape, "residual_shape")
+
+  residual_scale_calibrated <- is.null(residual_scale)
+  expected_pve_total <- NULL
+  reference_residual_var <- NULL
+  if (residual_scale_calibrated) {
+    has_expected_pve <- vapply(
+      blocks, function(block) !is.null(block$expected_pve), logical(1)
+    )
+    if (!all(has_expected_pve)) {
+      stop(
+        paste0(
+          "`residual_scale` is required unless every ETA block supplies ",
+          "`expected_pve`."
+        ),
+        call. = FALSE
+      )
+    }
+    if (residual_shape <= 1) {
+      stop(
+        paste0(
+          "`residual_shape` must exceed one when `residual_scale` is ",
+          "calibrated from `expected_pve`."
+        ),
+        call. = FALSE
+      )
+    }
+    .validate_variance(reference_response_var, "reference_response_var")
+    expected_pve_total <- sum(vapply(
+      blocks, `[[`, numeric(1), "expected_pve"
+    ))
+    if (expected_pve_total >= 1) {
+      stop(
+        "The sum of supplied `expected_pve` values must be smaller than one.",
+        call. = FALSE
+      )
+    }
+    reference_residual_var <-
+      (1 - expected_pve_total) * reference_response_var
+    residual_scale <-
+      (residual_shape - 1) * reference_residual_var
+  }
+  .validate_variance(residual_scale, "residual_scale")
+
+  list(
+    residual_var = NULL,
+    residual_shape = residual_shape,
+    residual_scale = residual_scale,
+    residual_scale_calibrated = residual_scale_calibrated,
+    expected_pve_total = expected_pve_total,
+    reference_residual_var = reference_residual_var
+  )
+}
+
 .draw_gig <- function(n, lambda, chi, psi) {
   values <- c(n = n, lambda = lambda, chi = chi, psi = psi)
   if (!is.numeric(values) || anyNA(values) || any(!is.finite(values)) ||

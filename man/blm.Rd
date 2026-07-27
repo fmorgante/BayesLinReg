@@ -34,8 +34,10 @@ are \code{"Normal"}, \code{"SpikeSlab"}, \code{"GlobalLocal"}, and
 it using an inverse-gamma prior.}
 
 \item{residual_shape, residual_scale}{Positive shape and scale parameters for
-the inverse-gamma residual-variance prior. Required when
-\code{residual_var = NULL}.}
+the inverse-gamma residual-variance prior. \code{residual_shape} is required
+when \code{residual_var = NULL}. \code{residual_scale} is also required unless every
+\code{ETA} block supplies \code{expected_pve}, in which case omitting it calibrates
+its value from the response variance not assigned to the blocks.}
 
 \item{reference_response_var}{Optional positive reference response variance
 used to calibrate blocks that specify \code{expected_pve}. When omitted,
@@ -75,7 +77,11 @@ contains a named \code{coefficient_var} vector; \code{coefficient_cov} is includ
 when \code{store_coefficient_cov = TRUE}. When
 \code{store_samples = TRUE}, the corresponding posterior draws are also
 returned. With multiple chains, \code{chain_id} identifies the origin of each
-retained draw when samples are stored. \code{SpikeMultiSlab} blocks additionally
+retained draw when samples are stored. When the residual variance is
+learned, the result also records \code{residual_shape}, \code{residual_scale}, and
+\code{residual_scale_calibrated}. A calibrated residual prior additionally
+records \code{expected_pve_total}, \code{reference_response_var}, and
+\code{reference_residual_var}. \code{SpikeMultiSlab} blocks additionally
 return per-predictor \code{component_probability} values, an
 \code{inclusion_probability} vector, and summaries of the mixture probabilities
 and shared variance.
@@ -102,6 +108,14 @@ and one. It calibrates a scale hyperparameter using
 calibrated blocks, the supplied proportions must sum to less than one.
 Let \eqn{D=\sum_j\mathrm{Var}(X_j)} after applying the block's
 standardization; thus \eqn{D=p} by default.
+If every block supplies \code{expected_pve} and \code{residual_scale} is omitted,
+their sum \eqn{R^2} also calibrates the inverse-gamma residual prior:
+\deqn{\mathrm{residual\_scale} =
+  (\mathrm{residual\_shape}-1)(1-R^2)V_y.}
+This makes the prior mean residual variance equal to
+\eqn{(1-R^2)V_y} and therefore requires \code{residual_shape > 1}. It matches
+the ratio of prior mean variance components, rather than the prior mean
+of the random PVE ratio itself.
 
 A \code{"Normal"} block optionally accepts \code{var_shape = 2} and
 \code{var_scale = 1}. Its coefficients share a variance sampled from an

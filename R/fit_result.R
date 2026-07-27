@@ -1,6 +1,12 @@
 .assemble_blm_result <- function(blocks, block_indices, samples, nchains,
                                  store_samples, store_coefficient_cov,
-                                 fit_intercept = TRUE) {
+                                 fit_intercept = TRUE,
+                                 residual_shape = NULL,
+                                 residual_scale = NULL,
+                                 residual_scale_calibrated = FALSE,
+                                 expected_pve_total = NULL,
+                                 reference_response_var = NULL,
+                                 reference_residual_var = NULL) {
   eta_result <- lapply(seq_along(blocks), function(block_index) {
     block <- blocks[[block_index]]
     indices <- block_indices[[block_index]]
@@ -244,6 +250,16 @@
   }
   result$residual_var_mean <- residual_var_mean
   result$residual_var_var <- residual_var_var
+  if (!is.null(residual_shape)) {
+    result$residual_shape <- residual_shape
+    result$residual_scale <- residual_scale
+    result$residual_scale_calibrated <- residual_scale_calibrated
+    if (residual_scale_calibrated) {
+      result$expected_pve_total <- expected_pve_total
+      result$reference_response_var <- reference_response_var
+      result$reference_residual_var <- reference_residual_var
+    }
+  }
   result$store_samples <- store_samples
   result$store_coefficient_cov <- store_coefficient_cov
   if (store_samples) {

@@ -99,8 +99,7 @@ fit_pve <- blm(
     var_shape = 3,
     expected_pve = 0.3
   ),
-  residual_shape = 6,
-  residual_scale = 5
+  residual_shape = 6
 )
 ```
 
@@ -113,6 +112,13 @@ blocks determine the reference residual variance used by the sparsity-based
 global-scale calibration. This does not directly moment-match the
 GlobalLocal signal variance because its beta-prime local prior need not have a
 finite variance moment.
+
+When every block supplies `expected_pve`, omitting `residual_scale` calibrates
+the residual inverse-gamma prior as
+`(residual_shape - 1) * (1 - sum(expected_pve)) *
+reference_response_var`. Thus its prior mean is the response variance not
+assigned to the predictor blocks. This requires `residual_shape > 1`. Supply
+`residual_scale` explicitly to use an independently specified residual prior.
 
 By default, `blm()` returns the retained posterior draws. For large models,
 use `store_samples = FALSE` to compute posterior summaries online and keep the
