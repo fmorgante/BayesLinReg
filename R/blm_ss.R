@@ -18,6 +18,10 @@
 #' @param X_means,y_mean Optional predictor means and response mean. They must
 #'   be supplied together. When omitted, the model is fitted without an
 #'   intercept.
+#' @param reference_response_var Optional positive reference response variance
+#'   used to calibrate blocks that specify `expected_pve`. When omitted, it is
+#'   recovered from `yty` and `y_mean`; if that is not possible, it must be
+#'   supplied explicitly.
 #' @param check_psd If `TRUE`, use a full eigendecomposition to verify that the
 #'   centered `XtX` is positive semidefinite and that `Xty` and `yty` are
 #'   jointly compatible with it. The default, `FALSE`, avoids this
@@ -35,6 +39,9 @@
 #'   they are used as supplied. If any block requests standardization without
 #'   means, a warning reminds the user that the supplied cross-products should
 #'   already represent centered or standardized variables.
+#'   When `expected_pve` is used and `reference_response_var` is omitted, the
+#'   response variance is recovered from `yty` and `y_mean`; otherwise an
+#'   explicit positive `reference_response_var` is required.
 #'
 #'   Coefficients are sampled with a right-hand-side update that maintains
 #'   \eqn{X'y-X'X\beta}; individual-level pseudo-observations are not formed.
@@ -66,6 +73,7 @@
 blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
                    y_mean = NULL, residual_var = NULL,
                    residual_shape = NULL, residual_scale = NULL,
+                   reference_response_var = NULL,
                    iterations = 4000L, burnin = 1000L, thin = 1L,
                    seed = NULL, version = c("Rcpp", "R"), verbose = FALSE,
                    nchains = 1L, store_samples = TRUE,
@@ -116,6 +124,18 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
   normalized <- .normalize_ss_eta(ETA, predictor_names, residual_var, n)
   blocks <- normalized$blocks
   source_indices <- normalized$source_indices
+  has_expected_pve <- any(vapply(
+    blocks, function(block) !is.null(block$expected_pve), logical(1)
+  ))
+  if (!is.null(reference_response_var)) {
+    .validate_variance(reference_response_var, "reference_response_var")
+    if (!has_expected_pve) {
+      stop(
+        "`reference_response_var` requires at least one `expected_pve` block.",
+        call. = FALSE
+      )
+    }
+  }
   if (!fit_intercept) {
     warning(
       "`X_means` and `y_mean` were not supplied; fitting without an intercept.",
@@ -192,6 +212,38 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
   })
   for (block_index in seq_along(blocks)) {
     blocks[[block_index]]$predictor_scale <- predictor_scales[[block_index]]
+  }
+  if (has_expected_pve) {
+    if (is.null(reference_response_var)) {
+      if (!fit_intercept || is.null(centered_yty)) {
+        stop(
+          paste0(
+            "`reference_response_var` is required for `expected_pve` ",
+            "calibration when centered response variance cannot be recovered."
+          ),
+          call. = FALSE
+        )
+      }
+      reference_response_var <- centered_yty / (n - 1)
+      .validate_variance(
+        reference_response_var,
+        "(yty - n * y_mean^2) / (n - 1)"
+      )
+    }
+    predictor_variance_sums <- vapply(
+      seq_along(blocks),
+      function(block_index) {
+        indices <- source_indices[[block_index]]
+        sum(
+          centered_diagonal[indices] /
+            predictor_scales[[block_index]]^2 / (n - 1)
+        )
+      },
+      numeric(1)
+    )
+    blocks <- .calibrate_eta_priors(
+      blocks, predictor_variance_sums, reference_response_var, n
+    )
   }
 
   source_order <- unlist(source_indices, use.names = FALSE)

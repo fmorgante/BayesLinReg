@@ -86,6 +86,34 @@ For a block with `p` predictors, this sets `global_scale` to
 sqrt(reference_residual_var / n)`. Supply either the two calibration fields or
 an explicit `global_scale`, not both.
 
+All coefficient-prior models can instead calibrate their scale from an
+expected proportion of response variance explained:
+
+```r
+fit_pve <- blm(
+  y,
+  ETA = list(
+    X = X,
+    model = "SpikeSlab",
+    pi = c(a = 1, b = 9),
+    var_shape = 3,
+    expected_pve = 0.3
+  ),
+  residual_shape = 6,
+  residual_scale = 5
+)
+```
+
+By default, `blm()` uses `var(y)` as the reference response variance; supply
+`reference_response_var` to use an external value. For Normal, SpikeSlab, and
+SpikeMultiSlab, `expected_pve` determines `var_scale` while `var_shape`
+continues to control prior concentration. For GlobalLocal, combine
+`expected_pve` with `expected_nonzero`; the expected PVE values across all
+blocks determine the reference residual variance used by the sparsity-based
+global-scale calibration. This does not directly moment-match the
+GlobalLocal signal variance because its beta-prime local prior need not have a
+finite variance moment.
+
 By default, `blm()` returns the retained posterior draws. For large models,
 use `store_samples = FALSE` to compute posterior summaries online and keep the
 fitted object smaller:

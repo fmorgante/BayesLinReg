@@ -16,6 +16,9 @@
 #' @param residual_shape,residual_scale Positive shape and scale parameters for
 #'   the inverse-gamma residual-variance prior. Required when
 #'   `residual_var = NULL`.
+#' @param reference_response_var Optional positive reference response variance
+#'   used to calibrate blocks that specify `expected_pve`. When omitted,
+#'   [stats::var()] of `y` is used.
 #' @param iterations Total Gibbs iterations when sampling is required.
 #' @param burnin Number of initial iterations to discard.
 #' @param thin Interval between retained draws.
@@ -53,13 +56,29 @@
 #'   Every block accepts `standardize`, which defaults to `TRUE`. Returned
 #'   coefficients are always transformed to the original scale of that block's
 #'   supplied `X`.
+#'   Every model also accepts `expected_pve`, a number strictly between zero
+#'   and one. It calibrates a scale hyperparameter using
+#'   \eqn{V_g=\mathrm{expected\_pve}\,V_y}, where \eqn{V_y} is
+#'   `reference_response_var` or the sample variance of `y`. For multiple
+#'   calibrated blocks, the supplied proportions must sum to less than one.
+#'   Let \eqn{D=\sum_j\mathrm{Var}(X_j)} after applying the block's
+#'   standardization; thus \eqn{D=p} by default.
 #'
 #'   A `"Normal"` block optionally accepts `var_shape = 2` and
 #'   `var_scale = 1`. Its coefficients share a variance sampled from an
-#'   inverse-gamma prior with the supplied shape and scale.
+#'   inverse-gamma prior with the supplied shape and scale. As an alternative
+#'   to `var_scale`, `expected_pve` sets
+#'   \deqn{\mathrm{var\_scale} =
+#'     (\mathrm{var\_shape}-1)V_g/D.}
 #'   A `"SpikeSlab"` block optionally accepts `pi = c(a = 1, b = 1)`,
 #'   `var_shape = 2`, and `var_scale = 1`. Its shared slab variance has an
-#'   inverse-gamma prior with the supplied shape and scale. A `"GlobalLocal"`
+#'   inverse-gamma prior with the supplied shape and scale. With
+#'   \eqn{q=\mathrm{E}(\pi)=a/(a+b)}, `expected_pve` instead sets
+#'   \deqn{\mathrm{var\_scale} =
+#'     (\mathrm{var\_shape}-1)V_g/(qD).}
+#'   In either model, `var_shape` must exceed one when `expected_pve` is used.
+#'
+#'   A `"GlobalLocal"`
 #'   block optionally accepts
 #'   `local_shape = c(a = 1, b = 0.5)` and `global_scale = 1`. Alternatively,
 #'   supply `expected_nonzero` and `reference_residual_var` together to calibrate
@@ -70,6 +89,13 @@
 #'   the square root of `reference_residual_var`, and \eqn{p} is the number of
 #'   predictors in that
 #'   block. The calibrated fields are mutually exclusive with `global_scale`.
+#'   `expected_pve` may replace `reference_residual_var`. In that case every
+#'   block must supply `expected_pve`; their sum \eqn{R^2} defines
+#'   \eqn{\sigma_0^2=(1-R^2)V_y}, which is then used in the same global-scale
+#'   formula. Because the supported beta-prime local priors do not generally
+#'   have a finite signal-variance moment, `expected_pve` calibrates the
+#'   residual reference for GlobalLocal rather than matching its block signal
+#'   variance directly.
 #'   This expected-sparsity calibration is derived for the horseshoe and is a
 #'   useful scale heuristic for other beta-prime local priors. Its hierarchy is
 #'   \deqn{\beta_j \mid \tau^2,\psi_j \sim N(0,\tau^2\psi_j),\qquad
@@ -85,6 +111,12 @@
 #'   `var_scale = 1` for the inverse-gamma prior on the shared variance. Given
 #'   component \eqn{c > 1}, the coefficient variance is
 #'   \eqn{\gamma_c \sigma_\beta^2}.
+#'   As an alternative to `var_scale`, define
+#'   \eqn{\bar\gamma=\sum_c\{\alpha_c/\sum_k\alpha_k\}\gamma_c};
+#'   `expected_pve` then sets
+#'   \deqn{\mathrm{var\_scale} =
+#'     (\mathrm{var\_shape}-1)V_g/(D\bar\gamma).}
+#'   Here too, `var_shape` must exceed one.
 #'   The coefficient priors are independent of the residual variance.
 #' @export
 #'
@@ -107,6 +139,7 @@
 #' )
 blm <- function(y, ETA, residual_var = NULL,
                 residual_shape = NULL, residual_scale = NULL,
+                reference_response_var = NULL,
                 iterations = 4000L, burnin = 1000L, thin = 1L,
                 seed = NULL, version = c("Rcpp", "R"),
                 verbose = FALSE, nchains = 1L, store_samples = TRUE,
@@ -135,6 +168,31 @@ blm <- function(y, ETA, residual_var = NULL,
   }
 
   blocks <- .normalize_eta(ETA, length(y), residual_var)
+  has_expected_pve <- any(vapply(
+    blocks, function(block) !is.null(block$expected_pve), logical(1)
+  ))
+  if (!is.null(reference_response_var)) {
+    .validate_variance(reference_response_var, "reference_response_var")
+    if (!has_expected_pve) {
+      stop(
+        "`reference_response_var` requires at least one `expected_pve` block.",
+        call. = FALSE
+      )
+    }
+  }
+  if (has_expected_pve) {
+    if (is.null(reference_response_var)) {
+      reference_response_var <- stats::var(y)
+      .validate_variance(reference_response_var, "var(y)")
+    }
+    predictor_variance_sums <- vapply(blocks, function(block) {
+      centered_x <- sweep(block$x, 2L, colMeans(block$x), FUN = "-")
+      sum(colSums(centered_x^2) / (nrow(centered_x) - 1))
+    }, numeric(1))
+    blocks <- .calibrate_eta_priors(
+      blocks, predictor_variance_sums, reference_response_var, length(y)
+    )
+  }
   block_sizes <- vapply(blocks, function(block) ncol(block$x), integer(1))
   block_ends <- cumsum(block_sizes)
   block_starts <- block_ends - block_sizes + 1L

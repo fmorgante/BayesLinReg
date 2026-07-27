@@ -15,6 +15,7 @@ blm_ss(
   residual_var = NULL,
   residual_shape = NULL,
   residual_scale = NULL,
+  reference_response_var = NULL,
   iterations = 4000L,
   burnin = 1000L,
   thin = 1L,
@@ -63,6 +64,11 @@ it using an inverse-gamma prior.}
 the inverse-gamma residual-variance prior. Required when
 \code{residual_var = NULL}.}
 
+\item{reference_response_var}{Optional positive reference response variance
+used to calibrate blocks that specify \code{expected_pve}. When omitted, it is
+recovered from \code{yty} and \code{y_mean}; if that is not possible, it must be
+supplied explicitly.}
+
 \item{iterations}{Total Gibbs iterations when sampling is required.}
 
 \item{burnin}{Number of initial iterations to discard.}
@@ -104,6 +110,9 @@ uncentered cross-products and are centered internally. Without means,
 they are used as supplied. If any block requests standardization without
 means, a warning reminds the user that the supplied cross-products should
 already represent centered or standardized variables.
+When \code{expected_pve} is used and \code{reference_response_var} is omitted, the
+response variance is recovered from \code{yty} and \code{y_mean}; otherwise an
+explicit positive \code{reference_response_var} is required.
 Coefficients are sampled with a right-hand-side update that maintains
 \eqn{X'y-X'X\beta}; individual-level pseudo-observations are not formed.
 For sparse \code{XtX}, the Rcpp sampler traverses only stored entries. A

@@ -10,6 +10,7 @@ blm(
   residual_var = NULL,
   residual_shape = NULL,
   residual_scale = NULL,
+  reference_response_var = NULL,
   iterations = 4000L,
   burnin = 1000L,
   thin = 1L,
@@ -35,6 +36,10 @@ it using an inverse-gamma prior.}
 \item{residual_shape, residual_scale}{Positive shape and scale parameters for
 the inverse-gamma residual-variance prior. Required when
 \code{residual_var = NULL}.}
+
+\item{reference_response_var}{Optional positive reference response variance
+used to calibrate blocks that specify \code{expected_pve}. When omitted,
+\code{\link[stats:cor]{stats::var()}} of \code{y} is used.}
 
 \item{iterations}{Total Gibbs iterations when sampling is required.}
 
@@ -90,13 +95,29 @@ matrix.
 Every block accepts \code{standardize}, which defaults to \code{TRUE}. Returned
 coefficients are always transformed to the original scale of that block's
 supplied \code{X}.
+Every model also accepts \code{expected_pve}, a number strictly between zero
+and one. It calibrates a scale hyperparameter using
+\eqn{V_g=\mathrm{expected\_pve}\,V_y}, where \eqn{V_y} is
+\code{reference_response_var} or the sample variance of \code{y}. For multiple
+calibrated blocks, the supplied proportions must sum to less than one.
+Let \eqn{D=\sum_j\mathrm{Var}(X_j)} after applying the block's
+standardization; thus \eqn{D=p} by default.
 
 A \code{"Normal"} block optionally accepts \code{var_shape = 2} and
 \code{var_scale = 1}. Its coefficients share a variance sampled from an
-inverse-gamma prior with the supplied shape and scale.
+inverse-gamma prior with the supplied shape and scale. As an alternative
+to \code{var_scale}, \code{expected_pve} sets
+\deqn{\mathrm{var\_scale} =
+  (\mathrm{var\_shape}-1)V_g/D.}
 A \code{"SpikeSlab"} block optionally accepts \code{pi = c(a = 1, b = 1)},
 \code{var_shape = 2}, and \code{var_scale = 1}. Its shared slab variance has an
-inverse-gamma prior with the supplied shape and scale. A \code{"GlobalLocal"}
+inverse-gamma prior with the supplied shape and scale. With
+\eqn{q=\mathrm{E}(\pi)=a/(a+b)}, \code{expected_pve} instead sets
+\deqn{\mathrm{var\_scale} =
+  (\mathrm{var\_shape}-1)V_g/(qD).}
+In either model, \code{var_shape} must exceed one when \code{expected_pve} is used.
+
+A \code{"GlobalLocal"}
 block optionally accepts
 \code{local_shape = c(a = 1, b = 0.5)} and \code{global_scale = 1}.
 Alternatively, supply \code{expected_nonzero} and
@@ -106,6 +127,13 @@ Alternatively, supply \code{expected_nonzero} and
 where \eqn{p_0} is \code{expected_nonzero}, \eqn{\sigma_0} is the square root
 of \code{reference_residual_var}, and \eqn{p} is the number of predictors in that
 block. The calibrated fields are mutually exclusive with \code{global_scale}.
+\code{expected_pve} may replace \code{reference_residual_var}. In that case every
+block must supply \code{expected_pve}; their sum \eqn{R^2} defines
+\eqn{\sigma_0^2=(1-R^2)V_y}, which is then used in the same global-scale
+formula. Because the supported beta-prime local priors do not generally
+have a finite signal-variance moment, \code{expected_pve} calibrates the
+residual reference for GlobalLocal rather than matching its block signal
+variance directly.
 This expected-sparsity calibration is derived for the horseshoe and is a useful
 scale heuristic for other beta-prime local priors. Its hierarchy is
 \deqn{\beta_j \mid \tau^2,\psi_j \sim N(0,\tau^2\psi_j),\qquad
@@ -121,6 +149,12 @@ concentrations for the component probabilities; and \code{var_shape = 2} and
 \code{var_scale = 1} for the inverse-gamma prior on the shared variance. Given
 component \eqn{c > 1}, the coefficient variance is
 \eqn{\gamma_c \sigma_\beta^2}.
+As an alternative to \code{var_scale}, define
+\eqn{\bar\gamma=\sum_c\{\alpha_c/\sum_k\alpha_k\}\gamma_c};
+\code{expected_pve} then sets
+\deqn{\mathrm{var\_scale} =
+  (\mathrm{var\_shape}-1)V_g/(D\bar\gamma).}
+Here too, \code{var_shape} must exceed one.
 The coefficient priors are independent of the residual variance.
 }
 \examples{

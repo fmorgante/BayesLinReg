@@ -433,6 +433,103 @@ stopifnot(
   identical(calibrated_fit$ETA$ETA1$reference_residual_var, 0.25)
 )
 
+# `expected_pve` calibrates each model's scale using response and predictor
+# variance, existing inclusion priors, and existing mixture multipliers.
+pve_reference_var <- 2
+pve_target <- 0.3
+pve_fits <- lapply(
+  c("Normal", "SpikeSlab", "SpikeMultiSlab", "GlobalLocal"),
+  function(model) {
+    specification <- list(
+      X = multi_X, model = model, var_shape = 3,
+      expected_pve = pve_target
+    )
+    if (model == "SpikeSlab") specification$pi <- c(a = 1, b = 3)
+    if (model == "SpikeMultiSlab") {
+      specification$gamma <- c(0, 0.1, 1)
+      specification$alpha <- c(7, 2, 1)
+    }
+    if (model == "GlobalLocal") {
+      specification$var_shape <- NULL
+      specification$expected_nonzero <- 1
+    }
+    blm(
+      multi_y, ETA = specification, residual_var = 0.25,
+      reference_response_var = pve_reference_var,
+      iterations = 60, burnin = 20, seed = 112
+    )
+  }
+)
+names(pve_fits) <- c(
+  "Normal", "SpikeSlab", "SpikeMultiSlab", "GlobalLocal"
+)
+pve_normal <- pve_fits$Normal$ETA$ETA1
+pve_spike <- pve_fits$SpikeSlab$ETA$ETA1
+pve_multi <- pve_fits$SpikeMultiSlab$ETA$ETA1
+pve_global <- pve_fits$GlobalLocal$ETA$ETA1
+stopifnot(
+  isTRUE(all.equal(
+    pve_normal$var_scale,
+    (3 - 1) * pve_target * pve_reference_var / ncol(multi_X)
+  )),
+  isTRUE(all.equal(
+    pve_spike$var_scale,
+    (3 - 1) * pve_target * pve_reference_var /
+      (ncol(multi_X) * 0.25)
+  )),
+  isTRUE(all.equal(
+    pve_multi$var_scale,
+    (3 - 1) * pve_target * pve_reference_var /
+      (ncol(multi_X) * sum(c(7, 2, 1) / 10 * c(0, 0.1, 1)))
+  )),
+  isTRUE(all.equal(
+    pve_global$reference_residual_var,
+    (1 - pve_target) * pve_reference_var
+  )),
+  isTRUE(all.equal(
+    pve_global$global_scale,
+    1 / (ncol(multi_X) - 1) *
+      sqrt((1 - pve_target) * pve_reference_var / multi_n)
+  )),
+  all(vapply(
+    pve_fits,
+    function(fit) identical(fit$ETA$ETA1$expected_pve, pve_target),
+    logical(1)
+  ))
+)
+
+# With multiple blocks, GlobalLocal uses the residual share left after summing
+# every block's expected PVE.
+mixed_pve_fit <- blm(
+  multi_y,
+  ETA = list(
+    dense = list(
+      X = multi_X[, 1:2], model = "Normal",
+      var_shape = 3, expected_pve = 0.2
+    ),
+    shrinkage = list(
+      X = multi_X[, 3:4], model = "GlobalLocal",
+      expected_nonzero = 1, expected_pve = 0.3
+    )
+  ),
+  residual_var = 0.25,
+  reference_response_var = 2,
+  iterations = 60,
+  burnin = 20,
+  seed = 113
+)
+stopifnot(
+  isTRUE(all.equal(mixed_pve_fit$ETA$dense$var_scale, 0.4)),
+  isTRUE(all.equal(
+    mixed_pve_fit$ETA$shrinkage$reference_residual_var,
+    (1 - 0.2 - 0.3) * 2
+  )),
+  isTRUE(all.equal(
+    mixed_pve_fit$ETA$shrinkage$global_scale,
+    sqrt(((1 - 0.2 - 0.3) * 2) / multi_n)
+  ))
+)
+
 # A single SpikeSlab block accepts a vector or matrix of predictors.
 spike_fit <- blm(
   multi_y,
@@ -718,6 +815,61 @@ invalid_calls <- list(
       reference_residual_var = 0
     ),
     residual_var = 1
+  ),
+  function() blm(
+    y,
+    ETA = list(
+      X = x, model = "Normal", var_scale = 1, expected_pve = 0.2
+    ),
+    residual_var = 1
+  ),
+  function() blm(
+    y,
+    ETA = list(X = x, model = "Normal", expected_pve = 1),
+    residual_var = 1
+  ),
+  function() blm(
+    y,
+    ETA = list(
+      X = x, model = "Normal", var_shape = 1, expected_pve = 0.2
+    ),
+    residual_var = 1
+  ),
+  function() blm(
+    y,
+    ETA = list(X = x, model = "GlobalLocal", expected_pve = 0.2),
+    residual_var = 1
+  ),
+  function() blm(
+    y,
+    ETA = list(
+      first = list(
+        X = x[, "first", drop = FALSE], model = "GlobalLocal",
+        expected_nonzero = 0.5, expected_pve = 0.2
+      ),
+      second = list(
+        X = x[, "second", drop = FALSE], model = "Normal"
+      )
+    ),
+    residual_var = 1
+  ),
+  function() blm(
+    y,
+    ETA = list(
+      first = list(
+        X = x[, "first", drop = FALSE], model = "Normal",
+        expected_pve = 0.6
+      ),
+      second = list(
+        X = x[, "second", drop = FALSE], model = "Normal",
+        expected_pve = 0.4
+      )
+    ),
+    residual_var = 1
+  ),
+  function() blm(
+    y, ETA = normal_eta(x), residual_var = 1,
+    reference_response_var = 1
   ),
   function() blm(
     y, ETA = normal_eta(x), residual_shape = 2, residual_scale = 1,
