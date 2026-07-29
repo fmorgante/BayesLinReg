@@ -761,7 +761,9 @@
                        store_coefficient_cov = TRUE,
                        effective_n = NULL, fit_intercept = TRUE,
                        intercept_x_mean = NULL, intercept_y_mean = NULL,
-                       XtX = NULL, XtX_center = NULL, Xty = NULL, yty = NULL) {
+                       XtX = NULL, XtX_center = NULL, Xty = NULL, yty = NULL,
+                       center_observations = TRUE,
+                       residual_sse_offset = 0) {
   retained_iterations <- .validate_mcmc(iterations, burnin, thin, seed)
   use_sufficient_statistics <- !is.null(XtX)
   number_of_predictors <- if (use_sufficient_statistics) {
@@ -784,13 +786,17 @@
     corrected_rhs <- as.numeric(Xty)
     residual_sse <- yty
   } else {
-    x_mean <- colMeans(x)
-    y_mean <- mean(y)
+    x_mean <- if (center_observations) colMeans(x) else rep(0, ncol(x))
+    y_mean <- if (center_observations) mean(y) else 0
     if (is.null(effective_n)) effective_n <- length(y)
     if (is.null(intercept_x_mean)) intercept_x_mean <- x_mean
     if (is.null(intercept_y_mean)) intercept_y_mean <- y_mean
-    x_centered <- sweep(x, 2L, x_mean, FUN = "-")
-    y_centered <- y - y_mean
+    x_centered <- if (center_observations) {
+      sweep(x, 2L, x_mean, FUN = "-")
+    } else {
+      x
+    }
+    y_centered <- if (center_observations) y - y_mean else y
     x_squared <- colSums(x_centered^2)
   }
 
@@ -1126,7 +1132,7 @@
       sum_squared_residuals <- if (use_sufficient_statistics) {
         max(0, residual_sse)
       } else {
-        sum(residuals^2)
+        residual_sse_offset + sum(residuals^2)
       }
       residual_posterior_scale <- residual_scale +
         0.5 * sum_squared_residuals
@@ -1317,7 +1323,8 @@
                             intercept_x_mean = NULL,
                             intercept_y_mean = NULL,
                             XtX = NULL, XtX_center = NULL, Xty = NULL,
-                            yty = NULL) {
+                            yty = NULL, center_observations = TRUE,
+                            residual_sse_offset = 0) {
   .validate_mcmc(iterations, burnin, thin, seed)
   use_sufficient_statistics <- !is.null(XtX)
   if (is.null(block_id)) {
@@ -1365,7 +1372,9 @@
     intercept_y_mean = intercept_y_mean,
     use_sufficient_statistics = use_sufficient_statistics,
     summary_Xty = if (use_sufficient_statistics) Xty else numeric(),
-    summary_yty = if (use_sufficient_statistics && !is.null(yty)) yty else 0
+    summary_yty = if (use_sufficient_statistics && !is.null(yty)) yty else 0,
+    center_observations = center_observations,
+    residual_sse_offset = residual_sse_offset
   )
   samples <- if (inherits(XtX, "dgCMatrix")) {
     do.call(

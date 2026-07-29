@@ -163,7 +163,39 @@ otherwise `blm_ss()` fits a no-intercept model and warns. For multiple prior
 blocks, each `ETA` block uses `indices` to select a disjoint set of columns from
 `XtX`.
 
-`XtX` may also be a compressed sparse `dgCMatrix` or `dsCMatrix`. Sparse input 
-requires`version = "Rcpp"`. Full eigenvalue-based validation is optional through
+`XtX` may also be a compressed sparse `dgCMatrix` or `dsCMatrix`. Sparse input
+requires `version = "Rcpp"`. Full eigenvalue-based validation is optional through
 `check_psd = TRUE` and is disabled by default to avoid its cubic initialization
 cost; requesting it for sparse input temporarily constructs a dense matrix.
+
+### Eigen sufficient statistics
+
+`blm_ss_eigen()` accepts precomputed positive eigenpairs of the centered
+predictor cross-product. This avoids storing or traversing a dense `p` by `p`
+matrix when the retained rank is much smaller than `p`:
+
+```r
+X_centered <- sweep(X, 2, colMeans(X), FUN = "-")
+decomposition <- eigen(crossprod(X_centered), symmetric = TRUE)
+keep <- decomposition$values >
+  sqrt(.Machine$double.eps) * max(decomposition$values)
+
+fit_eigen <- blm_ss_eigen(
+  n = nrow(X),
+  XtX_eigenvectors = decomposition$vectors[, keep, drop = FALSE],
+  XtX_eigenvalues = decomposition$values[keep],
+  XtX_prop_var = 1,
+  Xty = crossprod(X, y),
+  yty = sum(y^2),
+  X_means = colMeans(X),
+  y_mean = mean(y),
+  ETA = list(model = "Normal"),
+  residual_var = 1
+)
+```
+
+`XtX_prop_var = 1` declares that every positive eigenpair is supplied and gives
+an exact re-expression of the sufficient-statistic likelihood. Supplying a
+truncated eigenspace with `XtX_prop_var < 1` gives an explicitly approximate
+posterior. The eigendecomposition is intentionally not computed inside
+`blm_ss_eigen()`, so it can be precomputed once and reused across fits.

@@ -217,7 +217,9 @@ Rcpp::List blm_gibbs_core(
     const bool use_sufficient_statistics,
     const SummaryMatrix& summary_XtX,
     const Rcpp::NumericVector& summary_Xty,
-    const double summary_yty) {
+    const double summary_yty,
+    const bool center_observations,
+    const double residual_sse_offset) {
   Rcpp::RNGScope scope;
 
   const int n = y.size();
@@ -227,7 +229,7 @@ Rcpp::List blm_gibbs_core(
 
   std::vector<double> x_mean(p, 0.0);
   double y_mean = 0.0;
-  if (!use_sufficient_statistics) {
+  if (!use_sufficient_statistics && center_observations) {
     for (int i = 0; i < n; ++i) {
       y_mean += y[i];
       for (int j = 0; j < p; ++j) {
@@ -240,13 +242,18 @@ Rcpp::List blm_gibbs_core(
     }
   }
 
-  Rcpp::NumericMatrix x_centered(n, p);
+  Rcpp::NumericMatrix x_centered(
+    center_observations ? n : 0,
+    center_observations ? p : 0
+  );
   Rcpp::NumericVector y_centered(n);
   if (!use_sufficient_statistics) {
     for (int i = 0; i < n; ++i) {
-      y_centered[i] = y[i] - y_mean;
-      for (int j = 0; j < p; ++j) {
-        x_centered(i, j) = X(i, j) - x_mean[j];
+      y_centered[i] = center_observations ? y[i] - y_mean : y[i];
+      if (center_observations) {
+        for (int j = 0; j < p; ++j) {
+          x_centered(i, j) = X(i, j) - x_mean[j];
+        }
       }
     }
   }
@@ -256,8 +263,11 @@ Rcpp::List blm_gibbs_core(
     if (use_sufficient_statistics) {
       x_squared[j] = summary_XtX.diagonal(j);
     } else {
+      const double* x_column = center_observations
+        ? x_centered.begin() + static_cast<std::size_t>(n) * j
+        : X.begin() + static_cast<std::size_t>(n) * j;
       for (int i = 0; i < n; ++i) {
-        x_squared[j] += x_centered(i, j) * x_centered(i, j);
+        x_squared[j] += x_column[i] * x_column[i];
       }
     }
   }
@@ -417,8 +427,11 @@ Rcpp::List blm_gibbs_core(
         ) + x_squared[j] * old_coefficient;
         conditional_numerator = partial_rhs;
       } else {
+        const double* x_column_begin = center_observations
+          ? x_centered.begin() + static_cast<std::size_t>(n) * j
+          : X.begin() + static_cast<std::size_t>(n) * j;
         const Eigen::Map<const Eigen::VectorXd> x_column(
-          x_centered.begin() + static_cast<std::size_t>(n) * j, n
+          x_column_begin, n
         );
         const Eigen::Map<const Eigen::VectorXd> residual(
           residuals.data(), n
@@ -528,8 +541,11 @@ Rcpp::List blm_gibbs_core(
           }
         }
       } else if (coefficient_change != 0.0) {
+        const double* x_column_begin = center_observations
+          ? x_centered.begin() + static_cast<std::size_t>(n) * j
+          : X.begin() + static_cast<std::size_t>(n) * j;
         const Eigen::Map<const Eigen::VectorXd> x_column(
-          x_centered.begin() + static_cast<std::size_t>(n) * j, n
+          x_column_begin, n
         );
         Eigen::Map<Eigen::VectorXd> residual(residuals.data(), n);
         residual.noalias() -= coefficient_change * x_column;
@@ -698,7 +714,8 @@ Rcpp::List blm_gibbs_core(
         const Eigen::Map<const Eigen::VectorXd> residual(
           residuals.data(), n
         );
-        sum_squared_residuals = residual.squaredNorm();
+        sum_squared_residuals =
+          residual_sse_offset + residual.squaredNorm();
       }
       const double posterior_scale =
         residual_scale + 0.5 * std::max(0.0, sum_squared_residuals);
@@ -942,7 +959,9 @@ Rcpp::List blm_gibbs_rcpp_cpp(
     const bool use_sufficient_statistics,
     const Rcpp::NumericMatrix& summary_XtX,
     const Rcpp::NumericVector& summary_Xty,
-    const double summary_yty) {
+    const double summary_yty,
+    const bool center_observations,
+    const double residual_sse_offset) {
   const DenseSummaryMatrix summary_matrix(summary_XtX);
   return blm_gibbs_core(
     y, X, residual_shape, residual_scale, iterations, burnin, thin,
@@ -952,7 +971,7 @@ Rcpp::List blm_gibbs_rcpp_cpp(
     multi_var_scale, learn_residual_var, fixed_residual_var, store_samples,
     store_coefficient_cov, effective_n, fit_intercept, intercept_x_mean,
     intercept_y_mean, use_sufficient_statistics, summary_matrix, summary_Xty,
-    summary_yty
+    summary_yty, center_observations, residual_sse_offset
   );
 }
 
@@ -1001,6 +1020,7 @@ Rcpp::List blm_gibbs_sparse_rcpp_cpp(
     local_a, local_b, multi_gamma_list, multi_pi_alpha_list, multi_var_shape,
     multi_var_scale, learn_residual_var, fixed_residual_var, store_samples,
     store_coefficient_cov, effective_n, fit_intercept, intercept_x_mean,
-    intercept_y_mean, true, summary_matrix, summary_Xty, summary_yty
+    intercept_y_mean, true, summary_matrix, summary_Xty, summary_yty,
+    true, 0.0
   );
 }
