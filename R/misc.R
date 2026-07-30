@@ -780,6 +780,12 @@
     block_id <- rep.int(1L, number_of_predictors)
   }
   number_of_blocks <- length(block_model)
+  block_predictors <- lapply(seq_len(number_of_blocks), function(block) {
+    which(block_id == block)
+  })
+  model_predictors <- lapply(0:3, function(model) {
+    unlist(block_predictors[block_model == model], use.names = FALSE)
+  })
 
   if (use_sufficient_statistics) {
     x_squared <- diag(XtX)
@@ -1035,7 +1041,7 @@
 
     if (has_normal) {
       for (block in which(block_model == 0L)) {
-        predictors <- which(block_id == block)
+        predictors <- block_predictors[[block]]
         normal_var[block] <- 1 / stats::rgamma(
           1L,
           shape = normal_shape[block] + length(predictors) / 2,
@@ -1046,7 +1052,7 @@
 
     if (has_spike_slab) {
       for (block in which(block_model == 1L)) {
-        predictors <- which(block_id == block)
+        predictors <- block_predictors[[block]]
         number_included <- sum(inclusion[predictors])
         pi[block] <- stats::rbeta(
           1L,
@@ -1065,7 +1071,7 @@
 
     if (has_spike_multi_slab) {
       for (block in which(block_model == 3L)) {
-        predictors <- which(block_id == block)
+        predictors <- block_predictors[[block]]
         components <- multi_component[predictors]
         counts <- tabulate(components, nbins = length(multi_gamma[[block]]))
         gamma_draws <- stats::rgamma(
@@ -1091,7 +1097,7 @@
 
     if (has_global_local) {
       for (block in which(block_model == 2L)) {
-        predictors <- which(block_id == block)
+        predictors <- block_predictors[[block]]
         gig_chi <- pmax(
           coefficient[predictors]^2 / tau_sq[block],
           .Machine$double.xmin
@@ -1193,21 +1199,26 @@
           normal_var_sum_sq <- normal_var_sum_sq + normal_var^2
         }
         if (has_spike_slab) {
-          inclusion_sum <- inclusion_sum + inclusion
+          predictors <- model_predictors[[2L]]
+          inclusion_sum[predictors] <-
+            inclusion_sum[predictors] + inclusion[predictors]
           pi_sum <- pi_sum + pi
           pi_sum_sq <- pi_sum_sq + pi^2
           slab_var_sum <- slab_var_sum + slab_var
           slab_var_sum_sq <- slab_var_sum_sq + slab_var^2
         }
         if (has_global_local) {
-          local_var_sum <- local_var_sum + local_var
-          local_var_sum_sq <- local_var_sum_sq + local_var^2
+          predictors <- model_predictors[[3L]]
+          local_var_sum[predictors] <-
+            local_var_sum[predictors] + local_var[predictors]
+          local_var_sum_sq[predictors] <-
+            local_var_sum_sq[predictors] + local_var[predictors]^2
           tau_sq_sum <- tau_sq_sum + tau_sq
           tau_sq_sum_sq <- tau_sq_sum_sq + tau_sq^2
         }
         if (has_spike_multi_slab) {
           for (block in which(block_model == 3L)) {
-            predictors <- which(block_id == block)
+            predictors <- block_predictors[[block]]
             for (component in seq_along(multi_gamma[[block]])) {
               selected <- multi_component[predictors] == component
               multi_component_sum[[block]][selected, component] <-

@@ -226,6 +226,21 @@ Rcpp::List blm_gibbs_core(
   const int p = use_sufficient_statistics ? summary_XtX.cols() : X.ncol();
   const int number_of_blocks = block_model.size();
   const int number_of_draws = (iterations - burnin - 1) / thin + 1;
+  std::vector< std::vector<int> > block_predictors(number_of_blocks);
+  bool has_normal = false;
+  bool has_spike_slab = false;
+  bool has_global_local = false;
+  bool has_spike_multi_slab = false;
+  for (int block = 0; block < number_of_blocks; ++block) {
+    has_normal = has_normal || block_model[block] == 0;
+    has_spike_slab = has_spike_slab || block_model[block] == 1;
+    has_global_local = has_global_local || block_model[block] == 2;
+    has_spike_multi_slab =
+      has_spike_multi_slab || block_model[block] == 3;
+  }
+  for (int j = 0; j < p; ++j) {
+    block_predictors[block_id[j] - 1].push_back(j);
+  }
 
   std::vector<double> x_mean(p, 0.0);
   double y_mean = 0.0;
@@ -273,21 +288,40 @@ Rcpp::List blm_gibbs_core(
   }
 
   const int stored_rows = store_samples ? number_of_draws : 0;
+  // Allocate posterior storage only for prior families used by this fit.
   Rcpp::NumericMatrix coefficient_samples(stored_rows, p);
   Rcpp::NumericVector intercept_samples(stored_rows);
   Rcpp::NumericVector residual_var_samples(stored_rows);
-  Rcpp::NumericMatrix normal_var_samples(stored_rows, number_of_blocks);
-  Rcpp::IntegerMatrix inclusion_samples(stored_rows, p);
-  Rcpp::NumericMatrix pi_samples(stored_rows, number_of_blocks);
-  Rcpp::NumericMatrix slab_var_samples(stored_rows, number_of_blocks);
-  Rcpp::NumericMatrix local_var_samples(stored_rows, p);
-  Rcpp::NumericMatrix tau_sq_samples(stored_rows, number_of_blocks);
-  Rcpp::IntegerMatrix multi_component_samples(stored_rows, p);
+  Rcpp::NumericMatrix normal_var_samples(
+    stored_rows, has_normal ? number_of_blocks : 0
+  );
+  Rcpp::IntegerMatrix inclusion_samples(
+    stored_rows, has_spike_slab ? p : 0
+  );
+  Rcpp::NumericMatrix pi_samples(
+    stored_rows, has_spike_slab ? number_of_blocks : 0
+  );
+  Rcpp::NumericMatrix slab_var_samples(
+    stored_rows, has_spike_slab ? number_of_blocks : 0
+  );
+  Rcpp::NumericMatrix local_var_samples(
+    stored_rows, has_global_local ? p : 0
+  );
+  Rcpp::NumericMatrix tau_sq_samples(
+    stored_rows, has_global_local ? number_of_blocks : 0
+  );
+  Rcpp::IntegerMatrix multi_component_samples(
+    stored_rows, has_spike_multi_slab ? p : 0
+  );
   Rcpp::List multi_pi_samples(number_of_blocks);
-  Rcpp::NumericMatrix multi_var_samples(stored_rows, number_of_blocks);
+  Rcpp::NumericMatrix multi_var_samples(
+    stored_rows, has_spike_multi_slab ? number_of_blocks : 0
+  );
   Rcpp::NumericVector coefficient_sum(p);
   Rcpp::NumericVector coefficient_sum_sq(p);
-  const int covariance_dimension = store_coefficient_cov ? p : 0;
+  // Stored draws are used to compute their covariance after sampling.
+  const int covariance_dimension =
+    !store_samples && store_coefficient_cov ? p : 0;
   Rcpp::NumericMatrix coefficient_crossprod(
     covariance_dimension, covariance_dimension
   );
@@ -295,28 +329,48 @@ Rcpp::List blm_gibbs_core(
   double intercept_sum_sq = 0.0;
   double residual_var_sum = 0.0;
   double residual_var_sum_sq = 0.0;
-  Rcpp::NumericVector normal_var_sum(number_of_blocks);
-  Rcpp::NumericVector normal_var_sum_sq(number_of_blocks);
-  Rcpp::NumericVector inclusion_sum(p);
-  Rcpp::NumericVector pi_sum(number_of_blocks);
-  Rcpp::NumericVector pi_sum_sq(number_of_blocks);
-  Rcpp::NumericVector slab_var_sum(number_of_blocks);
-  Rcpp::NumericVector slab_var_sum_sq(number_of_blocks);
-  Rcpp::NumericVector local_var_sum(p);
-  Rcpp::NumericVector local_var_sum_sq(p);
-  Rcpp::NumericVector tau_sq_sum(number_of_blocks);
-  Rcpp::NumericVector tau_sq_sum_sq(number_of_blocks);
+  Rcpp::NumericVector normal_var_sum(
+    has_normal ? number_of_blocks : 0
+  );
+  Rcpp::NumericVector normal_var_sum_sq(
+    has_normal ? number_of_blocks : 0
+  );
+  Rcpp::NumericVector inclusion_sum(has_spike_slab ? p : 0);
+  Rcpp::NumericVector pi_sum(
+    has_spike_slab ? number_of_blocks : 0
+  );
+  Rcpp::NumericVector pi_sum_sq(
+    has_spike_slab ? number_of_blocks : 0
+  );
+  Rcpp::NumericVector slab_var_sum(
+    has_spike_slab ? number_of_blocks : 0
+  );
+  Rcpp::NumericVector slab_var_sum_sq(
+    has_spike_slab ? number_of_blocks : 0
+  );
+  Rcpp::NumericVector local_var_sum(has_global_local ? p : 0);
+  Rcpp::NumericVector local_var_sum_sq(has_global_local ? p : 0);
+  Rcpp::NumericVector tau_sq_sum(
+    has_global_local ? number_of_blocks : 0
+  );
+  Rcpp::NumericVector tau_sq_sum_sq(
+    has_global_local ? number_of_blocks : 0
+  );
   Rcpp::List multi_component_sum(number_of_blocks);
   Rcpp::List multi_pi_sum(number_of_blocks);
   Rcpp::List multi_pi_sum_sq(number_of_blocks);
-  Rcpp::NumericVector multi_var_sum(number_of_blocks);
-  Rcpp::NumericVector multi_var_sum_sq(number_of_blocks);
+  Rcpp::NumericVector multi_var_sum(
+    has_spike_multi_slab ? number_of_blocks : 0
+  );
+  Rcpp::NumericVector multi_var_sum_sq(
+    has_spike_multi_slab ? number_of_blocks : 0
+  );
   std::vector<double> coefficient(p, 0.0);
-  std::vector<int> inclusion(p, 1);
-  std::vector<int> multi_component(p, 0);
+  std::vector<int> inclusion(has_spike_slab ? p : 0, 1);
+  std::vector<int> multi_component(has_spike_multi_slab ? p : 0, 0);
   std::vector<int> multi_local_index(p, -1);
-  std::vector<double> local_var(p, 1.0);
-  std::vector<double> local_aux(p, 1.0);
+  std::vector<double> local_var(has_global_local ? p : 0, 1.0);
+  std::vector<double> local_aux(has_global_local ? p : 0, 1.0);
   std::vector<double> residuals(n);
   std::vector<double> corrected_rhs(p, 0.0);
   std::vector<double> fitted_crossproduct(p, 0.0);
@@ -344,28 +398,20 @@ Rcpp::List blm_gibbs_core(
   std::vector< std::vector<double> > multi_gamma(number_of_blocks);
   std::vector< std::vector<double> > multi_pi_alpha(number_of_blocks);
   std::vector< std::vector<double> > multi_pi(number_of_blocks);
-  bool has_normal = false;
-  bool has_spike_slab = false;
-  bool has_global_local = false;
-  bool has_spike_multi_slab = false;
   for (int block = 0; block < number_of_blocks; ++block) {
     if (block_model[block] == 0) {
-      has_normal = true;
       normal_var[block] =
         normal_scale[block] / (normal_shape[block] + 1.0);
     }
     if (block_model[block] == 1) {
-      has_spike_slab = true;
       pi[block] = pi_alpha[block] / (pi_alpha[block] + pi_beta[block]);
       slab_var[block] =
         spike_var_scale[block] / (spike_var_shape[block] + 1.0);
     }
     if (block_model[block] == 2) {
-      has_global_local = true;
       tau_sq[block] = global_scale[block] * global_scale[block];
     }
     if (block_model[block] == 3) {
-      has_spike_multi_slab = true;
       const Rcpp::NumericVector gamma_values = multi_gamma_list[block];
       const Rcpp::NumericVector alpha_values = multi_pi_alpha_list[block];
       multi_gamma[block] = Rcpp::as< std::vector<double> >(gamma_values);
@@ -386,15 +432,14 @@ Rcpp::List blm_gibbs_core(
           stored_rows, alpha_values.size()
         );
       } else {
-        int block_size = 0;
-        for (int j = 0; j < p; ++j) {
-          if (block_id[j] - 1 == block) {
-            multi_local_index[j] = block_size;
-            ++block_size;
-          }
+        const std::vector<int>& predictors = block_predictors[block];
+        for (int local_index = 0;
+             local_index < static_cast<int>(predictors.size());
+             ++local_index) {
+          multi_local_index[predictors[local_index]] = local_index;
         }
         multi_component_sum[block] = Rcpp::NumericMatrix(
-          block_size, alpha_values.size()
+          predictors.size(), alpha_values.size()
         );
         multi_pi_sum[block] = Rcpp::NumericVector(alpha_values.size());
         multi_pi_sum_sq[block] = Rcpp::NumericVector(alpha_values.size());
@@ -574,18 +619,16 @@ Rcpp::List blm_gibbs_core(
         if (block_model[block] != 0) {
           continue;
         }
-        int block_size = 0;
+        const std::vector<int>& predictors = block_predictors[block];
         double coefficient_sum_of_squares = 0.0;
-        for (int j = 0; j < p; ++j) {
-          if (block_id[j] - 1 == block) {
-            coefficient_sum_of_squares += coefficient[j] * coefficient[j];
-            ++block_size;
-          }
+        for (std::size_t index = 0; index < predictors.size(); ++index) {
+          const int j = predictors[index];
+          coefficient_sum_of_squares += coefficient[j] * coefficient[j];
         }
         const double normal_posterior_scale =
           normal_scale[block] + 0.5 * coefficient_sum_of_squares;
         normal_var[block] = 1.0 / R::rgamma(
-          normal_shape[block] + 0.5 * block_size,
+          normal_shape[block] + 0.5 * predictors.size(),
           1.0 / normal_posterior_scale
         );
       }
@@ -596,21 +639,19 @@ Rcpp::List blm_gibbs_core(
         if (block_model[block] != 1) {
           continue;
         }
+        const std::vector<int>& predictors = block_predictors[block];
         int number_included = 0;
-        int block_size = 0;
         double included_sum_of_squares = 0.0;
-        for (int j = 0; j < p; ++j) {
-          if (block_id[j] - 1 == block) {
-            number_included += inclusion[j];
-            if (inclusion[j] == 1) {
-              included_sum_of_squares += coefficient[j] * coefficient[j];
-            }
-            ++block_size;
+        for (std::size_t index = 0; index < predictors.size(); ++index) {
+          const int j = predictors[index];
+          number_included += inclusion[j];
+          if (inclusion[j] == 1) {
+            included_sum_of_squares += coefficient[j] * coefficient[j];
           }
         }
         pi[block] = R::rbeta(
           pi_alpha[block] + number_included,
-          pi_beta[block] + block_size - number_included
+          pi_beta[block] + predictors.size() - number_included
         );
         const double slab_posterior_scale =
           spike_var_scale[block] + 0.5 * included_sum_of_squares;
@@ -627,13 +668,12 @@ Rcpp::List blm_gibbs_core(
           continue;
         }
         const int component_count = multi_gamma[block].size();
+        const std::vector<int>& predictors = block_predictors[block];
         std::vector<int> counts(component_count, 0);
         int number_nonzero = 0;
         double scaled_sum_of_squares = 0.0;
-        for (int j = 0; j < p; ++j) {
-          if (block_id[j] - 1 != block) {
-            continue;
-          }
+        for (std::size_t index = 0; index < predictors.size(); ++index) {
+          const int j = predictors[index];
           const int component = multi_component[j];
           ++counts[component];
           if (component > 0) {
@@ -666,12 +706,9 @@ Rcpp::List blm_gibbs_core(
         if (block_model[block] != 2) {
           continue;
         }
-        int block_size = 0;
-        for (int j = 0; j < p; ++j) {
-          if (block_id[j] - 1 != block) {
-            continue;
-          }
-          ++block_size;
+        const std::vector<int>& predictors = block_predictors[block];
+        for (std::size_t index = 0; index < predictors.size(); ++index) {
+          const int j = predictors[index];
           const double raw_chi =
             coefficient[j] * coefficient[j] / tau_sq[block];
           const double chi = std::max(
@@ -690,14 +727,13 @@ Rcpp::List blm_gibbs_core(
         }
 
         double tau_rate = 1.0 / global_aux[block];
-        for (int j = 0; j < p; ++j) {
-          if (block_id[j] - 1 == block) {
-            tau_rate += coefficient[j] * coefficient[j] /
-              (2.0 * local_var[j]);
-          }
+        for (std::size_t index = 0; index < predictors.size(); ++index) {
+          const int j = predictors[index];
+          tau_rate += coefficient[j] * coefficient[j] /
+            (2.0 * local_var[j]);
         }
         tau_sq[block] = 1.0 / R::rgamma(
-          (static_cast<double>(block_size) + 1.0) / 2.0,
+          (static_cast<double>(predictors.size()) + 1.0) / 2.0,
           1.0 / tau_rate
         );
         const double global_aux_rate =
@@ -796,11 +832,14 @@ Rcpp::List blm_gibbs_core(
         for (int j = 0; j < p; ++j) {
           coefficient_sum[j] += coefficient[j];
           coefficient_sum_sq[j] += coefficient[j] * coefficient[j];
-          inclusion_sum[j] += inclusion[j];
-          local_var_sum[j] += local_var[j];
-          local_var_sum_sq[j] += local_var[j] * local_var[j];
-          if (block_model[block_id[j] - 1] == 3) {
-            const int block = block_id[j] - 1;
+          const int block = block_id[j] - 1;
+          const int model = block_model[block];
+          if (model == 1) {
+            inclusion_sum[j] += inclusion[j];
+          } else if (model == 2) {
+            local_var_sum[j] += local_var[j];
+            local_var_sum_sq[j] += local_var[j] * local_var[j];
+          } else if (model == 3) {
             Rcpp::NumericMatrix block_component_sum =
               multi_component_sum[block];
             block_component_sum(
@@ -823,15 +862,20 @@ Rcpp::List blm_gibbs_core(
         residual_var_sum += residual_var;
         residual_var_sum_sq += residual_var * residual_var;
         for (int block = 0; block < number_of_blocks; ++block) {
-          normal_var_sum[block] += normal_var[block];
-          normal_var_sum_sq[block] += normal_var[block] * normal_var[block];
-          pi_sum[block] += pi[block];
-          pi_sum_sq[block] += pi[block] * pi[block];
-          slab_var_sum[block] += slab_var[block];
-          slab_var_sum_sq[block] += slab_var[block] * slab_var[block];
-          tau_sq_sum[block] += tau_sq[block];
-          tau_sq_sum_sq[block] += tau_sq[block] * tau_sq[block];
-          if (block_model[block] == 3) {
+          const int model = block_model[block];
+          if (model == 0) {
+            normal_var_sum[block] += normal_var[block];
+            normal_var_sum_sq[block] +=
+              normal_var[block] * normal_var[block];
+          } else if (model == 1) {
+            pi_sum[block] += pi[block];
+            pi_sum_sq[block] += pi[block] * pi[block];
+            slab_var_sum[block] += slab_var[block];
+            slab_var_sum_sq[block] += slab_var[block] * slab_var[block];
+          } else if (model == 2) {
+            tau_sq_sum[block] += tau_sq[block];
+            tau_sq_sum_sq[block] += tau_sq[block] * tau_sq[block];
+          } else if (model == 3) {
             Rcpp::NumericVector block_pi_sum = multi_pi_sum[block];
             Rcpp::NumericVector block_pi_sum_sq = multi_pi_sum_sq[block];
             for (int component = 0;

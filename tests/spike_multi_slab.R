@@ -93,6 +93,51 @@ stopifnot(
   identical(dim(mixed_fit$ETA$five$pi_samples), c(60L, 5L))
 )
 
+# Mixed prior families preserve identical stored and online summaries after
+# precomputing block membership and allocating only family-specific state.
+all_prior_eta <- list(
+  normal = list(X = X[, 1, drop = FALSE], model = "Normal"),
+  selection = list(X = X[, 2, drop = FALSE], model = "SpikeSlab"),
+  shrinkage = list(X = X[, 3, drop = FALSE], model = "GlobalLocal"),
+  mixture = list(X = X[, 4:6, drop = FALSE], model = "SpikeMultiSlab")
+)
+all_prior_stored <- blm(
+  y, ETA = all_prior_eta, residual_var = 1,
+  iterations = 100, burnin = 40, seed = 705
+)
+all_prior_online <- blm(
+  y, ETA = all_prior_eta, residual_var = 1,
+  iterations = 100, burnin = 40, seed = 705,
+  store_samples = FALSE
+)
+stopifnot(
+  all(vapply(names(all_prior_eta), function(block) {
+    isTRUE(all.equal(
+      all_prior_stored$ETA[[block]]$coefficient_mean,
+      all_prior_online$ETA[[block]]$coefficient_mean
+    )) && isTRUE(all.equal(
+      all_prior_stored$ETA[[block]]$coefficient_cov,
+      all_prior_online$ETA[[block]]$coefficient_cov
+    ))
+  }, logical(1))),
+  isTRUE(all.equal(
+    all_prior_stored$ETA$normal$normal_var_mean,
+    all_prior_online$ETA$normal$normal_var_mean
+  )),
+  isTRUE(all.equal(
+    all_prior_stored$ETA$selection$inclusion_probability,
+    all_prior_online$ETA$selection$inclusion_probability
+  )),
+  isTRUE(all.equal(
+    all_prior_stored$ETA$shrinkage$local_var_mean,
+    all_prior_online$ETA$shrinkage$local_var_mean
+  )),
+  isTRUE(all.equal(
+    all_prior_stored$ETA$mixture$component_probability,
+    all_prior_online$ETA$mixture$component_probability
+  ))
+)
+
 # SpikeSlab now uses the same variance-prior field names as other models.
 renamed_fit <- blm(
   y,
