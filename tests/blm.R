@@ -14,6 +14,20 @@ normal_eta <- function(X, var_shape = 2, var_scale = 10,
   )
 }
 
+# Raw-data normalization keeps one centered/scaled working design and the
+# compact metadata needed to reconstruct the intercept.
+normalized_block <- BayesLinReg:::.normalize_eta(
+  normal_eta(x), nrow(x), residual_var = 1
+)[[1L]]
+stopifnot(
+  is.null(normalized_block$X),
+  max(abs(colMeans(normalized_block$x))) < 1e-14,
+  isTRUE(all.equal(
+    normalized_block$predictor_mean,
+    colMeans(x) / normalized_block$predictor_scale
+  ))
+)
+
 # A Normal block samples one shared coefficient variance.
 known_fit <- blm(
   y,

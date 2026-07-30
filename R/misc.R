@@ -185,7 +185,8 @@
         call. = FALSE
       )
     }
-    x_centered <- sweep(X, 2L, colMeans(X), FUN = "-")
+    predictor_mean <- colMeans(X)
+    x_centered <- sweep(X, 2L, predictor_mean, FUN = "-")
     constant_predictors <- vapply(
       seq_len(ncol(X)),
       function(index) all(X[, index] == X[1L, index]),
@@ -449,10 +450,10 @@
       model_code = match(
         model, c("Normal", "SpikeSlab", "GlobalLocal", "SpikeMultiSlab")
       ) - 1L,
-      X = X,
-      x = sweep(X, 2L, predictor_scale, FUN = "/"),
+      x = sweep(x_centered, 2L, predictor_scale, FUN = "/"),
       predictor_names = colnames(X),
       predictor_scale = predictor_scale,
+      predictor_mean = predictor_mean / predictor_scale,
       standardize = standardize,
       normal_shape = normal_shape,
       normal_scale = normal_scale,
@@ -786,6 +787,11 @@
   model_predictors <- lapply(0:3, function(model) {
     unlist(block_predictors[block_model == model], use.names = FALSE)
   })
+  model_local_index <- integer(number_of_predictors)
+  for (model in 0:3) {
+    predictors <- model_predictors[[model + 1L]]
+    model_local_index[predictors] <- seq_along(predictors)
+  }
 
   if (use_sufficient_statistics) {
     x_squared <- diag(XtX)
@@ -844,17 +850,17 @@
       inclusion_samples <- matrix(
         NA_integer_,
         nrow = number_of_draws,
-        ncol = number_of_predictors,
-        dimnames = list(NULL, predictor_names)
+        ncol = length(model_predictors[[2L]]),
+        dimnames = list(NULL, predictor_names[model_predictors[[2L]]])
       )
       pi_samples <- matrix(NA_real_, number_of_draws, number_of_blocks)
       slab_var_samples <- matrix(NA_real_, number_of_draws, number_of_blocks)
     } else {
-      inclusion_sum <- numeric(number_of_predictors)
+      inclusion_sum <- numeric(length(model_predictors[[2L]]))
       pi_sum <- pi_sum_sq <- numeric(number_of_blocks)
       slab_var_sum <- slab_var_sum_sq <- numeric(number_of_blocks)
     }
-    inclusion <- rep.int(1L, number_of_predictors)
+    inclusion <- rep.int(1L, length(model_predictors[[2L]]))
     pi <- pi_alpha / (pi_alpha + pi_beta)
     slab_var <- spike_var_scale / (spike_var_shape + 1)
   }
@@ -863,29 +869,30 @@
       local_var_samples <- matrix(
         NA_real_,
         nrow = number_of_draws,
-        ncol = number_of_predictors,
-        dimnames = list(NULL, predictor_names)
+        ncol = length(model_predictors[[3L]]),
+        dimnames = list(NULL, predictor_names[model_predictors[[3L]]])
       )
       tau_sq_samples <- matrix(NA_real_, number_of_draws, number_of_blocks)
     } else {
-      local_var_sum <- local_var_sum_sq <- numeric(number_of_predictors)
+      local_var_sum <- local_var_sum_sq <-
+        numeric(length(model_predictors[[3L]]))
       tau_sq_sum <- tau_sq_sum_sq <- numeric(number_of_blocks)
     }
-    local_var <- rep(1, number_of_predictors)
-    local_aux <- rep(1, number_of_predictors)
+    local_var <- rep(1, length(model_predictors[[3L]]))
+    local_aux <- rep(1, length(model_predictors[[3L]]))
     tau_sq <- global_scale^2
     global_aux <- rep(1, number_of_blocks)
   }
   if (has_spike_multi_slab) {
-    multi_component <- rep.int(1L, number_of_predictors)
+    multi_component <- rep.int(1L, length(model_predictors[[4L]]))
     multi_pi <- lapply(seq_len(number_of_blocks), function(block) {
       multi_pi_alpha[[block]] / sum(multi_pi_alpha[[block]])
     })
     multi_var <- multi_var_scale / (multi_var_shape + 1)
     if (store_samples) {
       multi_component_samples <- matrix(
-        NA_integer_, number_of_draws, number_of_predictors,
-        dimnames = list(NULL, predictor_names)
+        NA_integer_, number_of_draws, length(model_predictors[[4L]]),
+        dimnames = list(NULL, predictor_names[model_predictors[[4L]]])
       )
       multi_pi_samples <- lapply(seq_len(number_of_blocks), function(block) {
         if (block_model[block] == 3L) {
@@ -930,11 +937,13 @@
   }
   progress_index <- 1L
   last_reported_iteration <- 0L
+  residual_refresh_interval <- 100L
 
   for (iteration in seq_len(iterations)) {
     for (predictor in seq_len(number_of_predictors)) {
       block <- block_id[predictor]
       model <- block_model[block]
+      local_index <- model_local_index[predictor]
       old_coefficient <- coefficient[predictor]
       if (use_sufficient_statistics) {
         partial_rhs <- corrected_rhs[predictor] +
@@ -964,10 +973,10 @@
         }
         probabilities <- exp(log_weights - max(log_weights))
         probabilities <- probabilities / sum(probabilities)
-        multi_component[predictor] <- sample.int(
+        multi_component[local_index] <- sample.int(
           length(gamma), 1L, prob = probabilities
         )
-        component <- multi_component[predictor]
+        component <- multi_component[local_index]
         coefficient[predictor] <- if (component == 1L) {
           0
         } else {
@@ -978,7 +987,7 @@
         }
       } else {
         prior_precision <- if (model == 2L) {
-          1 / tau_sq[block] / local_var[predictor]
+          1 / tau_sq[block] / local_var[local_index]
         } else if (model == 1L) {
           1 / slab_var[block]
         } else {
@@ -996,13 +1005,13 @@
           log_inclusion_odds <- stats::qlogis(bounded_pi) +
             0.5 * log(conditional_var / slab_var[block]) +
             conditional_mean^2 / (2 * conditional_var)
-          inclusion[predictor] <- stats::rbinom(
+          inclusion[local_index] <- stats::rbinom(
             1L,
             size = 1L,
             prob = stats::plogis(log_inclusion_odds)
           )
         }
-        if (model != 1L || inclusion[predictor] == 1L) {
+        if (model != 1L || inclusion[local_index] == 1L) {
           coefficient[predictor] <- stats::rnorm(
             1L,
             mean = conditional_mean,
@@ -1030,12 +1039,17 @@
       }
     }
 
-    if (use_sufficient_statistics && iteration %% 100L == 0L) {
-      fitted_crossproducts <- drop(XtX %*% coefficient)
-      corrected_rhs <- Xty - fitted_crossproducts
-      if (learn_residual_var) {
-        residual_sse <- yty - 2 * sum(coefficient * Xty) +
-          sum(coefficient * fitted_crossproducts)
+    # Reconstruct accumulated state periodically to limit floating-point drift.
+    if (iteration %% residual_refresh_interval == 0L) {
+      if (use_sufficient_statistics) {
+        fitted_crossproducts <- drop(XtX %*% coefficient)
+        corrected_rhs <- Xty - fitted_crossproducts
+        if (learn_residual_var) {
+          residual_sse <- yty - 2 * sum(coefficient * Xty) +
+            sum(coefficient * fitted_crossproducts)
+        }
+      } else {
+        residuals <- y_centered - drop(x_centered %*% coefficient)
       }
     }
 
@@ -1053,13 +1067,14 @@
     if (has_spike_slab) {
       for (block in which(block_model == 1L)) {
         predictors <- block_predictors[[block]]
-        number_included <- sum(inclusion[predictors])
+        local_indices <- model_local_index[predictors]
+        number_included <- sum(inclusion[local_indices])
         pi[block] <- stats::rbeta(
           1L,
           shape1 = pi_alpha[block] + number_included,
           shape2 = pi_beta[block] + length(predictors) - number_included
         )
-        included_predictors <- predictors[inclusion[predictors] == 1L]
+        included_predictors <- predictors[inclusion[local_indices] == 1L]
         slab_var[block] <- 1 / stats::rgamma(
           1L,
           shape = spike_var_shape[block] + length(included_predictors) / 2,
@@ -1072,7 +1087,7 @@
     if (has_spike_multi_slab) {
       for (block in which(block_model == 3L)) {
         predictors <- block_predictors[[block]]
-        components <- multi_component[predictors]
+        components <- multi_component[model_local_index[predictors]]
         counts <- tabulate(components, nbins = length(multi_gamma[[block]]))
         gamma_draws <- stats::rgamma(
           length(counts), shape = multi_pi_alpha[[block]] + counts
@@ -1098,33 +1113,33 @@
     if (has_global_local) {
       for (block in which(block_model == 2L)) {
         predictors <- block_predictors[[block]]
+        local_indices <- model_local_index[predictors]
         gig_chi <- pmax(
           coefficient[predictors]^2 / tau_sq[block],
           .Machine$double.xmin
         )
-        local_var[predictors] <- vapply(
+        local_var[local_indices] <- vapply(
           seq_along(predictors),
           function(index) {
-            predictor <- predictors[index]
             .draw_gig(
               n = 1L,
               lambda = local_a[block] - 0.5,
               chi = gig_chi[index],
-              psi = 2 * local_aux[predictor]
+              psi = 2 * local_aux[local_indices[index]]
             )
           },
           numeric(1)
         )
-        local_aux[predictors] <- stats::rgamma(
+        local_aux[local_indices] <- stats::rgamma(
           length(predictors),
           shape = local_a[block] + local_b[block],
-          rate = 1 + local_var[predictors]
+          rate = 1 + local_var[local_indices]
         )
         tau_sq[block] <- 1 / stats::rgamma(
           1L,
           shape = (length(predictors) + 1) / 2,
           rate = 1 / global_aux[block] +
-            sum(coefficient[predictors]^2 / local_var[predictors]) / 2
+            sum(coefficient[predictors]^2 / local_var[local_indices]) / 2
         )
         global_aux[block] <- 1 / stats::rgamma(
           1L,
@@ -1199,28 +1214,25 @@
           normal_var_sum_sq <- normal_var_sum_sq + normal_var^2
         }
         if (has_spike_slab) {
-          predictors <- model_predictors[[2L]]
-          inclusion_sum[predictors] <-
-            inclusion_sum[predictors] + inclusion[predictors]
+          inclusion_sum <- inclusion_sum + inclusion
           pi_sum <- pi_sum + pi
           pi_sum_sq <- pi_sum_sq + pi^2
           slab_var_sum <- slab_var_sum + slab_var
           slab_var_sum_sq <- slab_var_sum_sq + slab_var^2
         }
         if (has_global_local) {
-          predictors <- model_predictors[[3L]]
-          local_var_sum[predictors] <-
-            local_var_sum[predictors] + local_var[predictors]
-          local_var_sum_sq[predictors] <-
-            local_var_sum_sq[predictors] + local_var[predictors]^2
+          local_var_sum <- local_var_sum + local_var
+          local_var_sum_sq <- local_var_sum_sq + local_var^2
           tau_sq_sum <- tau_sq_sum + tau_sq
           tau_sq_sum_sq <- tau_sq_sum_sq + tau_sq^2
         }
         if (has_spike_multi_slab) {
           for (block in which(block_model == 3L)) {
             predictors <- block_predictors[[block]]
+            components <-
+              multi_component[model_local_index[predictors]]
             for (component in seq_along(multi_gamma[[block]])) {
-              selected <- multi_component[predictors] == component
+              selected <- components == component
               multi_component_sum[[block]][selected, component] <-
                 multi_component_sum[[block]][selected, component] + 1
             }
@@ -1423,25 +1435,29 @@
     } else {
       colnames(x)
     }
+    predictor_model <- block_model[block_id]
     colnames(samples$coefficient_samples) <- predictor_names
     if (!any(block_model == 0L)) {
       samples$normal_var_samples <- NULL
     }
     if (any(block_model == 1L)) {
-      colnames(samples$inclusion_samples) <- predictor_names
+      colnames(samples$inclusion_samples) <-
+        predictor_names[predictor_model == 1L]
     } else {
       samples$inclusion_samples <- NULL
       samples$pi_samples <- NULL
       samples$slab_var_samples <- NULL
     }
     if (any(block_model == 2L)) {
-      colnames(samples$local_var_samples) <- predictor_names
+      colnames(samples$local_var_samples) <-
+        predictor_names[predictor_model == 2L]
     } else {
       samples$local_var_samples <- NULL
       samples$tau_sq_samples <- NULL
     }
     if (any(block_model == 3L)) {
-      colnames(samples$multi_component_samples) <- predictor_names
+      colnames(samples$multi_component_samples) <-
+        predictor_names[predictor_model == 3L]
     } else {
       samples$multi_component_samples <- NULL
       samples$multi_pi_samples <- NULL

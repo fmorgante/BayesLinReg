@@ -200,8 +200,7 @@ blm <- function(y, ETA, residual_var = NULL,
       .validate_variance(reference_response_var, "var(y)")
     }
     predictor_variance_sums <- vapply(blocks, function(block) {
-      centered_x <- sweep(block$x, 2L, colMeans(block$x), FUN = "-")
-      sum(colSums(centered_x^2) / (nrow(centered_x) - 1))
+      sum(colSums(block$x^2) / (nrow(block$x) - 1))
     }, numeric(1))
     blocks <- .calibrate_eta_priors(
       blocks, predictor_variance_sums, reference_response_var, length(y)
@@ -221,6 +220,15 @@ blm <- function(y, ETA, residual_var = NULL,
     )
     block_x
   }))
+  intercept_x_mean <- unlist(
+    lapply(blocks, `[[`, "predictor_mean"),
+    use.names = FALSE
+  )
+  for (block_index in seq_along(blocks)) {
+    blocks[[block_index]]$x <- NULL
+    blocks[[block_index]]$predictor_mean <- NULL
+  }
+  centered_y <- y - mean(y)
   residual_prior <- .prepare_residual_prior(
     residual_var, residual_shape, residual_scale, blocks,
     reference_response_var
@@ -243,7 +251,7 @@ blm <- function(y, ETA, residual_var = NULL,
   multi_var_shape <- vapply(blocks, `[[`, numeric(1), "multi_var_shape")
   multi_var_scale <- vapply(blocks, `[[`, numeric(1), "multi_var_scale")
   sampler_arguments <- list(
-    y = y,
+    y = centered_y,
     x = x,
     residual_shape = if (is.null(residual_shape)) 1 else residual_shape,
     residual_scale = if (is.null(residual_scale)) 1 else residual_scale,
@@ -267,7 +275,12 @@ blm <- function(y, ETA, residual_var = NULL,
     multi_var_shape = multi_var_shape,
     multi_var_scale = multi_var_scale,
     store_samples = store_samples,
-    store_coefficient_cov = store_coefficient_cov
+    store_coefficient_cov = store_coefficient_cov,
+    effective_n = length(y),
+    fit_intercept = TRUE,
+    intercept_x_mean = intercept_x_mean,
+    intercept_y_mean = mean(y),
+    center_observations = FALSE
   )
   run_chains <- function(progressor = NULL) {
     .run_blm_chains(

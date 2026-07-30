@@ -138,6 +138,65 @@ stopifnot(
   ))
 )
 
+# Low-level family-specific state uses only the predictors assigned to that
+# family, rather than allocating every family across all predictors.
+compact_x <- scale(X, center = TRUE, scale = FALSE)
+compact_y <- y - mean(y)
+compact_arguments <- list(
+  y = compact_y,
+  x = compact_x,
+  residual_shape = 2,
+  residual_scale = 1,
+  iterations = 30,
+  burnin = 20,
+  thin = 1,
+  seed = 706,
+  block_id = c(1L, 2L, 3L, 4L, 4L, 4L),
+  block_model = 0:3,
+  normal_shape = rep(2, 4),
+  normal_scale = rep(1, 4),
+  pi_alpha = rep(1, 4),
+  pi_beta = rep(1, 4),
+  spike_var_shape = rep(2, 4),
+  spike_var_scale = rep(1, 4),
+  global_scale = rep(1, 4),
+  residual_var = 1,
+  local_a = rep(1, 4),
+  local_b = rep(0.5, 4),
+  multi_gamma = rep(list(c(0, 0.1, 1)), 4),
+  multi_pi_alpha = rep(list(rep(1, 3)), 4),
+  multi_var_shape = rep(2, 4),
+  multi_var_scale = rep(1, 4),
+  store_coefficient_cov = FALSE,
+  effective_n = n,
+  fit_intercept = FALSE,
+  intercept_x_mean = rep(0, ncol(X)),
+  intercept_y_mean = 0,
+  center_observations = FALSE
+)
+for (sampler in list(
+  BayesLinReg:::.blm_gibbs_rcpp,
+  BayesLinReg:::.blm_gibbs
+)) {
+  compact_stored <- do.call(
+    sampler,
+    c(compact_arguments, list(store_samples = TRUE))
+  )
+  compact_online <- do.call(
+    sampler,
+    c(compact_arguments, list(store_samples = FALSE))
+  )
+  stopifnot(
+    identical(dim(compact_stored$coefficient_samples), c(10L, 6L)),
+    identical(dim(compact_stored$inclusion_samples), c(10L, 1L)),
+    identical(dim(compact_stored$local_var_samples), c(10L, 1L)),
+    identical(dim(compact_stored$multi_component_samples), c(10L, 3L)),
+    length(compact_online$inclusion_sum) == 1L,
+    length(compact_online$local_var_sum) == 1L,
+    identical(dim(compact_online$multi_component_sum[[4L]]), c(3L, 3L))
+  )
+}
+
 # SpikeSlab now uses the same variance-prior field names as other models.
 renamed_fit <- blm(
   y,

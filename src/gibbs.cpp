@@ -227,6 +227,9 @@ Rcpp::List blm_gibbs_core(
   const int number_of_blocks = block_model.size();
   const int number_of_draws = (iterations - burnin - 1) / thin + 1;
   std::vector< std::vector<int> > block_predictors(number_of_blocks);
+  std::vector<int> model_local_index(p, -1);
+  std::vector<int> block_local_index(p, -1);
+  int model_size[4] = {0, 0, 0, 0};
   bool has_normal = false;
   bool has_spike_slab = false;
   bool has_global_local = false;
@@ -239,7 +242,13 @@ Rcpp::List blm_gibbs_core(
       has_spike_multi_slab || block_model[block] == 3;
   }
   for (int j = 0; j < p; ++j) {
-    block_predictors[block_id[j] - 1].push_back(j);
+    const int block = block_id[j] - 1;
+    const int model = block_model[block];
+    block_local_index[j] =
+      static_cast<int>(block_predictors[block].size());
+    block_predictors[block].push_back(j);
+    model_local_index[j] = model_size[model];
+    ++model_size[model];
   }
 
   std::vector<double> x_mean(p, 0.0);
@@ -296,7 +305,7 @@ Rcpp::List blm_gibbs_core(
     stored_rows, has_normal ? number_of_blocks : 0
   );
   Rcpp::IntegerMatrix inclusion_samples(
-    stored_rows, has_spike_slab ? p : 0
+    stored_rows, model_size[1]
   );
   Rcpp::NumericMatrix pi_samples(
     stored_rows, has_spike_slab ? number_of_blocks : 0
@@ -305,13 +314,13 @@ Rcpp::List blm_gibbs_core(
     stored_rows, has_spike_slab ? number_of_blocks : 0
   );
   Rcpp::NumericMatrix local_var_samples(
-    stored_rows, has_global_local ? p : 0
+    stored_rows, model_size[2]
   );
   Rcpp::NumericMatrix tau_sq_samples(
     stored_rows, has_global_local ? number_of_blocks : 0
   );
   Rcpp::IntegerMatrix multi_component_samples(
-    stored_rows, has_spike_multi_slab ? p : 0
+    stored_rows, model_size[3]
   );
   Rcpp::List multi_pi_samples(number_of_blocks);
   Rcpp::NumericMatrix multi_var_samples(
@@ -335,7 +344,7 @@ Rcpp::List blm_gibbs_core(
   Rcpp::NumericVector normal_var_sum_sq(
     has_normal ? number_of_blocks : 0
   );
-  Rcpp::NumericVector inclusion_sum(has_spike_slab ? p : 0);
+  Rcpp::NumericVector inclusion_sum(model_size[1]);
   Rcpp::NumericVector pi_sum(
     has_spike_slab ? number_of_blocks : 0
   );
@@ -348,8 +357,8 @@ Rcpp::List blm_gibbs_core(
   Rcpp::NumericVector slab_var_sum_sq(
     has_spike_slab ? number_of_blocks : 0
   );
-  Rcpp::NumericVector local_var_sum(has_global_local ? p : 0);
-  Rcpp::NumericVector local_var_sum_sq(has_global_local ? p : 0);
+  Rcpp::NumericVector local_var_sum(model_size[2]);
+  Rcpp::NumericVector local_var_sum_sq(model_size[2]);
   Rcpp::NumericVector tau_sq_sum(
     has_global_local ? number_of_blocks : 0
   );
@@ -366,11 +375,10 @@ Rcpp::List blm_gibbs_core(
     has_spike_multi_slab ? number_of_blocks : 0
   );
   std::vector<double> coefficient(p, 0.0);
-  std::vector<int> inclusion(has_spike_slab ? p : 0, 1);
-  std::vector<int> multi_component(has_spike_multi_slab ? p : 0, 0);
-  std::vector<int> multi_local_index(p, -1);
-  std::vector<double> local_var(has_global_local ? p : 0, 1.0);
-  std::vector<double> local_aux(has_global_local ? p : 0, 1.0);
+  std::vector<int> inclusion(model_size[1], 1);
+  std::vector<int> multi_component(model_size[3], 0);
+  std::vector<double> local_var(model_size[2], 1.0);
+  std::vector<double> local_aux(model_size[2], 1.0);
   std::vector<double> residuals(n);
   std::vector<double> corrected_rhs(p, 0.0);
   std::vector<double> fitted_crossproduct(p, 0.0);
@@ -433,11 +441,6 @@ Rcpp::List blm_gibbs_core(
         );
       } else {
         const std::vector<int>& predictors = block_predictors[block];
-        for (int local_index = 0;
-             local_index < static_cast<int>(predictors.size());
-             ++local_index) {
-          multi_local_index[predictors[local_index]] = local_index;
-        }
         multi_component_sum[block] = Rcpp::NumericMatrix(
           predictors.size(), alpha_values.size()
         );
@@ -457,12 +460,14 @@ Rcpp::List blm_gibbs_core(
   int retained_index = 0;
   int next_progress_percent = 10;
   int last_reported_iteration = 0;
+  const int residual_refresh_interval = 100;
 
   for (int iteration = 1; iteration <= iterations; ++iteration) {
     // Update each coefficient from its univariate conditional normal.
     for (int j = 0; j < p; ++j) {
       const int block = block_id[j] - 1;
       const int model = block_model[block];
+      const int local_index = model_local_index[j];
       const double old_coefficient = coefficient[j];
       double conditional_numerator = 0.0;
       double partial_rhs = 0.0;
@@ -528,7 +533,7 @@ Rcpp::List blm_gibbs_core(
             break;
           }
         }
-        multi_component[j] = selected_component;
+        multi_component[local_index] = selected_component;
         coefficient[j] = selected_component == 0
           ? 0.0
           : R::rnorm(
@@ -537,7 +542,7 @@ Rcpp::List blm_gibbs_core(
             );
       } else {
         const double prior_precision = model == 2
-          ? 1.0 / tau_sq[block] / local_var[j]
+          ? 1.0 / tau_sq[block] / local_var[local_index]
           : (model == 1
               ? 1.0 / slab_var[block]
               : 1.0 / normal_var[block]);
@@ -561,11 +566,11 @@ Rcpp::List blm_gibbs_core(
               ? 1.0 / (1.0 + std::exp(-log_inclusion_odds))
               : std::exp(log_inclusion_odds) /
                   (1.0 + std::exp(log_inclusion_odds));
-          inclusion[j] = static_cast<int>(
+          inclusion[local_index] = static_cast<int>(
             R::rbinom(1.0, inclusion_probability)
           );
         }
-        if (model != 1 || inclusion[j] == 1) {
+        if (model != 1 || inclusion[local_index] == 1) {
           coefficient[j] = R::rnorm(
             conditional_mean,
             std::sqrt(conditional_var)
@@ -597,20 +602,34 @@ Rcpp::List blm_gibbs_core(
       }
     }
 
-    if (use_sufficient_statistics && iteration % 100 == 0) {
-      double quadratic = 0.0;
-      double linear = 0.0;
-      summary_XtX.multiply(coefficient, fitted_crossproduct);
-      center_dot = summary_XtX.center_dot(coefficient);
-      for (int j = 0; j < p; ++j) {
-        corrected_rhs[j] = summary_Xty[j] - fitted_crossproduct[j];
-        linear += coefficient[j] * summary_Xty[j];
-        quadratic += coefficient[j] * summary_XtX.centered_fitted(
-          fitted_crossproduct[j], j, center_dot
+    // Reconstruct accumulated state periodically to limit floating-point drift.
+    if (iteration % residual_refresh_interval == 0) {
+      if (use_sufficient_statistics) {
+        double quadratic = 0.0;
+        double linear = 0.0;
+        summary_XtX.multiply(coefficient, fitted_crossproduct);
+        center_dot = summary_XtX.center_dot(coefficient);
+        for (int j = 0; j < p; ++j) {
+          corrected_rhs[j] = summary_Xty[j] - fitted_crossproduct[j];
+          linear += coefficient[j] * summary_Xty[j];
+          quadratic += coefficient[j] * summary_XtX.centered_fitted(
+            fitted_crossproduct[j], j, center_dot
+          );
+        }
+        if (learn_residual_var) {
+          residual_sse = summary_yty - 2.0 * linear + quadratic;
+        }
+      } else {
+        const double* design_begin = center_observations
+          ? x_centered.begin()
+          : X.begin();
+        const Eigen::Map<const Eigen::MatrixXd> design(design_begin, n, p);
+        const Eigen::Map<const Eigen::VectorXd> coefficient_vector(
+          coefficient.data(), p
         );
-      }
-      if (learn_residual_var) {
-        residual_sse = summary_yty - 2.0 * linear + quadratic;
+        const Eigen::Map<const Eigen::VectorXd> response(y_centered.begin(), n);
+        Eigen::Map<Eigen::VectorXd> residual(residuals.data(), n);
+        residual.noalias() = response - design * coefficient_vector;
       }
     }
 
@@ -644,8 +663,9 @@ Rcpp::List blm_gibbs_core(
         double included_sum_of_squares = 0.0;
         for (std::size_t index = 0; index < predictors.size(); ++index) {
           const int j = predictors[index];
-          number_included += inclusion[j];
-          if (inclusion[j] == 1) {
+          const int local_index = model_local_index[j];
+          number_included += inclusion[local_index];
+          if (inclusion[local_index] == 1) {
             included_sum_of_squares += coefficient[j] * coefficient[j];
           }
         }
@@ -674,7 +694,7 @@ Rcpp::List blm_gibbs_core(
         double scaled_sum_of_squares = 0.0;
         for (std::size_t index = 0; index < predictors.size(); ++index) {
           const int j = predictors[index];
-          const int component = multi_component[j];
+          const int component = multi_component[model_local_index[j]];
           ++counts[component];
           if (component > 0) {
             ++number_nonzero;
@@ -709,20 +729,21 @@ Rcpp::List blm_gibbs_core(
         const std::vector<int>& predictors = block_predictors[block];
         for (std::size_t index = 0; index < predictors.size(); ++index) {
           const int j = predictors[index];
+          const int local_index = model_local_index[j];
           const double raw_chi =
             coefficient[j] * coefficient[j] / tau_sq[block];
           const double chi = std::max(
             raw_chi,
             std::numeric_limits<double>::min()
           );
-          local_var[j] = draw_gig(
+          local_var[local_index] = draw_gig(
             local_a[block] - 0.5,
             chi,
-            2.0 * local_aux[j]
+            2.0 * local_aux[local_index]
           );
-          local_aux[j] = R::rgamma(
+          local_aux[local_index] = R::rgamma(
             local_a[block] + local_b[block],
-            1.0 / (1.0 + local_var[j])
+            1.0 / (1.0 + local_var[local_index])
           );
         }
 
@@ -730,7 +751,7 @@ Rcpp::List blm_gibbs_core(
         for (std::size_t index = 0; index < predictors.size(); ++index) {
           const int j = predictors[index];
           tau_rate += coefficient[j] * coefficient[j] /
-            (2.0 * local_var[j]);
+            (2.0 * local_var[model_local_index[j]]);
         }
         tau_sq[block] = 1.0 / R::rgamma(
           (static_cast<double>(predictors.size()) + 1.0) / 2.0,
@@ -767,17 +788,20 @@ Rcpp::List blm_gibbs_core(
       for (int j = 0; j < p; ++j) {
         const int block = block_id[j] - 1;
         const int model = block_model[block];
+        const int local_index = model_local_index[j];
         if (store_samples) {
           coefficient_samples(retained_index, j) = coefficient[j];
           if (model == 1) {
-            inclusion_samples(retained_index, j) = inclusion[j];
+            inclusion_samples(retained_index, local_index) =
+              inclusion[local_index];
           }
           if (model == 2) {
-            local_var_samples(retained_index, j) = local_var[j];
+            local_var_samples(retained_index, local_index) =
+              local_var[local_index];
           }
           if (model == 3) {
-            multi_component_samples(retained_index, j) =
-              multi_component[j] + 1;
+            multi_component_samples(retained_index, local_index) =
+              multi_component[local_index] + 1;
           }
         }
         intercept_mean -= intercept_x_mean[j] * coefficient[j];
@@ -834,16 +858,18 @@ Rcpp::List blm_gibbs_core(
           coefficient_sum_sq[j] += coefficient[j] * coefficient[j];
           const int block = block_id[j] - 1;
           const int model = block_model[block];
+          const int local_index = model_local_index[j];
           if (model == 1) {
-            inclusion_sum[j] += inclusion[j];
+            inclusion_sum[local_index] += inclusion[local_index];
           } else if (model == 2) {
-            local_var_sum[j] += local_var[j];
-            local_var_sum_sq[j] += local_var[j] * local_var[j];
+            local_var_sum[local_index] += local_var[local_index];
+            local_var_sum_sq[local_index] +=
+              local_var[local_index] * local_var[local_index];
           } else if (model == 3) {
             Rcpp::NumericMatrix block_component_sum =
               multi_component_sum[block];
             block_component_sum(
-              multi_local_index[j], multi_component[j]
+              block_local_index[j], multi_component[local_index]
             ) += 1.0;
           }
         }

@@ -7,6 +7,13 @@
                                  expected_pve_total = NULL,
                                  reference_response_var = NULL,
                                  reference_residual_var = NULL) {
+  block_models <- vapply(blocks, `[[`, character(1), "model")
+  family_indices <- lapply(
+    c("Normal", "SpikeSlab", "GlobalLocal", "SpikeMultiSlab"),
+    function(model) {
+      unlist(block_indices[block_models == model], use.names = FALSE)
+    }
+  )
   eta_result <- lapply(seq_along(blocks), function(block_index) {
     block <- blocks[[block_index]]
     indices <- block_indices[[block_index]]
@@ -78,8 +85,10 @@
       }
     }
     if (block$model == "SpikeSlab") {
+      local_indices <- match(indices, family_indices[[2L]])
       if (store_samples) {
-        inclusion_samples <- samples$inclusion_samples[, indices, drop = FALSE]
+        inclusion_samples <-
+          samples$inclusion_samples[, local_indices, drop = FALSE]
         colnames(inclusion_samples) <- block$predictor_names
         pi_samples <- samples$pi_samples[, block_index]
         slab_var_samples <- samples$slab_var_samples[, block_index]
@@ -92,7 +101,7 @@
         result$pi_samples <- pi_samples
         result$slab_var_samples <- slab_var_samples
       } else {
-        result$inclusion_probability <- samples$inclusion_sum[indices] /
+        result$inclusion_probability <- samples$inclusion_sum[local_indices] /
           samples$number_of_draws
         names(result$inclusion_probability) <- block$predictor_names
         result$pi_mean <- samples$pi_sum[block_index] / samples$number_of_draws
@@ -117,8 +126,10 @@
       }
     }
     if (block$model == "GlobalLocal") {
+      local_indices <- match(indices, family_indices[[3L]])
       if (store_samples) {
-        local_var_samples <- samples$local_var_samples[, indices, drop = FALSE]
+        local_var_samples <-
+          samples$local_var_samples[, local_indices, drop = FALSE]
         colnames(local_var_samples) <- block$predictor_names
         tau_sq_samples <- samples$tau_sq_samples[, block_index]
         result$local_var_mean <- colMeans(local_var_samples)
@@ -128,9 +139,9 @@
         result$local_var_samples <- local_var_samples
         result$tau_sq_samples <- tau_sq_samples
       } else {
-        result$local_var_mean <- samples$local_var_sum[indices] /
+        result$local_var_mean <- samples$local_var_sum[local_indices] /
           samples$number_of_draws
-        result$local_var_var <- vapply(indices, function(index) {
+        result$local_var_var <- vapply(local_indices, function(index) {
           .variance_from_sums(
             samples$local_var_sum[index], samples$local_var_sum_sq[index],
             samples$number_of_draws
@@ -159,12 +170,13 @@
       }
     }
     if (block$model == "SpikeMultiSlab") {
+      local_indices <- match(indices, family_indices[[4L]])
       component_names <- c(
         "spike", paste0("slab_", seq_len(length(block$multi_gamma) - 1L))
       )
       if (store_samples) {
         component_samples <-
-          samples$multi_component_samples[, indices, drop = FALSE]
+          samples$multi_component_samples[, local_indices, drop = FALSE]
         colnames(component_samples) <- block$predictor_names
         component_probability <- vapply(
           seq_along(block$multi_gamma),
