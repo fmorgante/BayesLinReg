@@ -55,8 +55,11 @@ fit$ETA$ETA1$coefficient_mean
 fit$intercept_mean
 ```
 
-The available models are `"Normal"`, `"SpikeSlab"`, `"SpikeMultiSlab"`, and
-`"GlobalLocal"`.
+The available models are `"Normal"`, `"SpikeSlab"`, `"SpikeMultiSlab"`,
+`"GlobalLocal"`, and `"Fixed"`. A `"Fixed"` block gives its coefficients a
+flat prior while retaining the package's separate intercept. Fixed predictors
+are checked jointly for full column rank after centering, including predictors
+split across multiple fixed blocks.
 For every model, `residual_var` may be supplied as a fixed value or learned
 from `residual_shape` and `residual_scale`.
 For mixed priors, use a named `ETA` list whose blocks specify their own
@@ -86,7 +89,7 @@ For a block with `p` predictors, this sets `global_scale` to
 sqrt(reference_residual_var / n)`. Supply either the two calibration fields or
 an explicit `global_scale`, not both.
 
-All coefficient-prior models can instead calibrate their scale from an
+All penalized coefficient-prior models can instead calibrate their scale from an
 expected proportion of response variance explained:
 
 ```r
@@ -119,6 +122,9 @@ the residual inverse-gamma prior as
 reference_response_var`. Thus its prior mean is the response variance not
 assigned to the predictor blocks. This requires `residual_shape > 1`. Supply
 `residual_scale` explicitly to use an independently specified residual prior.
+Fits containing a `"Fixed"` block always require an explicit `residual_scale`
+when residual variance is learned, because fixed effects do not have an
+`expected_pve` prior target.
 
 By default, `blm()` returns the retained posterior draws. For large models,
 use `store_samples = FALSE` to compute posterior summaries online and keep the

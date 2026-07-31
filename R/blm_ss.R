@@ -44,6 +44,10 @@
 #'   explicit positive `reference_response_var` is required.
 #'   When every block supplies `expected_pve`, omitting `residual_scale`
 #'   calibrates it from their total expected PVE exactly as in [blm()].
+#'   A `"Fixed"` block uses a flat prior and is jointly rank-checked with every
+#'   other fixed block using the centered and standardized fixed-predictor
+#'   submatrix of `XtX`. This check is always performed and is separate from
+#'   the optional full-matrix `check_psd` validation.
 #'   Optional posterior PVE calculations use the centered cross-products and
 #'   the definitions in [blm()]. Their cost is quadratic in block size for a
 #'   dense `XtX` and proportional to the relevant stored entries for sparse
@@ -296,6 +300,15 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
   }))
   dimnames(working_XtX) <- list(internal_names, internal_names)
   names(working_Xty) <- internal_names
+  fixed_indices <- .fixed_predictor_indices(blocks, block_indices)
+  fixed_gram <- if (sparse_XtX) {
+    working_XtX - Matrix::tcrossprod(working_center)
+  } else {
+    working_XtX
+  }
+  .validate_fixed_gram(
+    fixed_gram, fixed_indices, internal_names[fixed_indices]
+  )
   if (check_psd) {
     validation_XtX <- if (sparse_XtX) {
       as.matrix(working_XtX) - tcrossprod(working_center)

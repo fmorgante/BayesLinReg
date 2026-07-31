@@ -129,6 +129,10 @@ response variance is recovered from \code{yty} and \code{y_mean}; otherwise an
 explicit positive \code{reference_response_var} is required.
 When every block supplies \code{expected_pve}, omitting \code{residual_scale}
 calibrates it from their total expected PVE exactly as in \code{\link[=blm]{blm()}}.
+A \code{"Fixed"} block uses a flat prior and is jointly rank-checked with every
+other fixed block using the centered and standardized fixed-predictor
+submatrix of \code{XtX}. This check is always performed and is separate from
+the optional full-matrix \code{check_psd} validation.
 Optional posterior PVE calculations use the centered cross-products and the
 definitions in \code{\link[=blm]{blm()}}. Their cost is quadratic in block size for a
 dense \code{XtX} and proportional to the relevant stored entries for sparse

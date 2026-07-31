@@ -49,7 +49,8 @@
 #'   that space do not affect coefficient sampling and are included in the
 #'   beta-independent SSE offset. Standardization uses the diagonal of
 #'   \eqn{G_q}; aggressive truncation can therefore make a predictor appear
-#'   constant.
+#'   constant. All `"Fixed"` predictors must be full rank within the retained
+#'   eigenspace; this condition is checked before sampling.
 #'
 #'   This entry point is implemented only with the Rcpp sampler. It does not
 #'   compute an eigendecomposition internally, allowing a precomputed
@@ -293,6 +294,10 @@ blm_ss_eigen <- function(
     paste0(names(blocks)[block_index], "::", blocks[[block_index]]$predictor_names)
   }))
   colnames(transformed_X) <- internal_names
+  fixed_indices <- .fixed_predictor_indices(blocks, block_indices)
+  .validate_fixed_design(
+    transformed_X, fixed_indices, internal_names[fixed_indices]
+  )
 
   sampler_arguments <- list(
     y = transformed_y,

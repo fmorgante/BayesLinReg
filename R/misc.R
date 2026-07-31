@@ -128,12 +128,13 @@
     if (!is.character(specification$model) ||
         length(specification$model) != 1L || is.na(specification$model) ||
         !specification$model %in%
-          c("Normal", "SpikeSlab", "GlobalLocal", "SpikeMultiSlab")) {
+          c("Normal", "SpikeSlab", "GlobalLocal", "SpikeMultiSlab",
+            "Fixed")) {
       stop(
         sprintf(
           paste0(
             "ETA block `%s` has an invalid `model`; use `Normal`, ",
-            "`SpikeSlab`, `GlobalLocal`, or `SpikeMultiSlab`."
+            "`SpikeSlab`, `GlobalLocal`, `SpikeMultiSlab`, or `Fixed`."
           ),
           block_name
         ),
@@ -158,7 +159,8 @@
       SpikeMultiSlab = c(
         "X", "model", "standardize", "gamma", "alpha", "var_shape",
         "var_scale", "expected_pve"
-      )
+      ),
+      Fixed = c("X", "model", "standardize")
     )
     unknown <- setdiff(names(specification), allowed)
     if (length(unknown) > 0L) {
@@ -448,7 +450,8 @@
       name = block_name,
       model = model,
       model_code = match(
-        model, c("Normal", "SpikeSlab", "GlobalLocal", "SpikeMultiSlab")
+        model,
+        c("Normal", "SpikeSlab", "GlobalLocal", "SpikeMultiSlab", "Fixed")
       ) - 1L,
       x = sweep(x_centered, 2L, predictor_scale, FUN = "/"),
       predictor_names = colnames(X),
@@ -503,12 +506,15 @@
   global_local_from_pve <- has_expected_pve & vapply(
     blocks, function(block) block$model == "GlobalLocal", logical(1)
   )
-  if (any(global_local_from_pve) && !all(has_expected_pve)) {
+  penalized <- vapply(
+    blocks, function(block) block$model != "Fixed", logical(1)
+  )
+  if (any(global_local_from_pve) && !all(has_expected_pve[penalized])) {
     stop(
       paste0(
-        "When a GlobalLocal block uses `expected_pve`, every ETA block must ",
-        "supply `expected_pve` so the common reference residual variance can ",
-        "be determined."
+        "When a GlobalLocal block uses `expected_pve`, every penalized ETA ",
+        "block must supply `expected_pve` so the common reference residual ",
+        "variance can be determined."
       ),
       call. = FALSE
     )
@@ -569,6 +575,53 @@
     blocks[[block_index]] <- block
   }
   blocks
+}
+
+.fixed_predictor_indices <- function(blocks, block_indices) {
+  fixed <- vapply(blocks, function(block) block$model == "Fixed", logical(1))
+  unlist(block_indices[fixed], use.names = FALSE)
+}
+
+.validate_fixed_design <- function(x, fixed_indices, predictor_names) {
+  if (length(fixed_indices) == 0L) return(invisible(NULL))
+  fixed_x <- x[, fixed_indices, drop = FALSE]
+  fixed_rank <- qr(fixed_x)$rank
+  if (fixed_rank < ncol(fixed_x)) {
+    stop(
+      sprintf(
+        paste0(
+          "The Fixed predictors are jointly rank-deficient (rank %d for %d ",
+          "predictors): %s."
+        ),
+        fixed_rank, ncol(fixed_x), paste(predictor_names, collapse = ", ")
+      ),
+      call. = FALSE
+    )
+  }
+  invisible(NULL)
+}
+
+.validate_fixed_gram <- function(gram, fixed_indices, predictor_names) {
+  if (length(fixed_indices) == 0L) return(invisible(NULL))
+  fixed_gram <- as.matrix(gram[fixed_indices, fixed_indices, drop = FALSE])
+  fixed_gram <- (fixed_gram + t(fixed_gram)) / 2
+  eigenvalues <- eigen(fixed_gram, symmetric = TRUE, only.values = TRUE)$values
+  tolerance <- sqrt(.Machine$double.eps) *
+    max(1, max(abs(eigenvalues)))
+  fixed_rank <- sum(eigenvalues > tolerance)
+  if (fixed_rank < length(fixed_indices)) {
+    stop(
+      sprintf(
+        paste0(
+          "The Fixed predictors are jointly rank-deficient (rank %d for %d ",
+          "predictors): %s."
+        ),
+        fixed_rank, length(fixed_indices), paste(predictor_names, collapse = ", ")
+      ),
+      call. = FALSE
+    )
+  }
+  invisible(NULL)
 }
 
 .prepare_residual_prior <- function(residual_var, residual_shape,
@@ -806,11 +859,11 @@
   } else {
     NULL
   }
-  model_predictors <- lapply(0:3, function(model) {
+  model_predictors <- lapply(0:4, function(model) {
     unlist(block_predictors[block_model == model], use.names = FALSE)
   })
   model_local_index <- integer(number_of_predictors)
-  for (model in 0:3) {
+  for (model in 0:4) {
     predictors <- model_predictors[[model + 1L]]
     model_local_index[predictors] <- seq_along(predictors)
   }
@@ -1021,7 +1074,9 @@
           )
         }
       } else {
-        prior_precision <- if (model == 2L) {
+        prior_precision <- if (model == 4L) {
+          0
+        } else if (model == 2L) {
           1 / tau_sq[block] / local_var[local_index]
         } else if (model == 1L) {
           1 / slab_var[block]

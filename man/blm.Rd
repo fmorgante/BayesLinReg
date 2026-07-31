@@ -29,8 +29,8 @@ blm(
 
 \item{ETA}{A predictor specification or named list of predictor
 specifications. Each block must contain \code{X} and \code{model}. Available models
-are \code{"Normal"}, \code{"SpikeSlab"}, \code{"GlobalLocal"}, and
-\code{"SpikeMultiSlab"}. See Details.}
+are \code{"Normal"}, \code{"SpikeSlab"}, \code{"GlobalLocal"},
+\code{"SpikeMultiSlab"}, and \code{"Fixed"}. See Details.}
 
 \item{residual_var}{A positive known residual variance, or \code{NULL} to learn
 it using an inverse-gamma prior.}
@@ -116,7 +116,7 @@ matrix.
 Every block accepts \code{standardize}, which defaults to \code{TRUE}. Returned
 coefficients are always transformed to the original scale of that block's
 supplied \code{X}.
-Every model also accepts \code{expected_pve}, a number strictly between zero
+Every penalized model also accepts \code{expected_pve}, a number strictly between zero
 and one. It calibrates a scale hyperparameter using
 \eqn{V_g=\mathrm{expected\_pve}\,V_y}, where \eqn{V_y} is
 \code{reference_response_var} or the sample variance of \code{y}. For multiple
@@ -130,7 +130,19 @@ their sum \eqn{R^2} also calibrates the inverse-gamma residual prior:
 This makes the prior mean residual variance equal to
 \eqn{(1-R^2)V_y} and therefore requires \code{residual_shape > 1}. It matches
 the ratio of prior mean variance components, rather than the prior mean
-of the random PVE ratio itself.
+of the random PVE ratio itself. Because a \code{"Fixed"} block cannot supply
+\code{expected_pve}, fits containing one require an explicit \code{residual_scale}
+whenever the residual variance is learned.
+
+A \code{"Fixed"} block assigns its coefficients an improper flat prior and
+samples them explicitly. It accepts only \code{X}, \code{model}, and
+\code{standardize}. The intercept remains a separate parameter obtained by
+centering all predictor blocks; do not add a constant column to represent it.
+All \code{"Fixed"} predictors across blocks must be jointly full column rank
+after centering (or on the supplied scale for a no-intercept
+sufficient-statistics fit), otherwise the posterior is improper and fitting
+stops. Standardization changes numerical conditioning but not the flat prior,
+and returned coefficients remain on the original predictor scale.
 
 A \code{"Normal"} block optionally accepts \code{var_shape = 2} and
 \code{var_scale = 1}. Its coefficients share a variance sampled from an
@@ -157,7 +169,7 @@ where \eqn{p_0} is \code{expected_nonzero}, \eqn{\sigma_0} is the square root
 of \code{reference_residual_var}, and \eqn{p} is the number of predictors in that
 block. The calibrated fields are mutually exclusive with \code{global_scale}.
 \code{expected_pve} may replace \code{reference_residual_var}. In that case every
-block must supply \code{expected_pve}; their sum \eqn{R^2} defines
+penalized block must supply \code{expected_pve}; their sum \eqn{R^2} defines
 \eqn{\sigma_0^2=(1-R^2)V_y}, which is then used in the same global-scale
 formula. Because the supported beta-prime local priors do not generally
 have a finite signal-variance moment, \code{expected_pve} calibrates the

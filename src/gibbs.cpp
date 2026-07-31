@@ -268,7 +268,7 @@ Rcpp::List blm_gibbs_core(
   std::vector< std::vector<int> > block_predictors(number_of_blocks);
   std::vector<int> model_local_index(p, -1);
   std::vector<int> block_local_index(p, -1);
-  int model_size[4] = {0, 0, 0, 0};
+  int model_size[5] = {0, 0, 0, 0, 0};
   bool has_normal = false;
   bool has_spike_slab = false;
   bool has_global_local = false;
@@ -600,11 +600,13 @@ Rcpp::List blm_gibbs_core(
               std::sqrt(conditional_vars[selected_component])
             );
       } else {
-        const double prior_precision = model == 2
-          ? 1.0 / tau_sq[block] / local_var[local_index]
-          : (model == 1
-              ? 1.0 / slab_var[block]
-              : 1.0 / normal_var[block]);
+        const double prior_precision = model == 4
+          ? 0.0
+          : (model == 2
+              ? 1.0 / tau_sq[block] / local_var[local_index]
+              : (model == 1
+                  ? 1.0 / slab_var[block]
+                  : 1.0 / normal_var[block]));
         const double conditional_var = 1.0 / (
           x_squared[j] / residual_var + prior_precision
         );

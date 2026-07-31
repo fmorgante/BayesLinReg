@@ -134,7 +134,8 @@ posterior based on the supplied eigenspace. Components of \code{Xty} outside
 that space do not affect coefficient sampling and are included in the
 beta-independent SSE offset. Standardization uses the diagonal of
 \eqn{G_q}; aggressive truncation can therefore make a predictor appear
-constant.
+constant. All \code{"Fixed"} predictors must be full rank within the retained
+eigenspace; this condition is checked before sampling.
 
 This entry point is implemented only with the Rcpp sampler. It does not compute
 an eigendecomposition internally, allowing a precomputed representation to be

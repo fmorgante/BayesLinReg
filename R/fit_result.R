@@ -11,7 +11,7 @@
                                  reference_residual_var = NULL) {
   block_models <- vapply(blocks, `[[`, character(1), "model")
   family_indices <- lapply(
-    c("Normal", "SpikeSlab", "GlobalLocal", "SpikeMultiSlab"),
+    c("Normal", "SpikeSlab", "GlobalLocal", "SpikeMultiSlab", "Fixed"),
     function(model) {
       unlist(block_indices[block_models == model], use.names = FALSE)
     }

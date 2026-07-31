@@ -9,8 +9,8 @@
 #' @param y A finite numeric response vector.
 #' @param ETA A predictor specification or named list of predictor
 #'   specifications. Each block must contain `X` and `model`. Available models
-#'   are `"Normal"`, `"SpikeSlab"`, `"GlobalLocal"`, and
-#'   `"SpikeMultiSlab"`. See Details.
+#'   are `"Normal"`, `"SpikeSlab"`, `"GlobalLocal"`,
+#'   `"SpikeMultiSlab"`, and `"Fixed"`. See Details.
 #' @param residual_var A positive known residual variance, or `NULL` to learn
 #'   it using an inverse-gamma prior.
 #' @param residual_shape,residual_scale Positive shape and scale parameters for
@@ -73,7 +73,7 @@
 #'   Every block accepts `standardize`, which defaults to `TRUE`. Returned
 #'   coefficients are always transformed to the original scale of that block's
 #'   supplied `X`.
-#'   Every model also accepts `expected_pve`, a number strictly between zero
+#'   Every penalized model also accepts `expected_pve`, a number strictly between zero
 #'   and one. It calibrates a scale hyperparameter using
 #'   \eqn{V_g=\mathrm{expected\_pve}\,V_y}, where \eqn{V_y} is
 #'   `reference_response_var` or the sample variance of `y`. For multiple
@@ -87,7 +87,19 @@
 #'   This makes the prior mean residual variance equal to
 #'   \eqn{(1-R^2)V_y} and therefore requires `residual_shape > 1`. It matches
 #'   the ratio of prior mean variance components, rather than the prior mean
-#'   of the random PVE ratio itself.
+#'   of the random PVE ratio itself. Because a `"Fixed"` block cannot supply
+#'   `expected_pve`, fits containing one require an explicit `residual_scale`
+#'   whenever the residual variance is learned.
+#'
+#'   A `"Fixed"` block assigns its coefficients an improper flat prior and
+#'   samples them explicitly. It accepts only `X`, `model`, and `standardize`.
+#'   The intercept remains a separate parameter obtained by centering all
+#'   predictor blocks; do not add a constant column to represent it. All
+#'   `"Fixed"` predictors across blocks must be jointly full column rank after
+#'   centering (or on the supplied scale for a no-intercept sufficient-
+#'   statistics fit), otherwise the posterior is improper and fitting stops.
+#'   Standardization changes numerical conditioning but not the flat prior,
+#'   and returned coefficients remain on the original predictor scale.
 #'
 #'   A `"Normal"` block optionally accepts `var_shape = 2` and
 #'   `var_scale = 1`. Its coefficients share a variance sampled from an
@@ -115,7 +127,7 @@
 #'   predictors in that
 #'   block. The calibrated fields are mutually exclusive with `global_scale`.
 #'   `expected_pve` may replace `reference_residual_var`. In that case every
-#'   block must supply `expected_pve`; their sum \eqn{R^2} defines
+#'   penalized block must supply `expected_pve`; their sum \eqn{R^2} defines
 #'   \eqn{\sigma_0^2=(1-R^2)V_y}, which is then used in the same global-scale
 #'   formula. Because the supported beta-prime local priors do not generally
 #'   have a finite signal-variance moment, `expected_pve` calibrates the
@@ -250,6 +262,10 @@ blm <- function(y, ETA, residual_var = NULL,
     )
     block_x
   }))
+  fixed_indices <- .fixed_predictor_indices(blocks, block_indices)
+  .validate_fixed_design(
+    x, fixed_indices, colnames(x)[fixed_indices]
+  )
   intercept_x_mean <- unlist(
     lapply(blocks, `[[`, "predictor_mean"),
     use.names = FALSE
