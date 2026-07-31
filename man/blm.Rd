@@ -19,7 +19,9 @@ blm(
   verbose = FALSE,
   nchains = 1L,
   store_samples = TRUE,
-  store_coefficient_cov = TRUE
+  store_coefficient_cov = TRUE,
+  compute_pve = FALSE,
+  pve_type = c("standalone", "allocated")
 )
 }
 \arguments{
@@ -68,6 +70,16 @@ allocating draw matrices. Fits without stored samples cannot be passed to
 posterior coefficient covariance matrix for each \code{ETA} block. If \code{FALSE},
 return only the named vector of marginal coefficient variances and avoid
 the quadratic-size covariance accumulator when samples are not stored.}
+
+\item{compute_pve}{If \code{TRUE}, calculate block and total proportions of
+variance explained at retained posterior draws. The default, \code{FALSE},
+adds no PVE computation to the sampler.}
+
+\item{pve_type}{Definition used for block PVE. \code{"standalone"} divides each
+block's fitted-value variance by total fitted variance plus residual
+variance. \code{"allocated"} additionally allocates cross-block covariance so
+that block PVE values sum to total PVE. It is used only when
+\code{compute_pve = TRUE}.}
 }
 \value{
 An object of class \code{blm_fit}: a list containing \code{ETA}, a named list
@@ -84,7 +96,10 @@ records \code{expected_pve_total}, \code{reference_response_var}, and
 \code{reference_residual_var}. \code{SpikeMultiSlab} blocks additionally
 return per-predictor \code{component_probability} values, an
 \code{inclusion_probability} vector, and summaries of the mixture probabilities
-and shared variance.
+and shared variance. When \code{compute_pve = TRUE}, every block contains
+\code{pve_mean} and \code{pve_var}, and sampled fits also contain
+\code{pve_samples}. The top-level result similarly contains total and
+cross-block PVE summaries and, when stored, their samples.
 }
 \description{
 Fits a Bayesian linear regression with one or more predictor blocks using a
@@ -170,6 +185,20 @@ As an alternative to \code{var_scale}, define
   (\mathrm{var\_shape}-1)V_g/(D\bar\gamma).}
 Here too, \code{var_shape} must exceed one.
 The coefficient priors are independent of the residual variance.
+
+For a retained draw, let \eqn{f_b=X_b\beta_b}, \eqn{f=\sum_b f_b}, and
+\eqn{d=n-1} for a model with an intercept or \eqn{d=n} otherwise. Total PVE is
+\deqn{(\lVert f\rVert^2/d)/(\lVert f\rVert^2/d+\sigma_e^2).}
+Standalone block PVE replaces the numerator with
+\eqn{\lVert f_b\rVert^2/d}; these values need not sum to total PVE when
+blocks are correlated. \code{cross_block_pve} reports the difference between
+total PVE and their sum. Allocated block PVE instead uses \eqn{f_b'f/d} in
+the numerator, assigning cross-block covariance across the participating
+blocks so that their values sum to total PVE. Allocated values can be
+negative. PVE is evaluated only at retained draws, after burn-in and the main
+thinning schedule, but may still add appreciable matrix-vector work,
+approximately \eqn{O(np)} per retained draw for raw predictor data across all
+blocks.
 }
 \examples{
 X <- cbind(x1 = 1:20, x2 = rep(c(0, 1), 10))

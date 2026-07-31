@@ -1,6 +1,6 @@
 Package: BayesLinReg
 Title: Bayesian Linear Regression with Flexible Coefficient Priors
-Version: 11.5.2
+Version: 11.6.0
 Authors@R:
     person(
         "Fabio", "Morgante",
@@ -15,9 +15,10 @@ Description: Fits Bayesian linear regression models from raw observations or
     Strawderman-Berger and
     horseshoe specifications. Supports known or inverse-gamma-modeled residual
     variance, expected-proportion-of-variance scale calibration, sampled
-    coefficient-prior variances, Gibbs sampling implemented in R or 'Rcpp',
-    optional parallel chains, memory-efficient online posterior summaries,
-    predictor standardization, and convergence diagnostics.
+    coefficient-prior variances, optional posterior block and total variance
+    explained, Gibbs sampling implemented in R or 'Rcpp', optional parallel
+    chains, memory-efficient online posterior summaries, predictor
+    standardization, and convergence diagnostics.
 License: BSD_3_clause + file LICENSE
 URL: https://github.com/fmorgante/BayesLinReg
 BugReports: https://github.com/fmorgante/BayesLinReg/issues

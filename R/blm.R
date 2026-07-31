@@ -38,6 +38,14 @@
 #'   posterior coefficient covariance matrix for each `ETA` block. If `FALSE`,
 #'   return only the named vector of marginal coefficient variances and avoid
 #'   the quadratic-size covariance accumulator when samples are not stored.
+#' @param compute_pve If `TRUE`, calculate block and total proportions of
+#'   variance explained at retained posterior draws. The default, `FALSE`,
+#'   adds no PVE computation to the sampler.
+#' @param pve_type Definition used for block PVE. `"standalone"` divides each
+#'   block's fitted-value variance by total fitted variance plus residual
+#'   variance. `"allocated"` additionally allocates cross-block covariance so
+#'   that block PVE values sum to total PVE. It is used only when
+#'   `compute_pve = TRUE`.
 #'
 #' @return An object of class `blm_fit`: a list containing `ETA`, a named list
 #'   of block-specific posterior
@@ -53,7 +61,10 @@
 #'   `reference_residual_var`. `SpikeMultiSlab` blocks additionally
 #'   return per-predictor `component_probability` values, an
 #'   `inclusion_probability` vector, and summaries of the mixture probabilities
-#'   and shared variance.
+#'   and shared variance. When `compute_pve = TRUE`, every block contains
+#'   `pve_mean` and `pve_var`, and sampled fits also contain `pve_samples`.
+#'   The top-level result similarly contains total and cross-block PVE
+#'   summaries and, when stored, their samples.
 #'
 #' @details `ETA` may be a single-block specification such as
 #'   `list(X = X, model = "Normal")`, or a named list of blocks.
@@ -132,6 +143,21 @@
 #'     (\mathrm{var\_shape}-1)V_g/(D\bar\gamma).}
 #'   Here too, `var_shape` must exceed one.
 #'   The coefficient priors are independent of the residual variance.
+#'
+#'   For a retained draw, let \eqn{f_b=X_b\beta_b},
+#'   \eqn{f=\sum_b f_b}, and \eqn{d=n-1} for a model with an intercept or
+#'   \eqn{d=n} otherwise. Total PVE is
+#'   \deqn{(\lVert f\rVert^2/d)/(\lVert f\rVert^2/d+\sigma_e^2).}
+#'   Standalone block PVE replaces the numerator with
+#'   \eqn{\lVert f_b\rVert^2/d}; these values need not sum to total PVE when
+#'   blocks are correlated. `cross_block_pve` reports the difference between
+#'   total PVE and their sum. Allocated block PVE instead uses
+#'   \eqn{f_b'f/d} in the numerator, assigning cross-block covariance across
+#'   the participating blocks so that their values sum to total PVE. Allocated
+#'   values can be negative. PVE is evaluated only at retained draws, after
+#'   burn-in and the main thinning schedule, but may still add appreciable
+#'   matrix-vector work, approximately \eqn{O(np)} per retained draw for raw
+#'   predictor data across all blocks.
 #' @export
 #'
 #' @examples
@@ -157,9 +183,13 @@ blm <- function(y, ETA, residual_var = NULL,
                 iterations = 4000L, burnin = 1000L, thin = 1L,
                 seed = NULL, version = c("Rcpp", "R"),
                 verbose = FALSE, nchains = 1L, store_samples = TRUE,
-                store_coefficient_cov = TRUE) {
+                store_coefficient_cov = TRUE, compute_pve = FALSE,
+                pve_type = c("standalone", "allocated")) {
   version <- match.arg(version)
   nchains <- .validate_nchains(nchains)
+  pve_controls <- .validate_pve_controls(compute_pve, pve_type)
+  compute_pve <- pve_controls$compute_pve
+  pve_type <- pve_controls$pve_type
   if (!is.logical(verbose) || length(verbose) != 1L || is.na(verbose)) {
     stop("`verbose` must be TRUE or FALSE.", call. = FALSE)
   }
@@ -276,6 +306,8 @@ blm <- function(y, ETA, residual_var = NULL,
     multi_var_scale = multi_var_scale,
     store_samples = store_samples,
     store_coefficient_cov = store_coefficient_cov,
+    compute_pve = compute_pve,
+    pve_type = pve_type,
     effective_n = length(y),
     fit_intercept = TRUE,
     intercept_x_mean = intercept_x_mean,
@@ -304,6 +336,7 @@ blm <- function(y, ETA, residual_var = NULL,
   .assemble_blm_result(
     blocks, block_indices, samples, nchains, store_samples,
     store_coefficient_cov, fit_intercept = TRUE,
+    compute_pve = compute_pve, pve_type = pve_type,
     residual_shape = residual_shape,
     residual_scale = residual_scale,
     residual_scale_calibrated =

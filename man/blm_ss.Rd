@@ -25,7 +25,9 @@ blm_ss(
   nchains = 1L,
   store_samples = TRUE,
   store_coefficient_cov = TRUE,
-  check_psd = FALSE
+  check_psd = FALSE,
+  compute_pve = FALSE,
+  pve_type = c("standalone", "allocated")
 )
 }
 \arguments{
@@ -96,6 +98,16 @@ allocating draw matrices. Fits without stored samples cannot be passed to
 posterior coefficient covariance matrix for each \code{ETA} block. If \code{FALSE},
 return only the named vector of marginal coefficient variances and avoid
 the quadratic-size covariance accumulator when samples are not stored.}
+
+\item{compute_pve}{If \code{TRUE}, calculate block and total proportions of
+variance explained at retained posterior draws. The default, \code{FALSE},
+adds no PVE computation to the sampler.}
+
+\item{pve_type}{Definition used for block PVE. \code{"standalone"} divides each
+block's fitted-value variance by total fitted variance plus residual
+variance. \code{"allocated"} additionally allocates cross-block covariance so
+that block PVE values sum to total PVE. It is used only when
+\code{compute_pve = TRUE}.}
 }
 \value{
 A fitted object with the same block-specific posterior summaries as
@@ -117,6 +129,10 @@ response variance is recovered from \code{yty} and \code{y_mean}; otherwise an
 explicit positive \code{reference_response_var} is required.
 When every block supplies \code{expected_pve}, omitting \code{residual_scale}
 calibrates it from their total expected PVE exactly as in \code{\link[=blm]{blm()}}.
+Optional posterior PVE calculations use the centered cross-products and the
+definitions in \code{\link[=blm]{blm()}}. Their cost is quadratic in block size for a
+dense \code{XtX} and proportional to the relevant stored entries for sparse
+input, at each retained draw.
 Coefficients are sampled with a right-hand-side update that maintains
 \eqn{X'y-X'X\beta}; individual-level pseudo-observations are not formed.
 For sparse \code{XtX}, the Rcpp sampler traverses only stored entries. A

@@ -54,6 +54,8 @@
 #'   This entry point is implemented only with the Rcpp sampler. It does not
 #'   compute an eigendecomposition internally, allowing a precomputed
 #'   representation to be reused without an \eqn{O(p^3)} initialization.
+#'   Optional posterior PVE calculations use the retained representation, at
+#'   a cost of approximately \eqn{O(qp)} per retained draw across all blocks.
 #'
 #' @export
 #'
@@ -85,7 +87,12 @@ blm_ss_eigen <- function(
     reference_response_var = NULL,
     iterations = 4000L, burnin = 1000L, thin = 1L, seed = NULL,
     verbose = FALSE, nchains = 1L, store_samples = TRUE,
-    store_coefficient_cov = TRUE, check_eigenvectors = FALSE) {
+    store_coefficient_cov = TRUE, check_eigenvectors = FALSE,
+    compute_pve = FALSE,
+    pve_type = c("standalone", "allocated")) {
+  pve_controls <- .validate_pve_controls(compute_pve, pve_type)
+  compute_pve <- pve_controls$compute_pve
+  pve_type <- pve_controls$pve_type
   controls <- list(
     verbose = verbose,
     store_samples = store_samples,
@@ -325,6 +332,8 @@ blm_ss_eigen <- function(
     ),
     store_samples = store_samples,
     store_coefficient_cov = store_coefficient_cov,
+    compute_pve = compute_pve,
+    pve_type = pve_type,
     effective_n = n,
     fit_intercept = fit_intercept,
     intercept_x_mean = if (fit_intercept) {
@@ -353,6 +362,7 @@ blm_ss_eigen <- function(
   result <- .assemble_blm_result(
     blocks, block_indices, samples, nchains, store_samples,
     store_coefficient_cov, fit_intercept,
+    compute_pve = compute_pve, pve_type = pve_type,
     residual_shape = residual_shape,
     residual_scale = residual_scale,
     residual_scale_calibrated =

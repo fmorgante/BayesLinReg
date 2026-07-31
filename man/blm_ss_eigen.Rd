@@ -26,7 +26,9 @@ blm_ss_eigen(
   nchains = 1L,
   store_samples = TRUE,
   store_coefficient_cov = TRUE,
-  check_eigenvectors = FALSE
+  check_eigenvectors = FALSE,
+  compute_pve = FALSE,
+  pve_type = c("standalone", "allocated")
 )
 }
 \arguments{
@@ -94,6 +96,16 @@ posterior coefficient covariance matrix for each \code{ETA} block.}
 \item{check_eigenvectors}{If \code{TRUE}, check that the supplied eigenvectors
 are mutually orthonormal. The default avoids an
 \eqn{O(pq^2)} cross-product.}
+
+\item{compute_pve}{If \code{TRUE}, calculate block and total proportions of
+variance explained at retained posterior draws. The default, \code{FALSE},
+adds no PVE computation to the sampler.}
+
+\item{pve_type}{Definition used for block PVE. \code{"standalone"} divides each
+block's fitted-value variance by total fitted variance plus residual
+variance. \code{"allocated"} additionally allocates cross-block covariance so
+that block PVE values sum to total PVE. It is used only when
+\code{compute_pve = TRUE}.}
 }
 \value{
 A \code{blm_fit} object. In addition to the usual fields, it records
@@ -127,6 +139,8 @@ constant.
 This entry point is implemented only with the Rcpp sampler. It does not compute
 an eigendecomposition internally, allowing a precomputed representation to be
 reused without an \eqn{O(p^3)} initialization.
+Optional posterior PVE calculations use the retained representation, at a
+cost of approximately \eqn{O(qp)} per retained draw across all blocks.
 }
 \examples{
 X <- cbind(x1 = 1:20, x2 = rep(c(0, 1), 10))

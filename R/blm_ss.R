@@ -44,6 +44,10 @@
 #'   explicit positive `reference_response_var` is required.
 #'   When every block supplies `expected_pve`, omitting `residual_scale`
 #'   calibrates it from their total expected PVE exactly as in [blm()].
+#'   Optional posterior PVE calculations use the centered cross-products and
+#'   the definitions in [blm()]. Their cost is quadratic in block size for a
+#'   dense `XtX` and proportional to the relevant stored entries for sparse
+#'   input, at each retained draw.
 #'
 #'   Coefficients are sampled with a right-hand-side update that maintains
 #'   \eqn{X'y-X'X\beta}; individual-level pseudo-observations are not formed.
@@ -79,8 +83,13 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
                    iterations = 4000L, burnin = 1000L, thin = 1L,
                    seed = NULL, version = c("Rcpp", "R"), verbose = FALSE,
                    nchains = 1L, store_samples = TRUE,
-                   store_coefficient_cov = TRUE, check_psd = FALSE) {
+                   store_coefficient_cov = TRUE, check_psd = FALSE,
+                   compute_pve = FALSE,
+                   pve_type = c("standalone", "allocated")) {
   version <- match.arg(version)
+  pve_controls <- .validate_pve_controls(compute_pve, pve_type)
+  compute_pve <- pve_controls$compute_pve
+  pve_type <- pve_controls$pve_type
   sparse_XtX <- inherits(XtX, "sparseMatrix")
   if (sparse_XtX && version != "Rcpp") {
     stop("Sparse `XtX` requires `version = \"Rcpp\"`.", call. = FALSE)
@@ -341,6 +350,8 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
     multi_var_scale = multi_var_scale,
     store_samples = store_samples,
     store_coefficient_cov = store_coefficient_cov,
+    compute_pve = compute_pve,
+    pve_type = pve_type,
     effective_n = n,
     fit_intercept = fit_intercept,
     intercept_x_mean = if (fit_intercept) {
@@ -367,6 +378,7 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
   .assemble_blm_result(
     blocks, block_indices, samples, nchains, store_samples,
     store_coefficient_cov, fit_intercept,
+    compute_pve = compute_pve, pve_type = pve_type,
     residual_shape = residual_shape,
     residual_scale = residual_scale,
     residual_scale_calibrated =

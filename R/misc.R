@@ -746,6 +746,17 @@
   as.integer(nchains)
 }
 
+.validate_pve_controls <- function(compute_pve, pve_type) {
+  if (!is.logical(compute_pve) || length(compute_pve) != 1L ||
+      is.na(compute_pve)) {
+    stop("`compute_pve` must be TRUE or FALSE.", call. = FALSE)
+  }
+  list(
+    compute_pve = compute_pve,
+    pve_type = match.arg(pve_type, c("standalone", "allocated"))
+  )
+}
+
 .blm_gibbs <- function(y, x, residual_shape, residual_scale,
                        iterations, burnin, thin, seed,
                        progress_callback = NULL,
@@ -764,7 +775,11 @@
                        intercept_x_mean = NULL, intercept_y_mean = NULL,
                        XtX = NULL, XtX_center = NULL, Xty = NULL, yty = NULL,
                        center_observations = TRUE,
-                       residual_sse_offset = 0) {
+                       residual_sse_offset = 0, compute_pve = FALSE,
+                       pve_type = c("standalone", "allocated")) {
+  pve_controls <- .validate_pve_controls(compute_pve, pve_type)
+  compute_pve <- pve_controls$compute_pve
+  pve_type <- pve_controls$pve_type
   retained_iterations <- .validate_mcmc(iterations, burnin, thin, seed)
   use_sufficient_statistics <- !is.null(XtX)
   number_of_predictors <- if (use_sufficient_statistics) {
@@ -784,6 +799,13 @@
   block_predictors <- lapply(seq_len(number_of_blocks), function(block) {
     which(block_id == block)
   })
+  block_XtX <- if (compute_pve && use_sufficient_statistics) {
+    lapply(block_predictors, function(predictors) {
+      XtX[predictors, predictors, drop = FALSE]
+    })
+  } else {
+    NULL
+  }
   model_predictors <- lapply(0:3, function(model) {
     unlist(block_predictors[block_model == model], use.names = FALSE)
   })
@@ -832,6 +854,19 @@
     }
     intercept_sum <- intercept_sum_sq <- 0
     residual_var_sum <- residual_var_sum_sq <- 0
+  }
+  if (compute_pve) {
+    if (store_samples) {
+      block_pve_samples <- matrix(
+        NA_real_, number_of_draws, number_of_blocks
+      )
+      total_pve_samples <- cross_block_pve_samples <-
+        numeric(number_of_draws)
+    } else {
+      block_pve_sum <- block_pve_sum_sq <- numeric(number_of_blocks)
+      total_pve_sum <- total_pve_sum_sq <- 0
+      cross_block_pve_sum <- cross_block_pve_sum_sq <- 0
+    }
   }
   has_normal <- any(block_model == 0L)
   has_spike_slab <- any(block_model == 1L)
@@ -1166,6 +1201,60 @@
 
     if (retained_index <= number_of_draws &&
         iteration == retained_iterations[retained_index]) {
+      if (compute_pve) {
+        if (use_sufficient_statistics) {
+          fitted_crossproducts <- Xty - corrected_rhs
+          total_sum_squares <- max(
+            0, sum(coefficient * fitted_crossproducts)
+          )
+          standalone_sum_squares <- vapply(
+            seq_along(block_predictors),
+            function(block) {
+              predictors <- block_predictors[[block]]
+              block_coefficient <- coefficient[predictors]
+              max(0, sum(
+                block_coefficient *
+                  drop(block_XtX[[block]] %*% block_coefficient)
+              ))
+            },
+            numeric(1)
+          )
+          allocated_sum_squares <- vapply(
+            block_predictors,
+            function(predictors) {
+              sum(coefficient[predictors] *
+                fitted_crossproducts[predictors])
+            },
+            numeric(1)
+          )
+        } else {
+          total_fitted <- y_centered - residuals
+          total_sum_squares <- max(0, sum(total_fitted^2))
+          standalone_sum_squares <- allocated_sum_squares <-
+            numeric(number_of_blocks)
+          for (block in seq_len(number_of_blocks)) {
+            predictors <- block_predictors[[block]]
+            block_fitted <- drop(
+              x_centered[, predictors, drop = FALSE] %*%
+                coefficient[predictors]
+            )
+            standalone_sum_squares[block] <- max(0, sum(block_fitted^2))
+            allocated_sum_squares[block] <- sum(block_fitted * total_fitted)
+          }
+        }
+        variance_df <- effective_n - as.integer(fit_intercept)
+        total_signal_variance <- total_sum_squares / variance_df
+        pve_denominator <- total_signal_variance + residual_var
+        block_pve <- if (pve_type == "standalone") {
+          standalone_sum_squares / variance_df / pve_denominator
+        } else {
+          allocated_sum_squares / variance_df / pve_denominator
+        }
+        total_pve <- total_signal_variance / pve_denominator
+        cross_block_pve <-
+          (total_sum_squares - sum(standalone_sum_squares)) /
+            variance_df / pve_denominator
+      }
       intercept_draw <- if (fit_intercept) {
         stats::rnorm(
           1L,
@@ -1179,6 +1268,11 @@
         coefficient_samples[retained_index, ] <- coefficient
         intercept_samples[retained_index] <- intercept_draw
         residual_var_samples[retained_index] <- residual_var
+        if (compute_pve) {
+          block_pve_samples[retained_index, ] <- block_pve
+          total_pve_samples[retained_index] <- total_pve
+          cross_block_pve_samples[retained_index] <- cross_block_pve
+        }
         if (has_normal) {
           normal_var_samples[retained_index, ] <- normal_var
         }
@@ -1209,6 +1303,15 @@
         intercept_sum_sq <- intercept_sum_sq + intercept_draw^2
         residual_var_sum <- residual_var_sum + residual_var
         residual_var_sum_sq <- residual_var_sum_sq + residual_var^2
+        if (compute_pve) {
+          block_pve_sum <- block_pve_sum + block_pve
+          block_pve_sum_sq <- block_pve_sum_sq + block_pve^2
+          total_pve_sum <- total_pve_sum + total_pve
+          total_pve_sum_sq <- total_pve_sum_sq + total_pve^2
+          cross_block_pve_sum <- cross_block_pve_sum + cross_block_pve
+          cross_block_pve_sum_sq <-
+            cross_block_pve_sum_sq + cross_block_pve^2
+        }
         if (has_normal) {
           normal_var_sum <- normal_var_sum + normal_var
           normal_var_sum_sq <- normal_var_sum_sq + normal_var^2
@@ -1280,6 +1383,20 @@
   if (!store_samples && store_coefficient_cov) {
     samples$coefficient_crossprod <- coefficient_crossprod
   }
+  if (compute_pve) {
+    if (store_samples) {
+      samples$block_pve_samples <- block_pve_samples
+      samples$total_pve_samples <- total_pve_samples
+      samples$cross_block_pve_samples <- cross_block_pve_samples
+    } else {
+      samples$block_pve_sum <- block_pve_sum
+      samples$block_pve_sum_sq <- block_pve_sum_sq
+      samples$total_pve_sum <- total_pve_sum
+      samples$total_pve_sum_sq <- total_pve_sum_sq
+      samples$cross_block_pve_sum <- cross_block_pve_sum
+      samples$cross_block_pve_sum_sq <- cross_block_pve_sum_sq
+    }
+  }
   if (has_normal) {
     if (store_samples) {
       samples$normal_var_samples <- normal_var_samples
@@ -1347,7 +1464,11 @@
                             intercept_y_mean = NULL,
                             XtX = NULL, XtX_center = NULL, Xty = NULL,
                             yty = NULL, center_observations = TRUE,
-                            residual_sse_offset = 0) {
+                            residual_sse_offset = 0, compute_pve = FALSE,
+                            pve_type = c("standalone", "allocated")) {
+  pve_controls <- .validate_pve_controls(compute_pve, pve_type)
+  compute_pve <- pve_controls$compute_pve
+  pve_type <- pve_controls$pve_type
   .validate_mcmc(iterations, burnin, thin, seed)
   use_sufficient_statistics <- !is.null(XtX)
   if (is.null(block_id)) {
@@ -1397,7 +1518,9 @@
     summary_Xty = if (use_sufficient_statistics) Xty else numeric(),
     summary_yty = if (use_sufficient_statistics && !is.null(yty)) yty else 0,
     center_observations = center_observations,
-    residual_sse_offset = residual_sse_offset
+    residual_sse_offset = residual_sse_offset,
+    compute_pve = compute_pve,
+    pve_type_code = match(pve_type, c("standalone", "allocated")) - 1L
   )
   samples <- if (inherits(XtX, "dgCMatrix")) {
     do.call(
@@ -1411,7 +1534,8 @@
           "multi_gamma_list", "multi_pi_alpha_list", "multi_var_shape",
           "multi_var_scale", "learn_residual_var", "fixed_residual_var",
           "store_samples", "store_coefficient_cov", "effective_n",
-          "fit_intercept", "intercept_x_mean", "intercept_y_mean"
+          "fit_intercept", "intercept_x_mean", "intercept_y_mean",
+          "compute_pve", "pve_type_code"
         )],
         list(
           summary_XtX = XtX,
@@ -1543,13 +1667,15 @@
     chain_samples,
     block_model = block_model,
     store_samples = sampler_arguments$store_samples,
-    store_coefficient_cov = sampler_arguments$store_coefficient_cov
+    store_coefficient_cov = sampler_arguments$store_coefficient_cov,
+    compute_pve = sampler_arguments$compute_pve
   )
 }
 
 .combine_blm_chains <- function(chain_samples, block_model = 0L,
                                 store_samples = TRUE,
-                                store_coefficient_cov = TRUE) {
+                                store_coefficient_cov = TRUE,
+                                compute_pve = FALSE) {
   if (!store_samples) {
     summary_names <- c(
       "number_of_draws", "coefficient_sum", "coefficient_sum_sq",
@@ -1558,6 +1684,13 @@
     )
     if (store_coefficient_cov) {
       summary_names <- c(summary_names, "coefficient_crossprod")
+    }
+    if (compute_pve) {
+      summary_names <- c(
+        summary_names, "block_pve_sum", "block_pve_sum_sq",
+        "total_pve_sum", "total_pve_sum_sq", "cross_block_pve_sum",
+        "cross_block_pve_sum_sq"
+      )
     }
     if (any(block_model == 0L)) {
       summary_names <- c(summary_names, "normal_var_sum", "normal_var_sum_sq")
@@ -1617,6 +1750,18 @@
     ),
     chain_id = rep.int(seq_along(chain_samples), number_of_draws)
   )
+  if (compute_pve) {
+    combined$block_pve_samples <- do.call(
+      rbind, lapply(chain_samples, `[[`, "block_pve_samples")
+    )
+    combined$total_pve_samples <- unlist(
+      lapply(chain_samples, `[[`, "total_pve_samples"), use.names = FALSE
+    )
+    combined$cross_block_pve_samples <- unlist(
+      lapply(chain_samples, `[[`, "cross_block_pve_samples"),
+      use.names = FALSE
+    )
+  }
   if (any(block_model == 0L)) {
     combined$normal_var_samples <- do.call(
       rbind,
@@ -1716,6 +1861,16 @@
         nrow(coefficient_samples) != number_of_draws) {
       stop("`fit` contains incompatible ETA samples.", call. = FALSE)
     }
+    if (!is.null(block$pve_samples)) {
+      if (length(block$pve_samples) != number_of_draws) {
+        stop("`fit` contains incompatible block-PVE samples.",
+             call. = FALSE)
+      }
+      sample_matrix <- cbind(sample_matrix, block$pve_samples)
+      colnames(sample_matrix)[ncol(sample_matrix)] <- paste0(
+        "pve_", block_name
+      )
+    }
     if (identical(block$model, "Normal")) {
       if (is.null(block$normal_var_samples) ||
           length(block$normal_var_samples) != number_of_draws) {
@@ -1782,6 +1937,17 @@
         "var_", block_name
       )
     }
+  }
+  if (!is.null(fit$total_pve_samples)) {
+    if (length(fit$total_pve_samples) != number_of_draws ||
+        length(fit$cross_block_pve_samples) != number_of_draws) {
+      stop("`fit` contains incompatible total-PVE samples.", call. = FALSE)
+    }
+    sample_matrix <- cbind(
+      sample_matrix,
+      total_pve = fit$total_pve_samples,
+      cross_block_pve = fit$cross_block_pve_samples
+    )
   }
   sample_matrix
 }

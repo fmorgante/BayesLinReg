@@ -140,6 +140,35 @@ vector. Set `store_coefficient_cov = FALSE` to omit its full
 `coefficient_cov` matrix; this also avoids the quadratic-size covariance
 accumulator when `store_samples = FALSE`.
 
+### Posterior variance explained
+
+Set `compute_pve = TRUE` to calculate PVE only at retained posterior draws:
+
+```r
+fit_with_pve <- blm(
+  y,
+  ETA = list(
+    first = list(X = X[, 1, drop = FALSE], model = "Normal"),
+    second = list(X = X[, -1, drop = FALSE], model = "SpikeSlab")
+  ),
+  residual_var = 1,
+  compute_pve = TRUE,
+  pve_type = "standalone"
+)
+```
+
+Each block returns `pve_mean`, `pve_var`, and, when posterior draws are stored,
+`pve_samples`. The fit also returns total and cross-block PVE. Standalone block
+PVE measures the variance of that block's linear predictor; because correlated
+blocks have cross-covariance, standalone values need not sum to total PVE.
+`pve_type = "allocated"` distributes those covariance terms across blocks so
+their PVE values sum to total PVE, although an allocated block value can be
+negative. `cross_block_pve` is reported under either definition.
+
+PVE calculation is disabled by default and therefore has no default runtime
+cost. When enabled, it adds matrix-vector work only after burn-in and at draws
+retained by `thin`; there is no separate PVE thinning parameter.
+
 ### Sufficient statistics
 
 Use `blm_ss()` when the original response and predictor matrix are unavailable:

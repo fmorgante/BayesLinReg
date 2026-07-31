@@ -85,6 +85,22 @@ class DenseSummaryMatrix {
 
   void update_center_dot(double&, const int, const double) const {}
 
+  double block_quadratic(
+      const std::vector<double>& coefficient,
+      const std::vector<int>& predictors,
+      const Rcpp::IntegerVector&,
+      const int) const {
+    double result = 0.0;
+    for (std::size_t column = 0; column < predictors.size(); ++column) {
+      const int j = predictors[column];
+      for (std::size_t row = 0; row < predictors.size(); ++row) {
+        const int k = predictors[row];
+        result += coefficient[k] * matrix_(k, j) * coefficient[j];
+      }
+    }
+    return result;
+  }
+
  private:
   const Rcpp::NumericMatrix& matrix_;
 };
@@ -155,6 +171,27 @@ class SparseSummaryMatrix {
     center_dot += center_[j] * change;
   }
 
+  double block_quadratic(
+      const std::vector<double>& coefficient,
+      const std::vector<int>& predictors,
+      const Rcpp::IntegerVector& block_id,
+      const int block) const {
+    double sparse_result = 0.0;
+    double block_center_dot = 0.0;
+    for (std::size_t index = 0; index < predictors.size(); ++index) {
+      const int j = predictors[index];
+      block_center_dot += center_[j] * coefficient[j];
+      for (Eigen::MappedSparseMatrix<double>::InnerIterator entry(matrix_, j);
+           entry; ++entry) {
+        if (block_id[entry.row()] - 1 == block) {
+          sparse_result += coefficient[entry.row()] * entry.value() *
+            coefficient[j];
+        }
+      }
+    }
+    return sparse_result - block_center_dot * block_center_dot;
+  }
+
  private:
   const Eigen::MappedSparseMatrix<double>& matrix_;
   const Rcpp::NumericVector& center_;
@@ -219,7 +256,9 @@ Rcpp::List blm_gibbs_core(
     const Rcpp::NumericVector& summary_Xty,
     const double summary_yty,
     const bool center_observations,
-    const double residual_sse_offset) {
+    const double residual_sse_offset,
+    const bool compute_pve,
+    const int pve_type_code) {
   Rcpp::RNGScope scope;
 
   const int n = y.size();
@@ -301,6 +340,16 @@ Rcpp::List blm_gibbs_core(
   Rcpp::NumericMatrix coefficient_samples(stored_rows, p);
   Rcpp::NumericVector intercept_samples(stored_rows);
   Rcpp::NumericVector residual_var_samples(stored_rows);
+  Rcpp::NumericMatrix block_pve_samples(
+    compute_pve ? stored_rows : 0,
+    compute_pve ? number_of_blocks : 0
+  );
+  Rcpp::NumericVector total_pve_samples(
+    compute_pve ? stored_rows : 0
+  );
+  Rcpp::NumericVector cross_block_pve_samples(
+    compute_pve ? stored_rows : 0
+  );
   Rcpp::NumericMatrix normal_var_samples(
     stored_rows, has_normal ? number_of_blocks : 0
   );
@@ -338,6 +387,16 @@ Rcpp::List blm_gibbs_core(
   double intercept_sum_sq = 0.0;
   double residual_var_sum = 0.0;
   double residual_var_sum_sq = 0.0;
+  Rcpp::NumericVector block_pve_sum(
+    compute_pve ? number_of_blocks : 0
+  );
+  Rcpp::NumericVector block_pve_sum_sq(
+    compute_pve ? number_of_blocks : 0
+  );
+  double total_pve_sum = 0.0;
+  double total_pve_sum_sq = 0.0;
+  double cross_block_pve_sum = 0.0;
+  double cross_block_pve_sum_sq = 0.0;
   Rcpp::NumericVector normal_var_sum(
     has_normal ? number_of_blocks : 0
   );
@@ -784,6 +843,81 @@ Rcpp::List blm_gibbs_core(
 
     if (iteration > burnin &&
         (iteration - burnin - 1) % thin == 0) {
+      std::vector<double> block_pve(number_of_blocks, 0.0);
+      double total_pve = 0.0;
+      double cross_block_pve = 0.0;
+      if (compute_pve) {
+        std::vector<double> standalone_sum_squares(number_of_blocks, 0.0);
+        std::vector<double> allocated_sum_squares(number_of_blocks, 0.0);
+        double total_sum_squares = 0.0;
+        if (use_sufficient_statistics) {
+          std::vector<double> centered_fitted(p, 0.0);
+          for (int j = 0; j < p; ++j) {
+            centered_fitted[j] = summary_Xty[j] -
+              summary_XtX.corrected_value(corrected_rhs, j, center_dot);
+            total_sum_squares += coefficient[j] * centered_fitted[j];
+          }
+          total_sum_squares = std::max(0.0, total_sum_squares);
+          for (int block = 0; block < number_of_blocks; ++block) {
+            standalone_sum_squares[block] = std::max(
+              0.0,
+              summary_XtX.block_quadratic(
+                coefficient, block_predictors[block], block_id, block
+              )
+            );
+            const std::vector<int>& predictors = block_predictors[block];
+            for (std::size_t index = 0; index < predictors.size(); ++index) {
+              const int j = predictors[index];
+              allocated_sum_squares[block] +=
+                coefficient[j] * centered_fitted[j];
+            }
+          }
+        } else {
+          std::vector<double> total_fitted(n, 0.0);
+          for (int i = 0; i < n; ++i) {
+            total_fitted[i] = y_centered[i] - residuals[i];
+            total_sum_squares += total_fitted[i] * total_fitted[i];
+          }
+          std::vector<double> block_fitted(n, 0.0);
+          for (int block = 0; block < number_of_blocks; ++block) {
+            std::fill(block_fitted.begin(), block_fitted.end(), 0.0);
+            const std::vector<int>& predictors = block_predictors[block];
+            for (std::size_t index = 0; index < predictors.size(); ++index) {
+              const int j = predictors[index];
+              const double* x_column = center_observations
+                ? x_centered.begin() + static_cast<std::size_t>(n) * j
+                : X.begin() + static_cast<std::size_t>(n) * j;
+              for (int i = 0; i < n; ++i) {
+                block_fitted[i] += x_column[i] * coefficient[j];
+              }
+            }
+            for (int i = 0; i < n; ++i) {
+              standalone_sum_squares[block] +=
+                block_fitted[i] * block_fitted[i];
+              allocated_sum_squares[block] +=
+                block_fitted[i] * total_fitted[i];
+            }
+          }
+        }
+        const double variance_df = static_cast<double>(
+          effective_n - (fit_intercept ? 1 : 0)
+        );
+        const double total_signal_variance = total_sum_squares / variance_df;
+        const double pve_denominator = total_signal_variance + residual_var;
+        double standalone_total = 0.0;
+        for (int block = 0; block < number_of_blocks; ++block) {
+          standalone_total += standalone_sum_squares[block];
+          const double block_sum_squares = pve_type_code == 0
+            ? standalone_sum_squares[block]
+            : allocated_sum_squares[block];
+          block_pve[block] =
+            block_sum_squares / variance_df / pve_denominator;
+        }
+        total_pve = total_signal_variance / pve_denominator;
+        cross_block_pve =
+          (total_sum_squares - standalone_total) /
+            variance_df / pve_denominator;
+      }
       double intercept_mean = intercept_y_mean;
       for (int j = 0; j < p; ++j) {
         const int block = block_id[j] - 1;
@@ -815,6 +949,13 @@ Rcpp::List blm_gibbs_core(
       if (store_samples) {
         intercept_samples[retained_index] = intercept_draw;
         residual_var_samples[retained_index] = residual_var;
+        if (compute_pve) {
+          for (int block = 0; block < number_of_blocks; ++block) {
+            block_pve_samples(retained_index, block) = block_pve[block];
+          }
+          total_pve_samples[retained_index] = total_pve;
+          cross_block_pve_samples[retained_index] = cross_block_pve;
+        }
         if (has_normal) {
           for (int block = 0; block < number_of_blocks; ++block) {
             if (block_model[block] == 0) {
@@ -887,6 +1028,17 @@ Rcpp::List blm_gibbs_core(
         intercept_sum_sq += intercept_draw * intercept_draw;
         residual_var_sum += residual_var;
         residual_var_sum_sq += residual_var * residual_var;
+        if (compute_pve) {
+          for (int block = 0; block < number_of_blocks; ++block) {
+            block_pve_sum[block] += block_pve[block];
+            block_pve_sum_sq[block] += block_pve[block] * block_pve[block];
+          }
+          total_pve_sum += total_pve;
+          total_pve_sum_sq += total_pve * total_pve;
+          cross_block_pve_sum += cross_block_pve;
+          cross_block_pve_sum_sq +=
+            cross_block_pve * cross_block_pve;
+        }
         for (int block = 0; block < number_of_blocks; ++block) {
           const int model = block_model[block];
           if (model == 0) {
@@ -959,7 +1111,10 @@ Rcpp::List blm_gibbs_core(
       Rcpp::Named("tau_sq_samples") = tau_sq_samples,
       Rcpp::Named("multi_component_samples") = multi_component_samples,
       Rcpp::Named("multi_pi_samples") = multi_pi_samples,
-      Rcpp::Named("multi_var_samples") = multi_var_samples
+      Rcpp::Named("multi_var_samples") = multi_var_samples,
+      Rcpp::Named("block_pve_samples") = block_pve_samples,
+      Rcpp::Named("total_pve_samples") = total_pve_samples,
+      Rcpp::Named("cross_block_pve_samples") = cross_block_pve_samples
     );
   }
   Rcpp::List summaries = Rcpp::List::create(
@@ -985,7 +1140,13 @@ Rcpp::List blm_gibbs_core(
     Rcpp::Named("multi_pi_sum") = multi_pi_sum,
     Rcpp::Named("multi_pi_sum_sq") = multi_pi_sum_sq,
     Rcpp::Named("multi_var_sum") = multi_var_sum,
-    Rcpp::Named("multi_var_sum_sq") = multi_var_sum_sq
+    Rcpp::Named("multi_var_sum_sq") = multi_var_sum_sq,
+    Rcpp::Named("block_pve_sum") = block_pve_sum,
+    Rcpp::Named("block_pve_sum_sq") = block_pve_sum_sq,
+    Rcpp::Named("total_pve_sum") = total_pve_sum,
+    Rcpp::Named("total_pve_sum_sq") = total_pve_sum_sq,
+    Rcpp::Named("cross_block_pve_sum") = cross_block_pve_sum,
+    Rcpp::Named("cross_block_pve_sum_sq") = cross_block_pve_sum_sq
   );
   if (store_coefficient_cov) {
     summaries["coefficient_crossprod"] = coefficient_crossprod;
@@ -1031,7 +1192,9 @@ Rcpp::List blm_gibbs_rcpp_cpp(
     const Rcpp::NumericVector& summary_Xty,
     const double summary_yty,
     const bool center_observations,
-    const double residual_sse_offset) {
+    const double residual_sse_offset,
+    const bool compute_pve,
+    const int pve_type_code) {
   const DenseSummaryMatrix summary_matrix(summary_XtX);
   return blm_gibbs_core(
     y, X, residual_shape, residual_scale, iterations, burnin, thin,
@@ -1041,7 +1204,8 @@ Rcpp::List blm_gibbs_rcpp_cpp(
     multi_var_scale, learn_residual_var, fixed_residual_var, store_samples,
     store_coefficient_cov, effective_n, fit_intercept, intercept_x_mean,
     intercept_y_mean, use_sufficient_statistics, summary_matrix, summary_Xty,
-    summary_yty, center_observations, residual_sse_offset
+    summary_yty, center_observations, residual_sse_offset, compute_pve,
+    pve_type_code
   );
 }
 
@@ -1079,7 +1243,9 @@ Rcpp::List blm_gibbs_sparse_rcpp_cpp(
     const Eigen::MappedSparseMatrix<double>& summary_XtX,
     const Rcpp::NumericVector& summary_center,
     const Rcpp::NumericVector& summary_Xty,
-    const double summary_yty) {
+    const double summary_yty,
+    const bool compute_pve,
+    const int pve_type_code) {
   const Rcpp::NumericVector empty_y;
   const Rcpp::NumericMatrix empty_X(0, 0);
   const SparseSummaryMatrix summary_matrix(summary_XtX, summary_center);
@@ -1091,6 +1257,6 @@ Rcpp::List blm_gibbs_sparse_rcpp_cpp(
     multi_var_scale, learn_residual_var, fixed_residual_var, store_samples,
     store_coefficient_cov, effective_n, fit_intercept, intercept_x_mean,
     intercept_y_mean, true, summary_matrix, summary_Xty, summary_yty,
-    true, 0.0
+    true, 0.0, compute_pve, pve_type_code
   );
 }

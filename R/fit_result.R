@@ -1,6 +1,8 @@
 .assemble_blm_result <- function(blocks, block_indices, samples, nchains,
                                  store_samples, store_coefficient_cov,
                                  fit_intercept = TRUE,
+                                 compute_pve = FALSE,
+                                 pve_type = "standalone",
                                  residual_shape = NULL,
                                  residual_scale = NULL,
                                  residual_scale_calibrated = FALSE,
@@ -61,6 +63,22 @@
     )
     if (store_coefficient_cov) result$coefficient_cov <- coefficient_cov
     if (store_samples) result$coefficient_samples <- coefficient_samples
+    if (compute_pve) {
+      if (store_samples) {
+        pve_samples <- samples$block_pve_samples[, block_index]
+        result$pve_mean <- mean(pve_samples)
+        result$pve_var <- stats::var(pve_samples)
+        result$pve_samples <- pve_samples
+      } else {
+        result$pve_mean <- samples$block_pve_sum[block_index] /
+          samples$number_of_draws
+        result$pve_var <- .variance_from_sums(
+          samples$block_pve_sum[block_index],
+          samples$block_pve_sum_sq[block_index],
+          samples$number_of_draws
+        )
+      }
+    }
     if (block$model == "Normal") {
       if (store_samples) {
         normal_var_samples <- samples$normal_var_samples[, block_index]
@@ -266,6 +284,30 @@
   }
   result$residual_var_mean <- residual_var_mean
   result$residual_var_var <- residual_var_var
+  if (compute_pve) {
+    if (store_samples) {
+      result$total_pve_mean <- mean(samples$total_pve_samples)
+      result$total_pve_var <- stats::var(samples$total_pve_samples)
+      result$cross_block_pve_mean <- mean(samples$cross_block_pve_samples)
+      result$cross_block_pve_var <- stats::var(samples$cross_block_pve_samples)
+      result$total_pve_samples <- samples$total_pve_samples
+      result$cross_block_pve_samples <- samples$cross_block_pve_samples
+    } else {
+      result$total_pve_mean <- samples$total_pve_sum /
+        samples$number_of_draws
+      result$total_pve_var <- .variance_from_sums(
+        samples$total_pve_sum, samples$total_pve_sum_sq,
+        samples$number_of_draws
+      )
+      result$cross_block_pve_mean <- samples$cross_block_pve_sum /
+        samples$number_of_draws
+      result$cross_block_pve_var <- .variance_from_sums(
+        samples$cross_block_pve_sum, samples$cross_block_pve_sum_sq,
+        samples$number_of_draws
+      )
+    }
+    result$pve_type <- pve_type
+  }
   if (!is.null(residual_shape)) {
     result$residual_shape <- residual_shape
     result$residual_scale <- residual_scale
