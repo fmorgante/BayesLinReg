@@ -4,7 +4,13 @@
 \alias{predict.blm_fit}
 \title{Predict from a BayesLinReg fit}
 \usage{
-\method{predict}{blm_fit}(object, newdata, ...)
+\method{predict}{blm_fit}(
+  object,
+  newdata,
+  interval = c("none", "credible", "prediction"),
+  level = 0.95,
+  ...
+)
 }
 \arguments{
 \item{object}{A fitted model returned by \code{\link[=blm]{blm()}} or
@@ -17,11 +23,23 @@ represents multiple observations. For a multi-block fit, a named list of
 matrices or data frames, one for each \code{ETA} block. Named columns are
 reordered to match the fitted predictors.}
 
+\item{interval}{Interval to return. \code{"none"} returns only posterior-mean
+predictions. \code{"credible"} returns an equal-tailed posterior interval for
+the conditional mean. \code{"prediction"} returns an equal-tailed posterior
+predictive interval that also includes residual variation. Intervals require
+a fit created with \code{store_samples = TRUE}.}
+
+\item{level}{Coverage probability for credible or prediction intervals.}
+
 \item{...}{Additional arguments. Currently unused.}
 }
 \value{
-A numeric vector of posterior-mean predictions.
+With \code{interval = "none"}, a numeric vector of posterior-mean predictions.
+Otherwise, a matrix with columns \code{fit}, \code{lwr}, and \code{upr}.
 }
 \description{
-Computes posterior-mean predictions for new predictor values.
+Computes posterior-mean predictions and optional posterior intervals for new
+predictor values. Prediction intervals use deterministic quantiles of the
+equal-weight normal mixture induced by the retained coefficient and residual-
+variance draws.
 }

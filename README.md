@@ -55,6 +55,32 @@ fit$ETA$ETA1$coefficient_mean
 fit$intercept_mean
 ```
 
+Posterior summaries and uncertainty-aware predictions use familiar S3
+methods:
+
+```r
+summary(fit)
+summary(fit, coefficients = "top", max_coefficients = 20)
+summary(
+  fit,
+  coefficients = "top",
+  max_coefficients = 20,
+  rank_by = "inclusion_probability"
+)
+predict(fit, X[1:5, , drop = FALSE], interval = "credible")
+predict(fit, X[1:5, , drop = FALSE], interval = "prediction", level = 0.9)
+```
+
+The default summary is block-first. It reports all coefficients automatically
+only for fits with at most 20 predictors; larger coefficient tables are
+omitted unless `coefficients = "top"` or `coefficients = "all"` is requested.
+Quantiles are computed only for reported coefficients.
+
+Credible intervals describe uncertainty in the conditional mean. Prediction
+intervals additionally include residual variation. Both require
+`store_samples = TRUE`; point predictions and mean/SD summaries remain
+available for memory-efficient online fits.
+
 The available models are `"Normal"`, `"SpikeSlab"`, `"SpikeMultiSlab"`,
 `"GlobalLocal"`, and `"Fixed"`. A `"Fixed"` block gives its coefficients a
 flat prior while retaining the package's separate intercept. Fixed predictors

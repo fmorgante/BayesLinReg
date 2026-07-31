@@ -38,6 +38,13 @@ stopifnot(
       stats::coef(stats::lm(y ~ X))[-1][1:2]
   )) < 0.25
 )
+fixed_summary <- summary(fixed_rcpp)
+stopifnot(
+  all(c("covariates::exposure", "markers::marker1") %in%
+      rownames(fixed_summary$coefficients)),
+  identical(rownames(fixed_summary$hyperparameters),
+            "markers::coefficient_var")
+)
 
 # Learning residual variance uses the usual explicitly sampled-coefficient
 # conditional and requires an independently specified residual prior.

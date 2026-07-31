@@ -5,7 +5,7 @@ y <- 1 + 2 * X[, "first"] - X[, "second"]
 
 single_fit <- blm(
   y, ETA = list(X = X, model = "Normal"), residual_var = 1,
-  iterations = 100, burnin = 40, seed = 601
+  iterations = 100, burnin = 40, seed = 601, compute_pve = TRUE
 )
 single_coef <- coef(single_fit)
 stopifnot(
@@ -22,6 +22,89 @@ stopifnot(
   ))
 )
 
+# Credible intervals use fitted-mean draws; prediction intervals integrate the
+# normal observation model over the retained posterior draws.
+new_X <- X[1:4, , drop = FALSE]
+credible <- predict(single_fit, new_X, interval = "credible", level = 0.8)
+predictive <- predict(single_fit, new_X, interval = "prediction", level = 0.8)
+prediction_draws <- sweep(
+  tcrossprod(new_X, single_fit$ETA$ETA1$coefficient_samples),
+  2L, single_fit$intercept_samples, FUN = "+"
+)
+expected_bounds <- t(apply(
+  prediction_draws, 1L, stats::quantile,
+  probs = c(0.1, 0.9), names = FALSE
+))
+stopifnot(
+  identical(colnames(credible), c("fit", "lwr", "upr")),
+  isTRUE(all.equal(credible[, "fit"], predict(single_fit, new_X))),
+  isTRUE(all.equal(
+    unname(credible[, c("lwr", "upr")]), unname(expected_bounds)
+  )),
+  all(predictive[, "lwr"] < predictive[, "upr"]),
+  identical(
+    predictive,
+    predict(single_fit, new_X, interval = "prediction", level = 0.8)
+  )
+)
+
+stored_summary <- summary(single_fit, probs = c(0.1, 0.5, 0.9))
+printed_summary <- NULL
+invisible(utils::capture.output(printed_summary <- print(stored_summary)))
+stopifnot(
+  inherits(stored_summary, "summary.blm_fit"),
+  identical(
+    colnames(stored_summary$coefficients),
+    c("Mean", "SD", "10%", "50%", "90%")
+  ),
+  isTRUE(all.equal(
+    unname(stored_summary$coefficients["first", "Mean"]),
+    unname(single_fit$ETA$ETA1$coefficient_mean["first"])
+  )),
+  !is.null(stored_summary$hyperparameters),
+  !is.null(stored_summary$variance_explained),
+  identical(printed_summary, stored_summary)
+)
+
+compact_summary <- summary(single_fit, max_coefficients = 1)
+top_summary <- summary(
+  single_fit, coefficients = "top", max_coefficients = 1,
+  rank_by = "absolute_mean"
+)
+all_summary <- summary(single_fit, coefficients = "all",
+                       max_coefficients = 0)
+stopifnot(
+  is.null(compact_summary$coefficients),
+  identical(compact_summary$coefficient_summary, "none"),
+  identical(compact_summary$total_coefficients, 2L),
+  identical(compact_summary$reported_coefficients, 0L),
+  identical(rownames(compact_summary$blocks), "ETA1"),
+  identical(compact_summary$blocks$Predictors, 2L),
+  identical(rownames(compact_summary$intercept), "(Intercept)"),
+  identical(rownames(top_summary$coefficients), "first"),
+  identical(top_summary$coefficient_summary, "top"),
+  nrow(all_summary$coefficients) == 2L
+)
+
+spike_fit <- blm(
+  y, ETA = list(X = X, model = "SpikeSlab"), residual_var = 1,
+  iterations = 80, burnin = 30, seed = 604
+)
+spike_summary <- summary(
+  spike_fit, coefficients = "top", max_coefficients = 1,
+  rank_by = "inclusion_probability"
+)
+expected_top <- names(which.max(
+  spike_fit$ETA$ETA1$inclusion_probability
+))
+stopifnot(
+  identical(rownames(spike_summary$coefficients), expected_top),
+  isTRUE(all.equal(
+    spike_summary$blocks["ETA1", "Expected Included"],
+    sum(spike_fit$ETA$ETA1$inclusion_probability)
+  ))
+)
+
 summary_fit <- blm(
   y, ETA = list(X = X, model = "Normal"), residual_var = 1,
   iterations = 60, burnin = 20, seed = 603, store_samples = FALSE,
@@ -29,7 +112,15 @@ summary_fit <- blm(
 )
 stopifnot(
   length(coef(summary_fit)) == 3L,
-  length(predict(summary_fit, X[1:2, , drop = FALSE])) == 2L
+  length(predict(summary_fit, X[1:2, , drop = FALSE])) == 2L,
+  identical(colnames(summary(summary_fit)$coefficients), c("Mean", "SD")),
+  inherits(
+    try(
+      predict(summary_fit, X[1:2, , drop = FALSE], interval = "credible"),
+      silent = TRUE
+    ),
+    "try-error"
+  )
 )
 
 multi_fit <- blm(
@@ -89,6 +180,8 @@ invalid_predictions <- list(
   function() predict(single_fit),
   function() predict(single_fit, matrix(1, nrow = 2, ncol = 3)),
   function() predict(single_fit, matrix(NA_real_, nrow = 1, ncol = 2)),
+  function() predict(single_fit, X[1, , drop = FALSE], level = 1),
+  function() predict(single_fit, X[1, , drop = FALSE], interval = "invalid"),
   function() predict(multi_fit, list(first_block = X[, "first"])),
   function() predict(multi_fit, list(
     first_block = X[1:2, "first", drop = FALSE],
@@ -97,6 +190,22 @@ invalid_predictions <- list(
 )
 stopifnot(all(vapply(
   invalid_predictions,
+  function(call) inherits(try(call(), silent = TRUE), "try-error"),
+  logical(1)
+)))
+
+invalid_summaries <- list(
+  function() summary(single_fit, probs = 0),
+  function() summary(single_fit, probs = c(0.9, 0.1)),
+  function() summary(single_fit, probs = c(0.5, 0.5)),
+  function() summary(single_fit, max_coefficients = -1),
+  function() summary(
+    single_fit, coefficients = "top", max_coefficients = 1,
+    rank_by = "inclusion_probability"
+  )
+)
+stopifnot(all(vapply(
+  invalid_summaries,
   function(call) inherits(try(call(), silent = TRUE), "try-error"),
   logical(1)
 )))

@@ -2,6 +2,8 @@
 
 S3method(coef,blm_fit)
 S3method(predict,blm_fit)
+S3method(print,summary.blm_fit)
+S3method(summary,blm_fit)
 export(assess_convergence)
 export(blm)
 export(blm_ss)
