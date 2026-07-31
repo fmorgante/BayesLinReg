@@ -74,6 +74,36 @@ for (sampler_version in c("Rcpp", "R")) {
   ) %in% names(diagnostics$rhat)))
 }
 
+# A one-predictor block retains a matrix-shaped component summary in both
+# stored-draw and online-summary modes.
+for (sampler_version in c("Rcpp", "R")) {
+  single_eta <- list(
+    X = X[, "x1", drop = FALSE], model = "SpikeMultiSlab"
+  )
+  single_stored <- blm(
+    y, ETA = single_eta, residual_var = 1,
+    iterations = 80, burnin = 30, seed = 707,
+    version = sampler_version
+  )
+  single_online <- blm(
+    y, ETA = single_eta, residual_var = 1,
+    iterations = 80, burnin = 30, seed = 707,
+    version = sampler_version, store_samples = FALSE
+  )
+  stopifnot(
+    identical(
+      dim(single_stored$ETA$ETA1$component_probability), c(1L, 4L)
+    ),
+    identical(
+      dim(single_online$ETA$ETA1$component_probability), c(1L, 4L)
+    ),
+    isTRUE(all.equal(
+      single_stored$ETA$ETA1$component_probability,
+      single_online$ETA$ETA1$component_probability
+    ))
+  )
+}
+
 # Different multi-slab blocks may use different numbers of components.
 mixed_fit <- blm(
   y,

@@ -1,6 +1,6 @@
 Package: BayesLinReg
 Title: Bayesian Linear Regression with Flexible Coefficient Priors
-Version: 11.5.1
+Version: 11.5.2
 Authors@R:
     person(
         "Fabio", "Morgante",

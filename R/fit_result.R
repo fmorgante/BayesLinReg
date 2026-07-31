@@ -178,10 +178,14 @@
         component_samples <-
           samples$multi_component_samples[, local_indices, drop = FALSE]
         colnames(component_samples) <- block$predictor_names
-        component_probability <- vapply(
-          seq_along(block$multi_gamma),
-          function(component) colMeans(component_samples == component),
-          numeric(length(indices))
+        component_probability <- matrix(
+          vapply(
+            seq_along(block$multi_gamma),
+            function(component) colMeans(component_samples == component),
+            numeric(length(indices))
+          ),
+          nrow = length(indices),
+          ncol = length(block$multi_gamma)
         )
         dimnames(component_probability) <- list(
           block$predictor_names, component_names
