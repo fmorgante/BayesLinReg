@@ -11,6 +11,16 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
+// blm_build_info_cpp
+Rcpp::List blm_build_info_cpp();
+RcppExport SEXP _BayesLinReg_blm_build_info_cpp() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(blm_build_info_cpp());
+    return rcpp_result_gen;
+END_RCPP
+}
 // draw_gig_rcpp_cpp
 Rcpp::NumericVector draw_gig_rcpp_cpp(const int n, const double lambda, const double chi, const double psi);
 RcppExport SEXP _BayesLinReg_draw_gig_rcpp_cpp(SEXP nSEXP, SEXP lambdaSEXP, SEXP chiSEXP, SEXP psiSEXP) {
@@ -121,6 +131,7 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
+    {"_BayesLinReg_blm_build_info_cpp", (DL_FUNC) &_BayesLinReg_blm_build_info_cpp, 0},
     {"_BayesLinReg_draw_gig_rcpp_cpp", (DL_FUNC) &_BayesLinReg_draw_gig_rcpp_cpp, 4},
     {"_BayesLinReg_blm_gibbs_rcpp_cpp", (DL_FUNC) &_BayesLinReg_blm_gibbs_rcpp_cpp, 39},
     {"_BayesLinReg_blm_gibbs_sparse_rcpp_cpp", (DL_FUNC) &_BayesLinReg_blm_gibbs_sparse_rcpp_cpp, 35},

@@ -1,0 +1,22 @@
+# Optional Eigen BLAS build
+
+BayesLinReg uses Eigen's native dense kernels by default. To allow eligible
+Eigen operations to use the BLAS implementation linked to R, install the
+source package with:
+
+    R CMD INSTALL --configure-args="--enable-eigen-blas" BayesLinReg
+
+or from R with:
+
+    install.packages(
+      "BayesLinReg.tar.gz",
+      repos = NULL,
+      type = "source",
+      configure.args = "--enable-eigen-blas"
+    )
+
+The environment variable `BAYESLINREG_USE_EIGEN_BLAS=yes` provides an
+equivalent opt-in. An explicit configure argument takes precedence.
+
+Use `blm_build_info()` after installation to report whether Eigen BLAS
+delegation was compiled and the BLAS library reported by R.

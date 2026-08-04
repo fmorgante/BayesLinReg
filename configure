@@ -1,0 +1,68 @@
+#!/bin/sh
+
+use_eigen_blas=${BAYESLINREG_USE_EIGEN_BLAS:-no}
+
+normalize_choice() {
+  case "$1" in
+    1|yes|YES|true|TRUE|on|ON)
+      use_eigen_blas=yes
+      ;;
+    0|no|NO|false|FALSE|off|OFF|"")
+      use_eigen_blas=no
+      ;;
+    *)
+      echo "configure: invalid Eigen BLAS choice: $1" >&2
+      exit 1
+      ;;
+  esac
+}
+
+normalize_choice "$use_eigen_blas"
+
+for argument in "$@"; do
+  case "$argument" in
+    --enable-eigen-blas)
+      use_eigen_blas=yes
+      ;;
+    --disable-eigen-blas)
+      use_eigen_blas=no
+      ;;
+    --enable-eigen-blas=*)
+      normalize_choice "${argument#*=}"
+      ;;
+    --help)
+      echo "BayesLinReg configure options:"
+      echo "  --enable-eigen-blas   use R's BLAS for eligible Eigen kernels"
+      echo "  --disable-eigen-blas  use Eigen's native kernels (default)"
+      exit 0
+      ;;
+    *)
+      echo "configure: unrecognized option: $argument" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if test "$use_eigen_blas" = yes; then
+  eigen_blas_cppflags="-DEIGEN_USE_BLAS"
+  eigen_blas_libs='$(BLAS_LIBS) $(FLIBS)'
+  echo "configure: enabling external BLAS for eligible Eigen kernels"
+else
+  eigen_blas_cppflags=""
+  eigen_blas_libs=""
+  echo "configure: using Eigen's native kernels"
+fi
+
+generate_makevars() {
+  template=$1
+  target=$2
+  sed \
+    -e "s|@EIGEN_BLAS_CPPFLAGS@|$eigen_blas_cppflags|g" \
+    -e "s|@EIGEN_BLAS_LIBS@|$eigen_blas_libs|g" \
+    "$template" > "$target" || exit 1
+}
+
+generate_makevars src/Makevars.in src/Makevars
+generate_makevars src/Makevars.win.in src/Makevars.win
+
+exit 0

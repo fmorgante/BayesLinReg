@@ -27,6 +27,17 @@ Then load the package with:
 library(BayesLinReg)
 ```
 
+Source installations use Eigen's native dense kernels by default. Users with
+an optimized BLAS can opt into Eigen's external BLAS delegation at install
+time:
+
+```sh
+R CMD INSTALL --configure-args="--enable-eigen-blas" BayesLinReg
+```
+
+Run `blm_build_info()` to report the compiled backend. See `INSTALL` for the
+equivalent `install.packages()` and environment-variable forms.
+
 ## Examples
 
 ### Raw data

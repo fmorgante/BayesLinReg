@@ -202,6 +202,19 @@ class SparseSummaryMatrix {
 // [[Rcpp::depends(RcppEigen)]]
 
 // [[Rcpp::export]]
+Rcpp::List blm_build_info_cpp() {
+#ifdef EIGEN_USE_BLAS
+  const bool eigen_blas = true;
+#else
+  const bool eigen_blas = false;
+#endif
+  return Rcpp::List::create(
+    Rcpp::Named("eigen_blas") = eigen_blas,
+    Rcpp::Named("dense_kernel") = eigen_blas ? "external BLAS" : "Eigen"
+  );
+}
+
+// [[Rcpp::export]]
 Rcpp::NumericVector draw_gig_rcpp_cpp(
     const int n,
     const double lambda,
