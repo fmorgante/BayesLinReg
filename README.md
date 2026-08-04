@@ -31,6 +31,13 @@ Source installations use Eigen's native dense kernels by default. Users with
 an optimized BLAS can opt into Eigen's external BLAS delegation at install
 time:
 
+```r
+install.packages("remotes")
+remotes::install_github("fmorgante/BayesLinReg", configure.args="--enable-eigen-blas")
+```
+
+or
+
 ```sh
 R CMD INSTALL --configure-args="--enable-eigen-blas" BayesLinReg
 ```
