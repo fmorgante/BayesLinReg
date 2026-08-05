@@ -196,7 +196,12 @@ predict.blm_fit <- function(object, newdata,
 #'   `"absolute_mean"` ranks by absolute posterior coefficient mean.
 #'   `"inclusion_probability"` is available when at least one block has a
 #'   discrete spike component; coefficients without inclusion probabilities
-#'   sort after those with probabilities.
+#'   sort after those with probabilities. Absolute-mean ranking uses
+#'   coefficients transformed back to the original predictor scale. It is
+#'   therefore not invariant to predictor rescaling and is most meaningful
+#'   when predictors use comparable units. Internal standardization does not
+#'   alter this behavior. For spike models with differently scaled predictors,
+#'   inclusion-probability ranking is generally preferable.
 #' @param ... Additional arguments. Currently unused.
 #'
 #' @return An object of class `summary.blm_fit` containing block-level and
