@@ -247,6 +247,47 @@ requires `version = "Rcpp"`. Full eigenvalue-based validation is optional throug
 `check_psd = TRUE` and is disabled by default to avoid its cubic initialization
 cost; requesting it for sparse input temporarily constructs a dense matrix.
 
+### GWAS summary statistics
+
+`compute_ss_from_gwas()` converts marginal ordinary least-squares effect
+estimates, their standard errors, a common sample size, and a signed LD
+correlation matrix into centered cross-products for `blm_ss()` using the
+finite-sample SuSiE-RSS transformation:
+
+```r
+ss <- compute_ss_from_gwas(
+  beta = marginal_beta,
+  se = marginal_se,
+  LD = LD_correlations,
+  n = gwas_sample_size,
+  response_var = phenotype_variance
+)
+
+fit_gwas <- blm_ss(
+  n = ss$n,
+  XtX = ss$XtX,
+  Xty = ss$Xty,
+  yty = ss$yty,
+  X_means = ss$X_means,
+  y_mean = ss$y_mean,
+  reference_response_var = ss$reference_response_var,
+  ETA = list(model = "SpikeMultiSlab")
+)
+```
+
+Omitting `response_var` constructs the statistics on the standardized
+predictor and response scale. With an in-sample LD matrix and compatible OLS
+statistics, the reconstructed cross-products recover the individual-data
+likelihood. With reference LD or other GWAS models, they are approximate
+working cross-products. The function performs basic input validation but does
+not diagnose general GWAS/LD mismatch.
+
+Set `output = "eigen"` to compute and return the complete eigendecomposition as
+`XtX_eigenvectors_raw` and `XtX_eigenvalues_raw`. No eigenpairs are filtered or
+modified. Negative eigenvalues produce a warning; the user must select strictly
+positive eigenpairs and calculate `XtX_prop_var` before calling
+`blm_ss_eigen()`.
+
 ### Eigen sufficient statistics
 
 `blm_ss_eigen()` accepts precomputed positive eigenpairs of the centered
