@@ -38,6 +38,25 @@ stopifnot(
   identical(original$reference_response_var, stats::var(y))
 )
 
+# The default sufficient-statistics result feeds directly into a model that
+# does not use expected-PVE calibration without passing the unused reference
+# response variance.
+gwas_fit <- blm_ss(
+  n = original$n,
+  XtX = original$XtX,
+  Xty = original$Xty,
+  yty = original$yty,
+  X_means = original$X_means,
+  y_mean = original$y_mean,
+  ETA = list(model = "SpikeMultiSlab"),
+  residual_shape = 2,
+  residual_scale = original$reference_response_var,
+  iterations = 30,
+  burnin = 10,
+  seed = 902
+)
+stopifnot(inherits(gwas_fit, "blm_fit"))
+
 # Without response variance, the same inputs recover cross-products for
 # sample-standardized predictors and response.
 standardized <- compute_ss_from_gwas(beta, se, LD, n)

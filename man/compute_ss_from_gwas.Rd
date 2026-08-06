@@ -46,8 +46,9 @@ raw eigendecomposition for preparing input to \code{\link[=blm_ss_eigen]{blm_ss_
 }
 \value{
 For \code{output = "sufficient"}, a list containing \code{n}, \code{XtX}, \code{Xty},
-\code{yty}, zero \code{X_means} and \code{y_mean}, and \code{reference_response_var}. For
-\code{output = "eigen"}, \code{XtX} is replaced by
+\code{yty}, zero \code{X_means} and \code{y_mean}, and \code{reference_response_var}. Pass
+\code{reference_response_var} to \code{\link[=blm_ss]{blm_ss()}} only when at least one \code{ETA} block
+specifies \code{expected_pve}. For \code{output = "eigen"}, \code{XtX} is replaced by
 \code{XtX_eigenvectors_raw}, \code{XtX_eigenvalues_raw}, and
 \code{XtX_eigenvalue_tolerance}. Raw eigenpairs are returned without filtering
 or modification and therefore are not necessarily valid inputs to

@@ -26,8 +26,9 @@
 #'   raw eigendecomposition for preparing input to [blm_ss_eigen()].
 #'
 #' @return For `output = "sufficient"`, a list containing `n`, `XtX`, `Xty`,
-#'   `yty`, zero `X_means` and `y_mean`, and `reference_response_var`. For
-#'   `output = "eigen"`, `XtX` is replaced by
+#'   `yty`, zero `X_means` and `y_mean`, and `reference_response_var`. Pass
+#'   `reference_response_var` to [blm_ss()] only when at least one `ETA` block
+#'   specifies `expected_pve`. For `output = "eigen"`, `XtX` is replaced by
 #'   `XtX_eigenvectors_raw`, `XtX_eigenvalues_raw`, and
 #'   `XtX_eigenvalue_tolerance`. Raw eigenpairs are returned without filtering
 #'   or modification and therefore are not necessarily valid inputs to

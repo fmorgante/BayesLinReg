@@ -270,8 +270,9 @@ fit_gwas <- blm_ss(
   yty = ss$yty,
   X_means = ss$X_means,
   y_mean = ss$y_mean,
-  reference_response_var = ss$reference_response_var,
-  ETA = list(model = "SpikeMultiSlab")
+  ETA = list(model = "SpikeMultiSlab"),
+  residual_shape = 2,
+  residual_scale = ss$reference_response_var
 )
 ```
 
