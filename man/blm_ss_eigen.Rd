@@ -24,6 +24,7 @@ blm_ss_eigen(
   seed = NULL,
   verbose = FALSE,
   nchains = 1L,
+  nthreads = 1L,
   store_samples = TRUE,
   store_coefficient_cov = TRUE,
   check_eigenvectors = FALSE,
@@ -36,13 +37,15 @@ blm_ss_eigen(
 
 \item{XtX_eigenvectors}{A finite numeric matrix with one row per predictor
 and one column per retained eigenvector. The eigenvectors must describe
-the centered predictor cross-product matrix.}
+the centered predictor cross-product matrix. Alternatively, a list of
+matrices representing an exactly block-diagonal centered cross-product.}
 
 \item{XtX_eigenvalues}{A positive finite numeric vector corresponding to
-the columns of \code{XtX_eigenvectors}.}
+the columns of \code{XtX_eigenvectors}, or a matching list of vectors.}
 
-\item{XtX_prop_var}{A number in \code{(0, 1]} declaring the proportion of the
-total centered-\code{XtX} variance represented by the supplied eigenpairs.
+\item{XtX_prop_var}{A number, or for list input one value per block, in
+\code{(0, 1]} declaring the proportion of the corresponding centered-\code{XtX}
+variance represented by the supplied eigenpairs.
 Use \code{1} only when all positive eigenpairs have been retained.}
 
 \item{Xty}{A finite predictor-response cross-product vector on the original
@@ -86,6 +89,9 @@ per chain using \code{\link[progressr:with_progress]{progressr::with_progress()}
 \item{nchains}{Number of independent chains. Multiple chains use a temporary
 \link[future:multisession]{future::multisession} plan.}
 
+\item{nthreads}{Number of threads used within one Rcpp chain for list eigen
+input. Values above one require \code{nchains = 1}.}
+
 \item{store_samples}{If \code{TRUE} (the default), retain and return individual
 posterior draws. If \code{FALSE}, compute posterior summaries online without
 allocating draw matrices.}
@@ -110,7 +116,8 @@ that block PVE values sum to total PVE. It is used only when
 \value{
 A \code{blm_fit} object. In addition to the usual fields, it records
 \code{XtX_eigen_rank}, \code{XtX_prop_var}, \code{XtX_approximate}, and
-\code{residual_sse_offset}.
+\code{residual_sse_offset}. List input also records block sizes, block-specific
+ranks and retained fractions, the cross-block assumption, and \code{nthreads}.
 }
 \description{
 Fits the same models as \code{\link[=blm]{blm()}} using eigenpairs of the centered
@@ -142,6 +149,18 @@ an eigendecomposition internally, allowing a precomputed representation to be
 reused without an \eqn{O(p^3)} initialization.
 Optional posterior PVE calculations use the retained representation, at a
 cost of approximately \eqn{O(qp)} per retained draw across all blocks.
+
+With list input, each matrix and corresponding eigenvalue vector defines one
+block of the centered cross-product matrix; all cross-block products are
+assumed to be exactly zero. Predictor order is obtained by concatenating the
+matrix rows. The implementation stores each block-specific transformed design
+and residual separately, requiring approximately \eqn{\sum_b p_b q_b} values
+instead of a global \eqn{p\sum_b q_b} pseudo-design. ETA prior blocks may cross
+eigen blocks. When \code{nthreads > 1}, coefficient sweeps are sequential within
+each eigen block and concurrent across blocks. Shared prior and residual
+parameters are updated after the workers join. Nonzero \code{X_means} are
+supported because the supplied eigenpairs must already represent centered
+\code{XtX}; independently decomposed uncentered blocks are not valid substitutes.
 }
 \examples{
 X <- cbind(x1 = 1:20, x2 = rep(c(0, 1), 10))

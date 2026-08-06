@@ -491,6 +491,180 @@ class BlockSummaryMatrix {
   int nthreads_;
 };
 
+// A block-diagonal low-rank matrix represented as G_b = Q_b' Q_b. Besides
+// avoiding p_b-by-p_b Gram matrices, each block keeps its transformed residual
+// w_b - Q_b beta_b, so a coefficient update costs O(q_b).
+class EigenBlockSummaryMatrix {
+ public:
+  EigenBlockSummaryMatrix(
+      const Rcpp::List& designs,
+      const Rcpp::List& responses,
+      const Rcpp::List& indices,
+      const int p,
+      const int nthreads = 1)
+    : p_(p), global_block_(p, -1), global_local_(p, -1),
+      diagonal_(p, 0.0), nthreads_(nthreads) {
+    if (designs.size() < 1 || designs.size() != responses.size() ||
+        designs.size() != indices.size()) {
+      Rcpp::stop("Invalid block eigen representation.");
+    }
+    blocks_.reserve(designs.size());
+    for (int block_index = 0; block_index < designs.size(); ++block_index) {
+      Block block;
+      const Rcpp::NumericMatrix design = designs[block_index];
+      const Rcpp::NumericVector response = responses[block_index];
+      const Rcpp::IntegerVector mapping = indices[block_index];
+      block.rows = design.nrow();
+      block.cols = design.ncol();
+      if (block.rows < 1 || block.cols < 1 || response.size() != block.rows ||
+          mapping.size() != block.cols) {
+        Rcpp::stop("Eigen-block dimensions are inconsistent.");
+      }
+      block.design = design.begin();
+      block.response.assign(response.begin(), response.end());
+      block.residual = block.response;
+      block.global.resize(block.cols);
+      for (int local = 0; local < block.cols; ++local) {
+        const int global = mapping[local] - 1;
+        if (global < 0 || global >= p_ || global_block_[global] >= 0) {
+          Rcpp::stop("Eigen-block predictor indices must partition predictors.");
+        }
+        block.global[local] = global;
+        global_block_[global] = block_index;
+        global_local_[global] = local;
+        const double* column = block.design +
+          static_cast<std::size_t>(block.rows) * local;
+        for (int row = 0; row < block.rows; ++row) {
+          diagonal_[global] += column[row] * column[row];
+        }
+      }
+      blocks_.push_back(std::move(block));
+    }
+    for (int global = 0; global < p_; ++global) {
+      if (global_block_[global] < 0) {
+        Rcpp::stop("Eigen-block predictor indices must cover every predictor.");
+      }
+    }
+  }
+
+  int cols() const { return p_; }
+  int block_count() const { return static_cast<int>(blocks_.size()); }
+  double diagonal(const int j) const { return diagonal_[j]; }
+
+  const std::vector<int>& block_predictors(const int block) const {
+    return blocks_[block].global;
+  }
+
+  double corrected_value(
+      const std::vector<double>&,
+      const int j,
+      const double) const {
+    const Block& block = blocks_[global_block_[j]];
+    const int local = global_local_[j];
+    const double* column = block.design +
+      static_cast<std::size_t>(block.rows) * local;
+    double result = 0.0;
+    for (int row = 0; row < block.rows; ++row) {
+      result += column[row] * block.residual[row];
+    }
+    return result;
+  }
+
+  void update(
+      std::vector<double>&,
+      const int j,
+      const double change) const {
+    Block& block = blocks_[global_block_[j]];
+    const int local = global_local_[j];
+    const double* column = block.design +
+      static_cast<std::size_t>(block.rows) * local;
+    for (int row = 0; row < block.rows; ++row) {
+      block.residual[row] -= column[row] * change;
+    }
+  }
+
+  void multiply_block(
+      const int block_index,
+      const std::vector<double>& coefficient,
+      std::vector<double>& fitted) const {
+    Block& block = blocks_[block_index];
+    std::vector<double> transformed_fitted(block.rows, 0.0);
+    for (int local = 0; local < block.cols; ++local) {
+      const double beta = coefficient[block.global[local]];
+      const double* column = block.design +
+        static_cast<std::size_t>(block.rows) * local;
+      for (int row = 0; row < block.rows; ++row) {
+        transformed_fitted[row] += column[row] * beta;
+      }
+    }
+    for (int row = 0; row < block.rows; ++row) {
+      block.residual[row] = block.response[row] - transformed_fitted[row];
+    }
+    for (int local = 0; local < block.cols; ++local) {
+      const double* column = block.design +
+        static_cast<std::size_t>(block.rows) * local;
+      double value = 0.0;
+      for (int row = 0; row < block.rows; ++row) {
+        value += column[row] * transformed_fitted[row];
+      }
+      fitted[block.global[local]] = value;
+    }
+  }
+
+  void multiply(
+      const std::vector<double>& coefficient,
+      std::vector<double>& fitted) const;
+
+  double center_dot(const std::vector<double>&) const { return 0.0; }
+  double centered_fitted(const double fitted, const int, const double) const {
+    return fitted;
+  }
+  void update_center_dot(double&, const int, const double) const {}
+
+  double block_quadratic(
+      const std::vector<double>& coefficient,
+      const std::vector<int>& predictors,
+      const Rcpp::IntegerVector&,
+      const int) const {
+    std::vector< std::vector<double> > fitted(blocks_.size());
+    for (std::size_t block = 0; block < blocks_.size(); ++block) {
+      fitted[block].assign(blocks_[block].rows, 0.0);
+    }
+    for (const int j : predictors) {
+      const int block_index = global_block_[j];
+      const Block& block = blocks_[block_index];
+      const int local = global_local_[j];
+      const double* column = block.design +
+        static_cast<std::size_t>(block.rows) * local;
+      for (int row = 0; row < block.rows; ++row) {
+        fitted[block_index][row] += column[row] * coefficient[j];
+      }
+    }
+    double result = 0.0;
+    for (const std::vector<double>& values : fitted) {
+      for (const double value : values) result += value * value;
+    }
+    return result;
+  }
+
+ private:
+  struct Block {
+    int rows = 0;
+    int cols = 0;
+    const double* design = NULL;
+    std::vector<int> global;
+    std::vector<double> response;
+    mutable std::vector<double> residual;
+  };
+
+  int p_;
+  mutable std::vector<Block> blocks_;
+  std::vector<int> global_block_;
+  std::vector<int> global_local_;
+  std::vector<double> diagonal_;
+  int nthreads_;
+};
+
 class BlockMultiplyWorker : public RcppParallel::Worker {
  public:
   BlockMultiplyWorker(
@@ -513,6 +687,26 @@ class BlockMultiplyWorker : public RcppParallel::Worker {
   std::vector<double>& fitted_;
 };
 
+class EigenBlockMultiplyWorker : public RcppParallel::Worker {
+ public:
+  EigenBlockMultiplyWorker(
+      const EigenBlockSummaryMatrix& matrix,
+      const std::vector<double>& coefficient,
+      std::vector<double>& fitted)
+    : matrix_(matrix), coefficient_(coefficient), fitted_(fitted) {}
+
+  void operator()(const std::size_t begin, const std::size_t end) {
+    for (std::size_t block = begin; block < end; ++block) {
+      matrix_.multiply_block(static_cast<int>(block), coefficient_, fitted_);
+    }
+  }
+
+ private:
+  const EigenBlockSummaryMatrix& matrix_;
+  const std::vector<double>& coefficient_;
+  std::vector<double>& fitted_;
+};
+
 void BlockSummaryMatrix::multiply(
     const std::vector<double>& coefficient,
     std::vector<double>& fitted) const {
@@ -527,6 +721,20 @@ void BlockSummaryMatrix::multiply(
   RcppParallel::parallelFor(
     0, blocks_.size(), worker, 1, nthreads_
   );
+}
+
+void EigenBlockSummaryMatrix::multiply(
+    const std::vector<double>& coefficient,
+    std::vector<double>& fitted) const {
+  std::fill(fitted.begin(), fitted.end(), 0.0);
+  if (nthreads_ <= 1 || blocks_.size() <= 1) {
+    for (int block = 0; block < block_count(); ++block) {
+      multiply_block(block, coefficient, fitted);
+    }
+    return;
+  }
+  EigenBlockMultiplyWorker worker(*this, coefficient, fitted);
+  RcppParallel::parallelFor(0, blocks_.size(), worker, 1, nthreads_);
 }
 
 std::uint64_t splitmix64(std::uint64_t value) {
@@ -582,10 +790,11 @@ class BlockRng {
   std::uint64_t increment_;
 };
 
+template <typename BlockMatrix>
 class BlockCoefficientWorker : public RcppParallel::Worker {
  public:
   BlockCoefficientWorker(
-      const BlockSummaryMatrix& matrix,
+      const BlockMatrix& matrix,
       const int* block_id,
       const int* block_model,
       const std::vector<int>& model_local_index,
@@ -627,7 +836,9 @@ class BlockCoefficientWorker : public RcppParallel::Worker {
         const int model = block_model_[prior_block];
         const int local_index = model_local_index_[j];
         const double old_coefficient = coefficient_[j];
-        const double partial_rhs = corrected_rhs_[j] +
+        const double partial_rhs = matrix_.corrected_value(
+          corrected_rhs_, j, 0.0
+        ) +
           x_squared_[j] * old_coefficient;
 
         if (model == 3) {
@@ -730,7 +941,7 @@ class BlockCoefficientWorker : public RcppParallel::Worker {
   }
 
  private:
-  const BlockSummaryMatrix& matrix_;
+  const BlockMatrix& matrix_;
   const int* block_id_;
   const int* block_model_;
   const std::vector<int>& model_local_index_;
@@ -753,8 +964,9 @@ class BlockCoefficientWorker : public RcppParallel::Worker {
   std::vector<double>& residual_sse_change_;
 };
 
+template <typename BlockMatrix>
 void parallel_coefficient_sweep(
-    const BlockSummaryMatrix& matrix,
+    const BlockMatrix& matrix,
     const Rcpp::IntegerVector& block_id,
     const Rcpp::IntegerVector& block_model,
     const std::vector<int>& model_local_index,
@@ -777,7 +989,7 @@ void parallel_coefficient_sweep(
     double& residual_sse,
     const int nthreads) {
   std::vector<double> residual_sse_change(matrix.block_count(), 0.0);
-  BlockCoefficientWorker worker(
+  BlockCoefficientWorker<BlockMatrix> worker(
     matrix, block_id.begin(), block_model.begin(), model_local_index,
     x_squared, residual_var, normal_var, pi, slab_var, tau_sq, local_var,
     multi_gamma, multi_pi, multi_var, learn_residual_var, coefficient,
@@ -790,6 +1002,15 @@ void parallel_coefficient_sweep(
     for (const double change : residual_sse_change) residual_sse += change;
   }
 }
+
+template <typename SummaryMatrix>
+struct is_parallel_block_matrix : std::false_type {};
+
+template <>
+struct is_parallel_block_matrix<BlockSummaryMatrix> : std::true_type {};
+
+template <>
+struct is_parallel_block_matrix<EigenBlockSummaryMatrix> : std::true_type {};
 
 }  // namespace
 
@@ -1131,7 +1352,7 @@ Rcpp::List blm_gibbs_core(
   const int residual_refresh_interval = 100;
   std::vector<BlockRng> block_rng;
   if (nthreads > 1) {
-    if constexpr (std::is_same<SummaryMatrix, BlockSummaryMatrix>::value) {
+    if constexpr (is_parallel_block_matrix<SummaryMatrix>::value) {
       const std::uint64_t seed_high = static_cast<std::uint64_t>(
         R::runif(0.0, 4294967296.0)
       );
@@ -1152,7 +1373,7 @@ Rcpp::List blm_gibbs_core(
   for (int iteration = 1; iteration <= iterations; ++iteration) {
     // Update each coefficient from its univariate conditional normal.
     bool parallel_sweep = false;
-    if constexpr (std::is_same<SummaryMatrix, BlockSummaryMatrix>::value) {
+    if constexpr (is_parallel_block_matrix<SummaryMatrix>::value) {
       if (nthreads > 1) {
         parallel_coefficient_sweep(
           summary_XtX, block_id, block_model, model_local_index, x_squared,
@@ -1962,6 +2183,65 @@ Rcpp::List blm_gibbs_block_rcpp_cpp(
   const Rcpp::NumericMatrix empty_X(0, 0);
   const BlockSummaryMatrix summary_matrix(
     summary_XtX, summary_indices, summary_types, summary_center, nthreads
+  );
+  return blm_gibbs_core(
+    empty_y, empty_X, residual_shape, residual_scale, iterations, burnin, thin,
+    progress_callback, block_id, block_model, normal_shape, normal_scale,
+    pi_alpha, pi_beta, spike_var_shape, spike_var_scale, global_scale,
+    local_a, local_b, multi_gamma_list, multi_pi_alpha_list, multi_var_shape,
+    multi_var_scale, learn_residual_var, fixed_residual_var, store_samples,
+    store_coefficient_cov, effective_n, fit_intercept, intercept_x_mean,
+    intercept_y_mean, true, summary_matrix, summary_Xty, summary_yty,
+    true, 0.0, compute_pve, pve_type_code, nthreads
+  );
+}
+
+// [[Rcpp::export]]
+Rcpp::List blm_gibbs_eigen_block_rcpp_cpp(
+    const double residual_shape,
+    const double residual_scale,
+    const int iterations,
+    const int burnin,
+    const int thin,
+    const Rcpp::Function& progress_callback,
+    const Rcpp::IntegerVector& block_id,
+    const Rcpp::IntegerVector& block_model,
+    const Rcpp::NumericVector& normal_shape,
+    const Rcpp::NumericVector& normal_scale,
+    const Rcpp::NumericVector& pi_alpha,
+    const Rcpp::NumericVector& pi_beta,
+    const Rcpp::NumericVector& spike_var_shape,
+    const Rcpp::NumericVector& spike_var_scale,
+    const Rcpp::NumericVector& global_scale,
+    const Rcpp::NumericVector& local_a,
+    const Rcpp::NumericVector& local_b,
+    const Rcpp::List& multi_gamma_list,
+    const Rcpp::List& multi_pi_alpha_list,
+    const Rcpp::NumericVector& multi_var_shape,
+    const Rcpp::NumericVector& multi_var_scale,
+    const bool learn_residual_var,
+    const double fixed_residual_var,
+    const bool store_samples,
+    const bool store_coefficient_cov,
+    const int effective_n,
+    const bool fit_intercept,
+    const Rcpp::NumericVector& intercept_x_mean,
+    const double intercept_y_mean,
+    const Rcpp::List& transformed_X,
+    const Rcpp::List& transformed_y,
+    const Rcpp::List& eigen_indices,
+    const Rcpp::NumericVector& summary_Xty,
+    const double summary_yty,
+    const bool compute_pve,
+    const int pve_type_code,
+    const int nthreads) {
+  if (nthreads < 1) {
+    Rcpp::stop("`nthreads` must be a positive integer.");
+  }
+  const Rcpp::NumericVector empty_y;
+  const Rcpp::NumericMatrix empty_X(0, 0);
+  const EigenBlockSummaryMatrix summary_matrix(
+    transformed_X, transformed_y, eigen_indices, summary_Xty.size(), nthreads
   );
   return blm_gibbs_core(
     empty_y, empty_X, residual_shape, residual_scale, iterations, burnin, thin,

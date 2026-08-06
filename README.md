@@ -326,8 +326,11 @@ fit_gwas <- blm_ss(
 For block LD, use `LD = list(region_1 = LD_1, region_2 = LD_2)`. The returned
 `ss$XtX` is a matching list and can be passed directly to `blm_ss()`; its prior
 blocks may cross LD-block boundaries. Symmetric sparse `dsCMatrix` inputs keep
-their one-triangle storage through this conversion. Block LD is not currently
-supported with `output = "eigen"`.
+their one-triangle storage through this conversion. With `output = "eigen"`,
+each scaled LD block is instead decomposed independently and the raw
+eigenvector, eigenvalue, and tolerance outputs retain the same block names.
+After selecting positive eigenpairs and calculating retained fractions, these
+lists can be passed directly to `blm_ss_eigen()`.
 
 Omitting `response_var` constructs the statistics on the standardized
 predictor and response scale. With an in-sample LD matrix and compatible OLS
@@ -373,3 +376,12 @@ an exact re-expression of the sufficient-statistic likelihood. Supplying a
 truncated eigenspace with `XtX_prop_var < 1` gives an explicitly approximate
 posterior. The eigendecomposition is intentionally not computed inside
 `blm_ss_eigen()`, so it can be precomputed once and reused across fits.
+
+For an exactly block-diagonal centered cross-product, the eigenvectors and
+eigenvalues may instead be matching lists. The sampler retains separate
+low-rank transformed designs and residuals, avoiding a global mostly-zero
+pseudo-design. `XtX_prop_var` may be a scalar or one value per block, and ETA
+prior blocks may cross eigen-block boundaries. With list input, `nthreads > 1`
+updates independent eigen blocks concurrently within one chain; coefficient
+updates remain sequential within each block. Nonzero `X_means` are supported
+because the supplied eigenpairs describe the already-centered cross-product.

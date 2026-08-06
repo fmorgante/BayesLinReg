@@ -24,8 +24,8 @@
 #'   regressions. The SuSiE-RSS ordinary least-squares conversion uses the
 #'   default `n - 2`.
 #' @param output Whether to return cross-products for [blm_ss()] or a complete
-#'   raw eigendecomposition for preparing input to [blm_ss_eigen()]. List `LD`
-#'   currently supports only `output = "sufficient"`.
+#'   raw eigendecomposition for preparing input to [blm_ss_eigen()]. For list
+#'   `LD`, each scaled block is decomposed independently.
 #'
 #' @return For `output = "sufficient"`, a list containing `n`, `XtX`, `Xty`,
 #'   `yty`, zero `X_means` and `y_mean`, and `reference_response_var`. `XtX`
@@ -33,9 +33,11 @@
 #'   `reference_response_var` to [blm_ss()] only when at least one `ETA` block
 #'   specifies `expected_pve`. For `output = "eigen"`, `XtX` is replaced by
 #'   `XtX_eigenvectors_raw`, `XtX_eigenvalues_raw`, and
-#'   `XtX_eigenvalue_tolerance`. Raw eigenpairs are returned without filtering
-#'   or modification and therefore are not necessarily valid inputs to
-#'   [blm_ss_eigen()], which requires strictly positive eigenvalues.
+#'   `XtX_eigenvalue_tolerance`. These are matrices and a scalar for matrix
+#'   `LD`, or matching named lists and a named vector for list `LD`. Raw
+#'   eigenpairs are returned without filtering or modification and therefore
+#'   are not necessarily valid inputs to [blm_ss_eigen()], which requires
+#'   strictly positive eigenvalues.
 #'
 #' @details Let \eqn{z_j=\hat b_j/\hat s_j} and
 #'   \deqn{a_j=(n-1)/(z_j^2+\nu),}
@@ -63,11 +65,13 @@
 #'
 #'   The function performs only basic input validation. It does not diagnose
 #'   allele flips or broader incompatibility between the GWAS statistics and
-#'   LD. Eigen output uses a complete dense eigendecomposition, requiring
-#'   \eqn{O(p^2)} memory and \eqn{O(p^3)} time. Every eigenpair is returned,
-#'   including zero and negative eigenvalues. A warning is produced if any
-#'   negative eigenvalues are present. Users must choose the eigenpairs passed
-#'   to [blm_ss_eigen()] and calculate the corresponding `XtX_prop_var`.
+#'   LD. Eigen output uses a complete dense eigendecomposition. Matrix input
+#'   requires \eqn{O(p^2)} memory and \eqn{O(p^3)} time; list input processes
+#'   one scaled block at a time and requires peak eigendecomposition storage
+#'   for the largest block. Every eigenpair is returned, including zero and
+#'   negative eigenvalues. Block-specific warnings identify negative
+#'   eigenvalues. Users must choose the eigenpairs passed to [blm_ss_eigen()]
+#'   and calculate the corresponding `XtX_prop_var` values.
 #'
 #' @references
 #' Zou Y, Carbonetto P, Wang G, Stephens M (2022). Fine-mapping from summary
@@ -145,11 +149,6 @@ compute_ss_from_gwas <- function(
   predictor_names <- validated_LD$predictor_names
   block_sizes <- validated_LD$block_sizes
   block_names <- validated_LD$block_names
-  if (list_LD && output == "eigen") {
-    stop("List `LD` currently requires `output = \"sufficient\"`.",
-         call. = FALSE)
-  }
-
   beta <- as.numeric(beta)
   se <- as.numeric(se)
   z <- beta / se
@@ -163,49 +162,25 @@ compute_ss_from_gwas <- function(
   block_indices <- Map(seq.int, block_starts, block_ends)
 
   if (scale == "standardized") {
-    XtX <- if (list_LD) {
-      lapply(LD, function(block) (n - 1) * block)
-    } else {
-      (n - 1) * LD
-    }
+    scale_block <- function(block, indices) (n - 1) * block
     Xty <- sqrt(n - 1) * sqrt(adjustment) * z
     yty <- n - 1
     reference_response_var <- 1
   } else {
     XtX_diagonal <- response_var * adjustment / se^2
     root_diagonal <- sqrt(XtX_diagonal)
-    if (list_LD) {
-      XtX <- Map(function(block, indices) {
-        .scale_gram_block(block, root_diagonal[indices])
-      }, LD, block_indices)
-    } else {
-      XtX <- .scale_gram_block(LD, root_diagonal)
+    scale_block <- function(block, indices) {
+      .scale_gram_block(block, root_diagonal[indices])
     }
     Xty <- XtX_diagonal * beta
     yty <- (n - 1) * response_var
     reference_response_var <- response_var
   }
-  finite_XtX <- if (list_LD) {
-    all(vapply(XtX, .finite_gwas_matrix, logical(1)))
-  } else {
-    .finite_gwas_matrix(XtX)
-  }
-  if (!finite_XtX || anyNA(Xty) || any(!is.finite(Xty)) ||
-      !is.finite(yty)) {
+  if (anyNA(Xty) || any(!is.finite(Xty)) || !is.finite(yty)) {
     stop("The reconstructed sufficient statistics are not finite.",
          call. = FALSE)
   }
 
-  if (list_LD) {
-    XtX <- Map(function(block, indices) {
-      names <- predictor_names[indices]
-      dimnames(block) <- list(names, names)
-      block
-    }, XtX, block_indices)
-    names(XtX) <- block_names
-  } else {
-    dimnames(XtX) <- list(predictor_names, predictor_names)
-  }
   names(Xty) <- predictor_names
   X_means <- stats::setNames(numeric(p), predictor_names)
 
@@ -215,36 +190,62 @@ compute_ss_from_gwas <- function(
     reference_response_var = as.numeric(reference_response_var)
   )
   if (output == "sufficient") {
+    XtX <- if (list_LD) {
+      Map(scale_block, LD, block_indices)
+    } else {
+      scale_block(LD, block_indices[[1L]])
+    }
+    finite_XtX <- if (list_LD) {
+      all(vapply(XtX, .finite_gwas_matrix, logical(1)))
+    } else {
+      .finite_gwas_matrix(XtX)
+    }
+    if (!finite_XtX) {
+      stop("The reconstructed sufficient statistics are not finite.",
+           call. = FALSE)
+    }
+    if (list_LD) {
+      XtX <- Map(function(block, indices) {
+        names <- predictor_names[indices]
+        dimnames(block) <- list(names, names)
+        block
+      }, XtX, block_indices)
+      names(XtX) <- block_names
+    } else {
+      dimnames(XtX) <- list(predictor_names, predictor_names)
+    }
     return(c(list(XtX = XtX), common))
   }
 
-  decomposition <- eigen(as.matrix(XtX), symmetric = TRUE)
-  rownames(decomposition$vectors) <- predictor_names
-  colnames(decomposition$vectors) <- paste0(
-    "eigen", seq_along(decomposition$values)
-  )
-  eigenvalue_tolerance <- sqrt(.Machine$double.eps) *
-    max(1, max(abs(decomposition$values)))
-  negative <- decomposition$values < 0
-  if (any(negative)) {
-    materially_negative <- decomposition$values < -eigenvalue_tolerance
-    warning(
-      sprintf(
-        paste0(
-          "The reconstructed `XtX` has %d negative eigenvalue(s) ",
-          "(minimum %.6g); %d are below -%.6g. All eigenpairs were ",
-          "returned unchanged."
-        ),
-        sum(negative), min(decomposition$values), sum(materially_negative),
-        eigenvalue_tolerance
-      ),
-      call. = FALSE
+  decompositions <- Map(function(block, indices, block_name) {
+    scaled_block <- scale_block(block, indices)
+    if (!.finite_gwas_matrix(scaled_block)) {
+      stop("The reconstructed sufficient statistics are not finite.",
+           call. = FALSE)
+    }
+    .decompose_gwas_gram(
+      scaled_block, predictor_names[indices],
+      if (list_LD) sprintf("eigen block `%s`", block_name) else "`XtX`"
     )
+  }, if (list_LD) LD else list(LD), block_indices, block_names)
+
+  if (list_LD) {
+    eigenvectors <- lapply(decompositions, `[[`, "vectors")
+    eigenvalues <- lapply(decompositions, `[[`, "values")
+    eigenvalue_tolerance <- vapply(
+      decompositions, `[[`, numeric(1), "tolerance"
+    )
+    names(eigenvectors) <- names(eigenvalues) <-
+      names(eigenvalue_tolerance) <- block_names
+  } else {
+    eigenvectors <- decompositions[[1L]]$vectors
+    eigenvalues <- decompositions[[1L]]$values
+    eigenvalue_tolerance <- decompositions[[1L]]$tolerance
   }
   c(
     list(
-      XtX_eigenvectors_raw = decomposition$vectors,
-      XtX_eigenvalues_raw = decomposition$values,
+      XtX_eigenvectors_raw = eigenvectors,
+      XtX_eigenvalues_raw = eigenvalues,
       XtX_eigenvalue_tolerance = eigenvalue_tolerance
     ),
     common
@@ -356,4 +357,35 @@ compute_ss_from_gwas <- function(
   } else {
     !anyNA(matrix) && all(is.finite(matrix))
   }
+}
+
+.decompose_gwas_gram <- function(matrix, predictor_names, label) {
+  decomposition <- eigen(as.matrix(matrix), symmetric = TRUE)
+  rownames(decomposition$vectors) <- predictor_names
+  colnames(decomposition$vectors) <- paste0(
+    "eigen", seq_along(decomposition$values)
+  )
+  tolerance <- sqrt(.Machine$double.eps) *
+    max(1, max(abs(decomposition$values)))
+  negative <- decomposition$values < 0
+  if (any(negative)) {
+    materially_negative <- decomposition$values < -tolerance
+    warning(
+      sprintf(
+        paste0(
+          "The reconstructed %s has %d negative eigenvalue(s) ",
+          "(minimum %.6g); %d are below -%.6g. All eigenpairs were ",
+          "returned unchanged."
+        ),
+        label, sum(negative), min(decomposition$values),
+        sum(materially_negative), tolerance
+      ),
+      call. = FALSE
+    )
+  }
+  list(
+    vectors = decomposition$vectors,
+    values = decomposition$values,
+    tolerance = tolerance
+  )
 }

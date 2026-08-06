@@ -194,6 +194,62 @@ stopifnot(
   eigen_output$XtX_eigenvalue_tolerance > 0
 )
 
+# List LD eigen output preserves block structure and feeds the block-eigen
+# sampler after the caller selects positive eigenpairs.
+block_eigen_output <- compute_ss_from_gwas(
+  beta, se, LD_blocks, n, response_var = stats::var(y), output = "eigen"
+)
+block_reconstructed <- Map(function(vectors, values) {
+  vectors %*% (values * t(vectors))
+}, block_eigen_output$XtX_eigenvectors_raw,
+block_eigen_output$XtX_eigenvalues_raw)
+stopifnot(
+  identical(names(block_eigen_output$XtX_eigenvectors_raw), names(LD_blocks)),
+  identical(names(block_eigen_output$XtX_eigenvalues_raw), names(LD_blocks)),
+  identical(names(block_eigen_output$XtX_eigenvalue_tolerance),
+            names(LD_blocks)),
+  all(vapply(seq_along(LD_blocks), function(block) {
+    isTRUE(all.equal(
+      unname(block_reconstructed[[block]]),
+      unname(block_original$XtX[[block]]), tolerance = 1e-10
+    ))
+  }, logical(1)))
+)
+block_keep <- Map(
+  function(values, tolerance) values > tolerance,
+  block_eigen_output$XtX_eigenvalues_raw,
+  as.list(block_eigen_output$XtX_eigenvalue_tolerance)
+)
+selected_block_vectors <- Map(
+  function(vectors, keep) vectors[, keep, drop = FALSE],
+  block_eigen_output$XtX_eigenvectors_raw, block_keep
+)
+selected_block_values <- Map(
+  function(values, keep) values[keep],
+  block_eigen_output$XtX_eigenvalues_raw, block_keep
+)
+block_eigen_fit <- blm_ss_eigen(
+  n = block_eigen_output$n,
+  XtX_eigenvectors = selected_block_vectors,
+  XtX_eigenvalues = selected_block_values,
+  XtX_prop_var = 1,
+  Xty = block_eigen_output$Xty,
+  yty = block_eigen_output$yty,
+  X_means = block_eigen_output$X_means,
+  y_mean = block_eigen_output$y_mean,
+  ETA = crossing_eta,
+  residual_var = 1,
+  iterations = 60,
+  burnin = 20,
+  seed = 903
+)
+stopifnot(
+  isTRUE(all.equal(
+    block_LD_fit$ETA, block_eigen_fit$ETA, tolerance = 1e-8
+  )),
+  identical(block_eigen_fit$XtX_representation, "block_diagonal_eigen")
+)
+
 # Indefinite correlation input is not repaired or filtered; it produces a
 # warning and every raw eigenpair is returned.
 indefinite_LD <- matrix(c(
@@ -218,6 +274,27 @@ stopifnot(
   grepl("returned unchanged", warning_text, fixed = TRUE)
 )
 
+block_warning_text <- NULL
+indefinite_blocks <- list(
+  bad_region = indefinite_LD,
+  good_region = LD[4:5, 4:5, drop = FALSE]
+)
+block_indefinite <- withCallingHandlers(
+  compute_ss_from_gwas(
+    beta, se, indefinite_blocks, n, output = "eigen"
+  ),
+  warning = function(condition) {
+    block_warning_text <<- conditionMessage(condition)
+    invokeRestart("muffleWarning")
+  }
+)
+stopifnot(
+  identical(names(block_indefinite$XtX_eigenvalues_raw),
+            names(indefinite_blocks)),
+  any(block_indefinite$XtX_eigenvalues_raw$bad_region < 0),
+  grepl("bad_region", block_warning_text, fixed = TRUE)
+)
+
 # Basic input validation rejects malformed conversions without attempting
 # broader GWAS/LD mismatch diagnostics.
 invalid_calls <- list(
@@ -239,9 +316,6 @@ invalid_calls <- list(
   function() compute_ss_from_gwas(beta, se, LD_blocks[1], n),
   function() compute_ss_from_gwas(
     beta, se, list(LD_blocks[[1]], unname(LD_blocks[[2]])), n
-  ),
-  function() compute_ss_from_gwas(
-    beta, se, LD_blocks, n, output = "eigen"
   ),
   function() compute_ss_from_gwas(
     beta, se, list(LD_blocks[[1]], LD_blocks[[2]][, 1, drop = FALSE]), n

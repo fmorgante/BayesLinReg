@@ -43,8 +43,8 @@ regressions. The SuSiE-RSS ordinary least-squares conversion uses the
 default \code{n - 2}.}
 
 \item{output}{Whether to return cross-products for \code{\link[=blm_ss]{blm_ss()}} or a complete
-raw eigendecomposition for preparing input to \code{\link[=blm_ss_eigen]{blm_ss_eigen()}}. List \code{LD}
-currently supports only \code{output = "sufficient"}.}
+raw eigendecomposition for preparing input to \code{\link[=blm_ss_eigen]{blm_ss_eigen()}}. For list
+\code{LD}, each scaled block is decomposed independently.}
 }
 \value{
 For \code{output = "sufficient"}, a list containing \code{n}, \code{XtX}, \code{Xty},
@@ -53,9 +53,11 @@ is a matrix for matrix \code{LD} and a same-structure list for list \code{LD}. P
 \code{reference_response_var} to \code{\link[=blm_ss]{blm_ss()}} only when at least one \code{ETA} block
 specifies \code{expected_pve}. For \code{output = "eigen"}, \code{XtX} is replaced by
 \code{XtX_eigenvectors_raw}, \code{XtX_eigenvalues_raw}, and
-\code{XtX_eigenvalue_tolerance}. Raw eigenpairs are returned without filtering
-or modification and therefore are not necessarily valid inputs to
-\code{\link[=blm_ss_eigen]{blm_ss_eigen()}}, which requires strictly positive eigenvalues.
+\code{XtX_eigenvalue_tolerance}. These are matrices and a scalar for matrix
+\code{LD}, or matching named lists and a named vector for list \code{LD}. Raw
+eigenpairs are returned without filtering or modification and therefore are
+not necessarily valid inputs to \code{\link[=blm_ss_eigen]{blm_ss_eigen()}}, which requires
+strictly positive eigenvalues.
 }
 \description{
 Reconstructs centered linear-regression cross-products from marginal GWAS
@@ -89,11 +91,13 @@ triangular representation for \code{\link[=blm_ss]{blm_ss()}} storage planning.
 
 The function performs only basic input validation. It does not diagnose
 allele flips or broader incompatibility between the GWAS statistics and
-LD. Eigen output uses a complete dense eigendecomposition, requiring
-\eqn{O(p^2)} memory and \eqn{O(p^3)} time. Every eigenpair is returned,
-including zero and negative eigenvalues. A warning is produced if any
-negative eigenvalues are present. Users must choose the eigenpairs passed
-to \code{\link[=blm_ss_eigen]{blm_ss_eigen()}} and calculate the corresponding \code{XtX_prop_var}.
+LD. Eigen output uses a complete dense eigendecomposition. Matrix input
+requires \eqn{O(p^2)} memory and \eqn{O(p^3)} time; list input processes one
+scaled block at a time and requires peak eigendecomposition storage for the
+largest block. Every eigenpair is returned, including zero and negative
+eigenvalues. Block-specific warnings identify negative eigenvalues. Users
+must choose the eigenpairs passed to \code{\link[=blm_ss_eigen]{blm_ss_eigen()}} and calculate the
+corresponding \code{XtX_prop_var} values.
 }
 \examples{
 set.seed(1)

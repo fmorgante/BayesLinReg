@@ -172,3 +172,166 @@ stopifnot(all(vapply(
   function(call) inherits(try(call(), silent = TRUE), "try-error"),
   logical(1)
 )))
+
+# Lists of centered eigen blocks use the dedicated low-rank sampler without
+# constructing either a global pseudo-design or block Gram matrices.
+set.seed(606)
+eigen_block_sizes <- c(first = 4L, second = 5L)
+centered_gram_blocks <- lapply(eigen_block_sizes, function(size) {
+  candidate <- matrix(rnorm(size^2), nrow = size)
+  crossprod(candidate) + diag(size)
+})
+eigen_block_decompositions <- lapply(
+  centered_gram_blocks, eigen, symmetric = TRUE
+)
+eigenvector_blocks <- lapply(
+  eigen_block_decompositions, `[[`, "vectors"
+)
+eigenvalue_blocks <- lapply(
+  eigen_block_decompositions, `[[`, "values"
+)
+block_predictor_names <- paste0("b", seq_len(sum(eigen_block_sizes)))
+block_ends <- cumsum(eigen_block_sizes)
+block_starts <- block_ends - eigen_block_sizes + 1L
+for (block in seq_along(eigenvector_blocks)) {
+  rownames(eigenvector_blocks[[block]]) <- block_predictor_names[
+    seq.int(block_starts[block], block_ends[block])
+  ]
+}
+block_centered_gram <- as.matrix(Matrix::bdiag(centered_gram_blocks))
+dimnames(block_centered_gram) <- list(block_predictor_names, block_predictor_names)
+block_means <- seq_along(block_predictor_names) / 50
+block_y_mean <- 0.3
+block_centered_Xty <- rnorm(length(block_predictor_names))
+block_Xty <- block_centered_Xty + n * block_means * block_y_mean
+block_XtX <- block_centered_gram + n * tcrossprod(block_means)
+block_yty <- 200 + n * block_y_mean^2
+block_eta <- list(
+  crossing = list(
+    indices = c("b1", "b5", "b2"), model = "Normal"
+  ),
+  remaining = list(
+    indices = setdiff(block_predictor_names, c("b1", "b5", "b2")),
+    model = "SpikeSlab"
+  )
+)
+block_fit_arguments <- list(
+  n = n, Xty = block_Xty, ETA = block_eta, yty = block_yty,
+  X_means = block_means, y_mean = block_y_mean,
+  residual_shape = 3, residual_scale = 1.5,
+  iterations = 80, burnin = 30, seed = 607,
+  store_coefficient_cov = FALSE, compute_pve = TRUE
+)
+block_dense_fit <- do.call(
+  blm_ss, c(list(XtX = block_XtX), block_fit_arguments)
+)
+block_eigen_fit <- do.call(
+  blm_ss_eigen,
+  c(
+    list(
+      XtX_eigenvectors = eigenvector_blocks,
+      XtX_eigenvalues = eigenvalue_blocks,
+      XtX_prop_var = c(first = 1, second = 1),
+      check_eigenvectors = TRUE
+    ),
+    block_fit_arguments
+  )
+)
+block_diagnostics <- block_eigen_fit[c(
+  "XtX_eigen_rank", "XtX_prop_var", "XtX_approximate",
+  "residual_sse_offset", "XtX_representation", "XtX_number_of_blocks",
+  "XtX_block_sizes", "XtX_eigen_rank_by_block",
+  "XtX_prop_var_by_block", "XtX_cross_block_assumption", "nthreads"
+)]
+block_eigen_fit[names(block_diagnostics)] <- NULL
+stopifnot(
+  isTRUE(all.equal(block_dense_fit, block_eigen_fit, tolerance = 1e-8)),
+  identical(block_diagnostics$XtX_eigen_rank, sum(eigen_block_sizes)),
+  identical(block_diagnostics$XtX_prop_var, 1),
+  identical(block_diagnostics$XtX_approximate, FALSE),
+  identical(block_diagnostics$XtX_representation, "block_diagonal_eigen"),
+  identical(block_diagnostics$XtX_number_of_blocks, 2L),
+  identical(
+    unname(block_diagnostics$XtX_block_sizes), unname(eigen_block_sizes)
+  ),
+  identical(
+    unname(block_diagnostics$XtX_eigen_rank_by_block),
+    unname(eigen_block_sizes)
+  ),
+  identical(unname(block_diagnostics$XtX_prop_var_by_block), c(1, 1)),
+  identical(block_diagnostics$XtX_cross_block_assumption, "zero"),
+  identical(block_diagnostics$nthreads, 1L)
+)
+
+# Threaded block-eigen sweeps are reproducible and accept nonzero means because
+# the supplied eigenpairs already represent centered XtX.
+threaded_arguments <- c(
+  list(
+    XtX_eigenvectors = eigenvector_blocks,
+    XtX_eigenvalues = eigenvalue_blocks,
+    XtX_prop_var = 1,
+    nthreads = 2L,
+    residual_var = 1,
+    compute_pve = FALSE
+  ),
+  block_fit_arguments[setdiff(
+    names(block_fit_arguments),
+    c("residual_shape", "residual_scale", "compute_pve")
+  )]
+)
+threaded_eigen_fit <- do.call(blm_ss_eigen, threaded_arguments)
+threaded_eigen_repeat <- do.call(blm_ss_eigen, threaded_arguments)
+stopifnot(
+  identical(threaded_eigen_fit, threaded_eigen_repeat),
+  identical(threaded_eigen_fit$nthreads, 2L),
+  all(is.finite(threaded_eigen_fit$ETA$crossing$coefficient_mean))
+)
+
+# Per-block truncation metadata includes a trace-weighted aggregate fraction.
+truncated_block_values <- eigenvalue_blocks
+truncated_block_vectors <- eigenvector_blocks
+truncated_block_values[[1L]] <- eigenvalue_blocks[[1L]][-length(eigenvalue_blocks[[1L]])]
+truncated_block_vectors[[1L]] <- eigenvector_blocks[[1L]][
+  , -ncol(eigenvector_blocks[[1L]]), drop = FALSE
+]
+block_prop <- c(
+  first = sum(truncated_block_values[[1L]]) / sum(eigenvalue_blocks[[1L]]),
+  second = 1
+)
+truncated_block_fit <- blm_ss_eigen(
+  n, truncated_block_vectors, truncated_block_values, block_prop,
+  block_Xty, block_eta, block_yty, block_means, block_y_mean,
+  residual_var = 1, iterations = 50, burnin = 20, seed = 608
+)
+expected_aggregate_prop <-
+  sum(vapply(truncated_block_values, sum, numeric(1))) /
+  sum(vapply(truncated_block_values, sum, numeric(1)) / block_prop)
+stopifnot(
+  identical(truncated_block_fit$XtX_approximate, TRUE),
+  isTRUE(all.equal(truncated_block_fit$XtX_prop_var, expected_aggregate_prop)),
+  identical(truncated_block_fit$XtX_prop_var_by_block, block_prop)
+)
+
+block_invalid_calls <- list(
+  function() blm_ss_eigen(
+    n, eigenvector_blocks, eigenvalues, 1, block_Xty, block_eta,
+    residual_var = 1
+  ),
+  function() blm_ss_eigen(
+    n, eigenvector_blocks, eigenvalue_blocks, c(1, 1, 1), block_Xty,
+    block_eta, residual_var = 1
+  ),
+  function() blm_ss_eigen(
+    n, eigenvectors, eigenvalues, 1, Xty, list(model = "Normal"),
+    residual_var = 1, nthreads = 2
+  ),
+  function() blm_ss_eigen(
+    n, eigenvector_blocks, eigenvalue_blocks, 1, block_Xty, block_eta,
+    residual_var = 1, nthreads = 2, nchains = 2
+  )
+)
+stopifnot(all(vapply(
+  block_invalid_calls,
+  function(call) inherits(try(call(), silent = TRUE), "try-error"),
+  logical(1)
+)))
