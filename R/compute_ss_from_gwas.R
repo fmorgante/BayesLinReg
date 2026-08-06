@@ -1,18 +1,19 @@
 #' Compute regression sufficient statistics from GWAS results
 #'
 #' Reconstructs centered linear-regression cross-products from marginal GWAS
-#' effect estimates, their standard errors, and a signed LD correlation matrix
-#' using the finite-sample transformation employed by SuSiE-RSS.
+#' effect estimates, their standard errors, and signed LD correlations using
+#' the finite-sample transformation employed by SuSiE-RSS.
 #'
 #' @param beta A finite numeric vector of marginal ordinary least-squares
 #'   effect estimates.
 #' @param se A positive finite numeric vector of standard errors corresponding
 #'   to `beta`.
-#' @param LD A finite, symmetric LD correlation matrix whose rows and columns
-#'   have the same order and effect-allele orientation as `beta`. Dense base-R
-#'   matrices and compressed sparse `Matrix` objects of class `dgCMatrix` or
-#'   `dsCMatrix` are supported. Supply signed correlations, not squared
-#'   correlations.
+#' @param LD A finite, symmetric LD correlation matrix, or a nonempty list of
+#'   such matrices representing exactly zero cross-block LD. Predictors follow
+#'   matrix order or the concatenated list order and must have the same
+#'   effect-allele orientation as `beta`. Dense base-R matrices and compressed
+#'   sparse `Matrix` objects of class `dgCMatrix` or `dsCMatrix` are supported.
+#'   Supply signed correlations, not squared correlations.
 #' @param n Number of observations used to calculate the GWAS statistics.
 #' @param response_var Optional positive sample variance of the response. It is
 #'   required for `scale = "original"`.
@@ -23,10 +24,12 @@
 #'   regressions. The SuSiE-RSS ordinary least-squares conversion uses the
 #'   default `n - 2`.
 #' @param output Whether to return cross-products for [blm_ss()] or a complete
-#'   raw eigendecomposition for preparing input to [blm_ss_eigen()].
+#'   raw eigendecomposition for preparing input to [blm_ss_eigen()]. List `LD`
+#'   currently supports only `output = "sufficient"`.
 #'
 #' @return For `output = "sufficient"`, a list containing `n`, `XtX`, `Xty`,
-#'   `yty`, zero `X_means` and `y_mean`, and `reference_response_var`. Pass
+#'   `yty`, zero `X_means` and `y_mean`, and `reference_response_var`. `XtX`
+#'   is a matrix for matrix `LD` and a same-structure list for list `LD`. Pass
 #'   `reference_response_var` to [blm_ss()] only when at least one `ETA` block
 #'   specifies `expected_pve`. For `output = "eigen"`, `XtX` is replaced by
 #'   `XtX_eigenvectors_raw`, `XtX_eigenvalues_raw`, and
@@ -53,6 +56,10 @@
 #'   statistics, or other non-OLS inputs, they are approximate working
 #'   cross-products. In particular, learning the residual variance is generally
 #'   safer with in-sample LD; fixing it is generally safer with reference LD.
+#'   For list `LD`, every omitted cross-block correlation is assumed to be
+#'   exactly zero and the returned `XtX` has the same list structure. Scaling
+#'   is performed within each block, and symmetric sparse blocks retain their
+#'   triangular representation for [blm_ss()] storage planning.
 #'
 #'   The function performs only basic input validation. It does not diagnose
 #'   allele flips or broader incompatibility between the GWAS statistics and
@@ -129,85 +136,18 @@ compute_ss_from_gwas <- function(
          call. = FALSE)
   }
 
-  sparse_LD <- inherits(LD, "sparseMatrix")
-  supported_sparse <- inherits(LD, c("dgCMatrix", "dsCMatrix"))
-  valid_dense <- is.matrix(LD) && is.numeric(LD)
-  finite_LD <- if (sparse_LD) {
-    supported_sparse && !anyNA(LD@x) && all(is.finite(LD@x))
-  } else {
-    valid_dense && !anyNA(LD) && all(is.finite(LD))
-  }
   p <- length(beta)
-  if ((!valid_dense && !supported_sparse) || nrow(LD) != p ||
-      ncol(LD) != p || !finite_LD) {
-    stop("`LD` must be a finite numeric square matrix matching `beta`.",
-         call. = FALSE)
-  }
-
-  maximum_LD <- if (sparse_LD && length(LD@x) == 0L) {
-    0
-  } else if (sparse_LD) {
-    max(abs(LD@x))
-  } else {
-    max(abs(LD))
-  }
-  symmetry_tolerance <- sqrt(.Machine$double.eps) * max(1, maximum_LD)
-  asymmetry <- if (inherits(LD, "dsCMatrix")) {
-    0
-  } else {
-    difference <- if (sparse_LD) LD - Matrix::t(LD) else LD - t(LD)
-    if (sparse_LD && length(difference@x) == 0L) {
-      0
-    } else {
-      max(abs(difference))
-    }
-  }
-  if (asymmetry > symmetry_tolerance) {
-    stop("`LD` must be symmetric.", call. = FALSE)
-  }
-  if (!inherits(LD, "dsCMatrix")) {
-    LD <- if (sparse_LD) {
-      (LD + Matrix::t(LD)) / 2
-    } else {
-      (LD + t(LD)) / 2
-    }
-  }
-
-  correlation_tolerance <- 1e-6
-  LD_diagonal <- if (sparse_LD) Matrix::diag(LD) else diag(LD)
-  if (any(abs(LD_diagonal - 1) > correlation_tolerance)) {
-    stop("The diagonal of `LD` must equal one.", call. = FALSE)
-  }
-  if (maximum_LD > 1 + correlation_tolerance) {
-    stop("Entries of `LD` must be correlations between -1 and 1.",
-         call. = FALSE)
-  }
-
   beta_names <- names(beta)
   se_names <- names(se)
-  LD_row_names <- rownames(LD)
-  LD_column_names <- colnames(LD)
-  if (xor(is.null(LD_row_names), is.null(LD_column_names)) ||
-      (!is.null(LD_row_names) && !identical(LD_row_names, LD_column_names))) {
-    stop("The row and column names of `LD` must match.", call. = FALSE)
-  }
-  supplied_names <- Filter(Negate(is.null), list(
-    beta = beta_names, se = se_names, LD = LD_column_names
-  ))
-  if (length(supplied_names) > 1L &&
-      !all(vapply(supplied_names[-1L], identical, logical(1),
-                  supplied_names[[1L]]))) {
-    stop("Names of `beta`, `se`, and `LD` must match when supplied.",
+  validated_LD <- .validate_gwas_ld(LD, p, beta_names, se_names)
+  LD <- validated_LD$LD
+  list_LD <- validated_LD$list_input
+  predictor_names <- validated_LD$predictor_names
+  block_sizes <- validated_LD$block_sizes
+  block_names <- validated_LD$block_names
+  if (list_LD && output == "eigen") {
+    stop("List `LD` currently requires `output = \"sufficient\"`.",
          call. = FALSE)
-  }
-  predictor_names <- if (length(supplied_names)) {
-    supplied_names[[1L]]
-  } else {
-    paste0("x", seq_len(p))
-  }
-  if (length(predictor_names) != p || anyNA(predictor_names) ||
-      any(predictor_names == "") || anyDuplicated(predictor_names)) {
-    stop("Predictor names must be nonempty and unique.", call. = FALSE)
   }
 
   beta <- as.numeric(beta)
@@ -218,29 +158,37 @@ compute_ss_from_gwas <- function(
          call. = FALSE)
   }
   adjustment <- (n - 1) / (z^2 + residual_df)
+  block_ends <- cumsum(block_sizes)
+  block_starts <- c(1L, block_ends[-length(block_ends)] + 1L)
+  block_indices <- Map(seq.int, block_starts, block_ends)
 
   if (scale == "standardized") {
-    XtX <- (n - 1) * LD
+    XtX <- if (list_LD) {
+      lapply(LD, function(block) (n - 1) * block)
+    } else {
+      (n - 1) * LD
+    }
     Xty <- sqrt(n - 1) * sqrt(adjustment) * z
     yty <- n - 1
     reference_response_var <- 1
   } else {
     XtX_diagonal <- response_var * adjustment / se^2
     root_diagonal <- sqrt(XtX_diagonal)
-    if (sparse_LD) {
-      scaling <- Matrix::Diagonal(x = root_diagonal)
-      XtX <- scaling %*% LD %*% scaling
+    if (list_LD) {
+      XtX <- Map(function(block, indices) {
+        .scale_gram_block(block, root_diagonal[indices])
+      }, LD, block_indices)
     } else {
-      XtX <- LD * tcrossprod(root_diagonal)
+      XtX <- .scale_gram_block(LD, root_diagonal)
     }
     Xty <- XtX_diagonal * beta
     yty <- (n - 1) * response_var
     reference_response_var <- response_var
   }
-  finite_XtX <- if (sparse_LD) {
-    !anyNA(XtX@x) && all(is.finite(XtX@x))
+  finite_XtX <- if (list_LD) {
+    all(vapply(XtX, .finite_gwas_matrix, logical(1)))
   } else {
-    !anyNA(XtX) && all(is.finite(XtX))
+    .finite_gwas_matrix(XtX)
   }
   if (!finite_XtX || anyNA(Xty) || any(!is.finite(Xty)) ||
       !is.finite(yty)) {
@@ -248,7 +196,16 @@ compute_ss_from_gwas <- function(
          call. = FALSE)
   }
 
-  dimnames(XtX) <- list(predictor_names, predictor_names)
+  if (list_LD) {
+    XtX <- Map(function(block, indices) {
+      names <- predictor_names[indices]
+      dimnames(block) <- list(names, names)
+      block
+    }, XtX, block_indices)
+    names(XtX) <- block_names
+  } else {
+    dimnames(XtX) <- list(predictor_names, predictor_names)
+  }
   names(Xty) <- predictor_names
   X_means <- stats::setNames(numeric(p), predictor_names)
 
@@ -292,4 +249,111 @@ compute_ss_from_gwas <- function(
     ),
     common
   )
+}
+
+.validate_gwas_ld <- function(LD, p, beta_names, se_names) {
+  list_input <- is.list(LD) && !is.matrix(LD)
+  if (list_input) {
+    if (length(LD) < 1L) {
+      stop("List `LD` must contain at least one correlation matrix.",
+           call. = FALSE)
+    }
+    block_names <- names(LD)
+    if (is.null(block_names)) block_names <- paste0("block", seq_along(LD))
+    missing_names <- is.na(block_names) | block_names == ""
+    block_names[missing_names] <- paste0("block", which(missing_names))
+    block_names <- make.unique(block_names)
+    blocks <- Map(function(block, name) {
+      .validate_gwas_ld_block(
+        block, sprintf("`LD[[\"%s\"]]`", name), strict_names = TRUE
+      )
+    }, LD, block_names)
+    names(blocks) <- block_names
+  } else {
+    block_names <- "LD"
+    blocks <- list(LD = .validate_gwas_ld_block(
+      LD, "`LD`", strict_names = TRUE
+    ))
+  }
+
+  block_sizes <- vapply(blocks, ncol, integer(1))
+  if (sum(block_sizes) != p) {
+    stop("The total dimension of `LD` must match `beta` and `se`.",
+         call. = FALSE)
+  }
+  supplied_block_names <- vapply(
+    blocks, function(block) !is.null(colnames(block)), logical(1)
+  )
+  if (list_input && any(supplied_block_names) && !all(supplied_block_names)) {
+    stop("List `LD` must name predictors in every matrix or in none of them.",
+         call. = FALSE)
+  }
+  LD_names <- if (all(supplied_block_names)) {
+    unlist(lapply(blocks, colnames), use.names = FALSE)
+  } else {
+    NULL
+  }
+  supplied_names <- Filter(Negate(is.null), list(
+    beta = beta_names, se = se_names, LD = LD_names
+  ))
+  if (length(supplied_names) > 1L &&
+      !all(vapply(supplied_names[-1L], identical, logical(1),
+                  supplied_names[[1L]]))) {
+    stop("Predictor names in `beta`, `se`, and `LD` must match in order.",
+         call. = FALSE)
+  }
+  predictor_names <- if (length(supplied_names)) {
+    supplied_names[[1L]]
+  } else {
+    paste0("x", seq_len(p))
+  }
+  if (length(predictor_names) != p || anyNA(predictor_names) ||
+      any(predictor_names == "") || anyDuplicated(predictor_names)) {
+    stop("Predictor names must be nonempty and unique.", call. = FALSE)
+  }
+
+  block_ends <- cumsum(block_sizes)
+  block_starts <- c(1L, block_ends[-length(block_ends)] + 1L)
+  blocks <- Map(function(block, start, end) {
+    names <- predictor_names[seq.int(start, end)]
+    dimnames(block) <- list(names, names)
+    block
+  }, blocks, block_starts, block_ends)
+  names(blocks) <- block_names
+  list(
+    LD = if (list_input) blocks else blocks[[1L]],
+    list_input = list_input,
+    predictor_names = predictor_names,
+    block_sizes = unname(block_sizes), block_names = block_names
+  )
+}
+
+.validate_gwas_ld_block <- function(matrix, label, strict_names) {
+  matrix <- .validate_gram_block(matrix, label, strict_names)
+  diagonal <- if (inherits(matrix, "sparseMatrix")) {
+    Matrix::diag(matrix)
+  } else {
+    diag(matrix)
+  }
+  if (any(abs(diagonal - 1) > 1e-6)) {
+    stop(sprintf("The diagonal of %s must equal one.", label), call. = FALSE)
+  }
+  maximum <- if (inherits(matrix, "sparseMatrix")) {
+    if (length(matrix@x)) max(abs(matrix@x)) else 0
+  } else {
+    max(abs(matrix))
+  }
+  if (maximum > 1 + 1e-6) {
+    stop(sprintf("Every correlation in %s must be between -1 and 1.", label),
+         call. = FALSE)
+  }
+  matrix
+}
+
+.finite_gwas_matrix <- function(matrix) {
+  if (inherits(matrix, "sparseMatrix")) {
+    !anyNA(matrix@x) && all(is.finite(matrix@x))
+  } else {
+    !anyNA(matrix) && all(is.finite(matrix))
+  }
 }

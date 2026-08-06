@@ -247,12 +247,37 @@ requires `version = "Rcpp"`. Full eigenvalue-based validation is optional throug
 `check_psd = TRUE` and is disabled by default to avoid its cubic initialization
 cost; requesting it for sparse input temporarily constructs a dense matrix.
 
+For exactly block-diagonal cross-products, `XtX` may instead be a list of
+dense or sparse Gram matrices. Predictor order is their concatenated order,
+and omitted cross-block entries are assumed to be zero. Gram blocks do not
+need to align with `ETA` prior blocks: a prior block may span several Gram
+blocks, and shared prior parameters are updated using all of its predictors.
+
+```r
+fit_block_ss <- blm_ss(
+  n = n,
+  XtX = list(region_1 = XtX_region_1, region_2 = XtX_region_2),
+  Xty = c(Xty_region_1, Xty_region_2),
+  yty = yty,
+  ETA = list(model = "SpikeMultiSlab"),
+  residual_var = 1
+)
+```
+
+For symmetric sparse matrices in a list, `XtX_storage = "speed"` expands both
+triangles, while `"memory"` chooses the smaller exact representation.
+The default `"auto"` uses `XtX_memory_limit` to retain triangular storage when
+expansion would exceed the requested internal-memory budget. The selected
+representation and estimated bytes for every Gram block are returned in
+`fit$XtX_storage`.
+
 ### GWAS summary statistics
 
 `compute_ss_from_gwas()` converts marginal ordinary least-squares effect
-estimates, their standard errors, a common sample size, and a signed LD
-correlation matrix into centered cross-products for `blm_ss()` using the
-finite-sample SuSiE-RSS transformation:
+estimates, their standard errors, a common sample size, and signed LD
+correlations into centered cross-products for `blm_ss()` using the
+finite-sample SuSiE-RSS transformation. `LD` can be one matrix or a list of
+matrices when cross-block LD is assumed to be exactly zero:
 
 ```r
 ss <- compute_ss_from_gwas(
@@ -275,6 +300,12 @@ fit_gwas <- blm_ss(
   residual_scale = ss$reference_response_var
 )
 ```
+
+For block LD, use `LD = list(region_1 = LD_1, region_2 = LD_2)`. The returned
+`ss$XtX` is a matching list and can be passed directly to `blm_ss()`; its prior
+blocks may cross LD-block boundaries. Symmetric sparse `dsCMatrix` inputs keep
+their one-triangle storage through this conversion. Block LD is not currently
+supported with `output = "eigen"`.
 
 Omitting `response_var` constructs the statistics on the standardized
 predictor and response scale. With an in-sample LD matrix and compatible OLS

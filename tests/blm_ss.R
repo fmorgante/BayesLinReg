@@ -67,6 +67,134 @@ ss_multi <- blm_ss(
 )
 stopifnot(isTRUE(all.equal(raw_multi, ss_multi, tolerance = 1e-8)))
 
+# A list of Gram matrices represents exact block-diagonal cross-products.
+# Gram blocks and prior blocks are independent: each prior block below spans
+# both Gram blocks while also splitting predictors within each one.
+gram_a <- matrix(c(
+  12, 2,
+  2, 10
+), 2L, dimnames = list(c("g1", "g2"), c("g1", "g2")))
+gram_b <- matrix(c(
+  9, -1,
+  -1, 8
+), 2L, dimnames = list(c("g3", "g4"), c("g3", "g4")))
+block_gram <- matrix(0, 4L, 4L)
+block_gram[1:2, 1:2] <- gram_a
+block_gram[3:4, 3:4] <- gram_b
+dimnames(block_gram) <- list(paste0("g", 1:4), paste0("g", 1:4))
+block_Xty <- stats::setNames(c(1, 2, -1, 0.5), paste0("g", 1:4))
+block_means <- stats::setNames(c(0.1, -0.1, 0.05, -0.05), paste0("g", 1:4))
+crossing_eta <- list(
+  normal = list(indices = c("g1", "g3"), model = "Normal"),
+  selection = list(indices = c("g2", "g4"), model = "SpikeMultiSlab")
+)
+block_arguments <- list(
+  n = 20L, Xty = block_Xty, ETA = crossing_eta, yty = 20,
+  X_means = block_means, y_mean = 0.02,
+  residual_shape = 2, residual_scale = 1,
+  iterations = 120, burnin = 40, seed = 512,
+  compute_pve = TRUE, check_psd = TRUE
+)
+single_gram_fit <- do.call(
+  blm_ss, c(list(XtX = block_gram), block_arguments)
+)
+list_gram_fit <- do.call(
+  blm_ss,
+  c(list(XtX = list(region_a = gram_a, region_b = gram_b)), block_arguments)
+)
+stopifnot(
+  isTRUE(all.equal(single_gram_fit$ETA, list_gram_fit$ETA,
+                   tolerance = 1e-10)),
+  isTRUE(all.equal(single_gram_fit$intercept_mean,
+                   list_gram_fit$intercept_mean, tolerance = 1e-10)),
+  isTRUE(all.equal(single_gram_fit$residual_var_mean,
+                   list_gram_fit$residual_var_mean, tolerance = 1e-10)),
+  isTRUE(all.equal(single_gram_fit$total_pve_mean,
+                   list_gram_fit$total_pve_mean, tolerance = 1e-10)),
+  identical(list_gram_fit$XtX_representation, "block_diagonal"),
+  identical(list_gram_fit$XtX_number_of_blocks, 2L),
+  identical(unname(list_gram_fit$XtX_block_sizes), c(2L, 2L)),
+  identical(list_gram_fit$XtX_cross_block_assumption, "zero"),
+  identical(list_gram_fit$XtX_storage$representation, c("dense", "dense"))
+)
+
+# Symmetric sparse blocks can retain one triangle with a reverse index or be
+# expanded for speed. Both representations produce the same chain.
+set.seed(513)
+symmetric_dense <- lapply(c("left", "right"), function(name) {
+  values <- crossprod(matrix(rnorm(24), 6L, 4L)) + diag(4)
+  predictor_names <- paste0(substr(name, 1L, 1L), seq_len(4L))
+  dimnames(values) <- list(predictor_names, predictor_names)
+  values
+})
+names(symmetric_dense) <- c("left", "right")
+symmetric_sparse <- Map(function(matrix, uplo) {
+  methods::as(
+    Matrix::forceSymmetric(Matrix::Matrix(matrix, sparse = TRUE), uplo = uplo),
+    "dsCMatrix"
+  )
+}, symmetric_dense, c("U", "L"))
+symmetric_Xty <- stats::setNames(
+  seq(-0.7, 0.7, length.out = 8L),
+  unlist(lapply(symmetric_dense, colnames), use.names = FALSE)
+)
+symmetric_arguments <- list(
+  n = 30L, XtX = symmetric_sparse, Xty = symmetric_Xty,
+  ETA = list(model = "SpikeSlab"), residual_var = 1,
+  X_means = stats::setNames(numeric(8L), names(symmetric_Xty)), y_mean = 0,
+  iterations = 100, burnin = 40, seed = 514, compute_pve = TRUE
+)
+memory_fit <- do.call(
+  blm_ss, c(symmetric_arguments, list(XtX_storage = "memory"))
+)
+speed_fit <- do.call(
+  blm_ss, c(symmetric_arguments, list(XtX_storage = "speed"))
+)
+auto_fit <- do.call(
+  blm_ss,
+  c(symmetric_arguments, list(XtX_storage = "auto", XtX_memory_limit = 418))
+)
+stopifnot(
+  isTRUE(all.equal(memory_fit$ETA, speed_fit$ETA, tolerance = 1e-10)),
+  isTRUE(all.equal(memory_fit$ETA, auto_fit$ETA, tolerance = 1e-10)),
+  isTRUE(all.equal(memory_fit$total_pve_mean, speed_fit$total_pve_mean,
+                   tolerance = 1e-10)),
+  identical(memory_fit$XtX_storage$representation,
+            rep("symmetric_indexed", 2L)),
+  identical(speed_fit$XtX_storage$representation,
+            rep("general_sparse", 2L)),
+  identical(auto_fit$XtX_storage$representation,
+            rep("symmetric_indexed", 2L)),
+  sum(auto_fit$XtX_storage$estimated_bytes) <= 418
+)
+
+# List-specific validation prevents ambiguous predictor ordering and unsupported
+# use of the reference R sampler.
+unnamed_gram <- unname(gram_b)
+dimnames(unnamed_gram) <- NULL
+invalid_gram_list_calls <- list(
+  function() blm_ss(
+    20, list(), numeric(), list(model = "Normal"), residual_var = 1
+  ),
+  function() blm_ss(
+    20, list(gram_a, unnamed_gram), block_Xty,
+    list(model = "Normal"), residual_var = 1
+  ),
+  function() blm_ss(
+    20, list(gram_a, gram_b), block_Xty,
+    list(model = "Normal"), residual_var = 1, version = "R"
+  ),
+  function() blm_ss(
+    20, list(gram_a, gram_b), block_Xty,
+    list(model = "Normal"), residual_var = 1, XtX_memory_limit = 0
+  )
+)
+stopifnot(all(vapply(
+  invalid_gram_list_calls,
+  function(call) inherits(try(call(), silent = TRUE), "try-error"),
+  logical(1)
+)))
+
 # Expected-sparsity calibration uses the original `n`, not the parser's
 # two-row placeholder, and is identical for raw and sufficient-statistic fits.
 calibration_eta_raw <- list(

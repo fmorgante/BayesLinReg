@@ -26,6 +26,8 @@ blm_ss(
   store_samples = TRUE,
   store_coefficient_cov = TRUE,
   check_psd = FALSE,
+  XtX_storage = c("auto", "speed", "memory"),
+  XtX_memory_limit = 1024^3,
   compute_pve = FALSE,
   pve_type = c("standalone", "allocated")
 )
@@ -33,9 +35,21 @@ blm_ss(
 \arguments{
 \item{n}{Number of observations used to form the sufficient statistics.}
 
-\item{XtX}{A finite, symmetric predictor cross-product matrix. Dense base-R
-matrices and compressed sparse \code{Matrix} objects of class \code{dgCMatrix} or
-\code{dsCMatrix} are supported. Sparse matrices require \code{version = "Rcpp"}.}
+\item{XtX}{A finite, symmetric predictor cross-product matrix, or a nonempty
+list of such matrices representing an exactly block-diagonal
+cross-product. Dense base-R matrices and compressed sparse \code{Matrix}
+objects of class \code{dgCMatrix} or \code{dsCMatrix} are supported. List and sparse
+inputs require \code{version = "Rcpp"}.}
+
+\item{XtX_storage}{Storage policy for symmetric sparse matrices in list
+input. \code{"speed"} expands them to general sparse matrices, \code{"memory"}
+chooses the smaller exact representation, and \code{"auto"} expands
+blocks only while the estimated total representation remains within
+\code{XtX_memory_limit}.}
+
+\item{XtX_memory_limit}{Positive approximate byte limit used by
+\code{XtX_storage = "auto"}. It controls internal Gram storage, not posterior
+draws or other fit allocations.}
 
 \item{Xty}{A finite predictor-response cross-product vector.}
 
@@ -56,8 +70,8 @@ intercept.}
 centered \code{XtX} is positive semidefinite and that \code{Xty} and \code{yty} are
 jointly compatible with it. The default, \code{FALSE}, avoids this
 \eqn{O(p^3)} validation cost. Symmetry and basic input checks are always
-performed. Sparse \code{XtX} is converted to a dense matrix for this optional
-validation.}
+performed. Sparse or list \code{XtX} is materialized as one dense matrix for
+this optional validation.}
 
 \item{residual_var}{A positive known residual variance, or \code{NULL} to learn
 it using an inverse-gamma prior.}
@@ -112,7 +126,9 @@ that block PVE values sum to total PVE. It is used only when
 \value{
 A fitted object with the same block-specific posterior summaries as
 \code{\link[=blm]{blm()}}. Intercept components are present only when both \code{X_means} and
-\code{y_mean} are supplied.
+\code{y_mean} are supplied. For list \code{XtX}, the result also records the
+block-diagonal assumption, block sizes, and selected storage
+representation for each Gram block.
 }
 \description{
 Fits the same prior models as \code{\link[=blm]{blm()}} directly from cross-products instead
@@ -124,6 +140,13 @@ uncentered cross-products and are centered internally. Without means,
 they are used as supplied. If any block requests standardization without
 means, a warning reminds the user that the supplied cross-products should
 already represent centered or standardized variables.
+For list \code{XtX}, predictor order is the concatenation of the matrices in
+list order and every omitted cross-block product is assumed to be exactly
+zero. Gram blocks and \code{ETA} prior blocks are independent: either may split
+or span the other. When predictor names are used, every Gram block must
+provide matching row and column names that are unique across the list.
+Centering is still exact because its global dense rank-one correction is
+maintained separately.
 When \code{expected_pve} is used and \code{reference_response_var} is omitted, the
 response variance is recovered from \code{yty} and \code{y_mean}; otherwise an
 explicit positive \code{reference_response_var} is required.
@@ -139,10 +162,12 @@ dense \code{XtX} and proportional to the relevant stored entries for sparse
 input, at each retained draw.
 Coefficients are sampled with a right-hand-side update that maintains
 \eqn{X'y-X'X\beta}; individual-level pseudo-observations are not formed.
-For sparse \code{XtX}, the Rcpp sampler traverses only stored entries. A
-symmetric \code{dsCMatrix} is expanded once to a general \code{dgCMatrix}, and the
-dense rank-one centering correction is maintained separately rather than
-materialized.
+For sparse \code{XtX}, the Rcpp sampler traverses only stored entries. A single
+symmetric \code{dsCMatrix} is expanded once to a general \code{dgCMatrix}. Within
+list input, \code{XtX_storage} can instead retain one triangle and construct a
+reverse adjacency index whose entries share the original numerical
+values. The dense rank-one centering correction is maintained separately
+rather than materialized.
 Set \code{check_psd = TRUE} when the supplied statistics are not known to come
 from a valid common data matrix and response vector.
 }

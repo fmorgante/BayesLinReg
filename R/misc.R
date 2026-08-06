@@ -1517,7 +1517,8 @@
                             effective_n = NULL, fit_intercept = TRUE,
                             intercept_x_mean = NULL,
                             intercept_y_mean = NULL,
-                            XtX = NULL, XtX_center = NULL, Xty = NULL,
+                            XtX = NULL, XtX_center = NULL,
+                            XtX_indices = NULL, XtX_types = NULL, Xty = NULL,
                             yty = NULL, center_observations = TRUE,
                             residual_sse_offset = 0, compute_pve = FALSE,
                             pve_type = c("standalone", "allocated")) {
@@ -1528,7 +1529,7 @@
   use_sufficient_statistics <- !is.null(XtX)
   if (is.null(block_id)) {
     block_id <- rep.int(
-      1L, if (use_sufficient_statistics) ncol(XtX) else ncol(x)
+      1L, if (use_sufficient_statistics) length(Xty) else ncol(x)
     )
   }
   if (is.null(progress_callback)) {
@@ -1577,7 +1578,32 @@
     compute_pve = compute_pve,
     pve_type_code = match(pve_type, c("standalone", "allocated")) - 1L
   )
-  samples <- if (inherits(XtX, "dgCMatrix")) {
+  samples <- if (is.list(XtX)) {
+    do.call(
+      blm_gibbs_block_rcpp_cpp,
+      c(
+        common_arguments[c(
+          "residual_shape", "residual_scale", "iterations", "burnin", "thin",
+          "progress_callback", "block_id", "block_model", "normal_shape",
+          "normal_scale", "pi_alpha", "pi_beta", "spike_var_shape",
+          "spike_var_scale", "global_scale", "local_a", "local_b",
+          "multi_gamma_list", "multi_pi_alpha_list", "multi_var_shape",
+          "multi_var_scale", "learn_residual_var", "fixed_residual_var",
+          "store_samples", "store_coefficient_cov", "effective_n",
+          "fit_intercept", "intercept_x_mean", "intercept_y_mean",
+          "compute_pve", "pve_type_code"
+        )],
+        list(
+          summary_XtX = XtX,
+          summary_indices = XtX_indices,
+          summary_types = XtX_types,
+          summary_center = XtX_center,
+          summary_Xty = Xty,
+          summary_yty = if (is.null(yty)) 0 else yty
+        )
+      )
+    )
+  } else if (inherits(XtX, "dgCMatrix")) {
     do.call(
       blm_gibbs_sparse_rcpp_cpp,
       c(
@@ -1610,7 +1636,7 @@
   }
   if (store_samples) {
     predictor_names <- if (use_sufficient_statistics) {
-      colnames(XtX)
+      names(Xty)
     } else {
       colnames(x)
     }

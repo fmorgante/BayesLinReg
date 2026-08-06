@@ -22,11 +22,12 @@ effect estimates.}
 \item{se}{A positive finite numeric vector of standard errors corresponding
 to \code{beta}.}
 
-\item{LD}{A finite, symmetric LD correlation matrix whose rows and columns
-have the same order and effect-allele orientation as \code{beta}. Dense base-R
-matrices and compressed sparse \code{Matrix} objects of class \code{dgCMatrix} or
-\code{dsCMatrix} are supported. Supply signed correlations, not squared
-correlations.}
+\item{LD}{A finite, symmetric LD correlation matrix, or a nonempty list of
+such matrices representing exactly zero cross-block LD. Predictors follow
+matrix order or the concatenated list order and must have the same
+effect-allele orientation as \code{beta}. Dense base-R matrices and compressed
+sparse \code{Matrix} objects of class \code{dgCMatrix} or \code{dsCMatrix} are supported.
+Supply signed correlations, not squared correlations.}
 
 \item{n}{Number of observations used to calculate the GWAS statistics.}
 
@@ -42,11 +43,13 @@ regressions. The SuSiE-RSS ordinary least-squares conversion uses the
 default \code{n - 2}.}
 
 \item{output}{Whether to return cross-products for \code{\link[=blm_ss]{blm_ss()}} or a complete
-raw eigendecomposition for preparing input to \code{\link[=blm_ss_eigen]{blm_ss_eigen()}}.}
+raw eigendecomposition for preparing input to \code{\link[=blm_ss_eigen]{blm_ss_eigen()}}. List \code{LD}
+currently supports only \code{output = "sufficient"}.}
 }
 \value{
 For \code{output = "sufficient"}, a list containing \code{n}, \code{XtX}, \code{Xty},
-\code{yty}, zero \code{X_means} and \code{y_mean}, and \code{reference_response_var}. Pass
+\code{yty}, zero \code{X_means} and \code{y_mean}, and \code{reference_response_var}. \code{XtX}
+is a matrix for matrix \code{LD} and a same-structure list for list \code{LD}. Pass
 \code{reference_response_var} to \code{\link[=blm_ss]{blm_ss()}} only when at least one \code{ETA} block
 specifies \code{expected_pve}. For \code{output = "eigen"}, \code{XtX} is replaced by
 \code{XtX_eigenvectors_raw}, \code{XtX_eigenvalues_raw}, and
@@ -56,8 +59,8 @@ or modification and therefore are not necessarily valid inputs to
 }
 \description{
 Reconstructs centered linear-regression cross-products from marginal GWAS
-effect estimates, their standard errors, and a signed LD correlation matrix
-using the finite-sample transformation employed by SuSiE-RSS.
+effect estimates, their standard errors, and signed LD correlations using
+the finite-sample transformation employed by SuSiE-RSS.
 }
 \details{
 Let \eqn{z_j=\hat b_j/\hat s_j} and
@@ -79,6 +82,10 @@ meta-analysis statistics, variable per-variant sample sizes, mixed-model
 statistics, or other non-OLS inputs, they are approximate working
 cross-products. In particular, learning the residual variance is generally
 safer with in-sample LD; fixing it is generally safer with reference LD.
+For list \code{LD}, every omitted cross-block correlation is assumed to be
+exactly zero and the returned \code{XtX} has the same list structure. Scaling
+is performed within each block, and symmetric sparse blocks retain their
+triangular representation for \code{\link[=blm_ss]{blm_ss()}} storage planning.
 
 The function performs only basic input validation. It does not diagnose
 allele flips or broader incompatibility between the GWAS statistics and

@@ -86,6 +86,100 @@ stopifnot(
   isTRUE(all.equal(sparse$Xty, original$Xty, tolerance = 1e-10))
 )
 
+# A list of LD matrices represents exact zero LD between blocks and produces
+# the same reconstruction as an explicitly block-diagonal matrix. The blocks
+# need not align with the prior blocks used by blm_ss().
+ld_indices <- list(region_a = 1:2, region_b = 3:5)
+LD_blocks <- lapply(ld_indices, function(indices) LD[indices, indices])
+block_diagonal_LD <- matrix(0, ncol(X), ncol(X))
+for (indices in ld_indices) {
+  block_diagonal_LD[indices, indices] <- LD[indices, indices]
+}
+dimnames(block_diagonal_LD) <- list(predictor_names, predictor_names)
+block_original <- compute_ss_from_gwas(
+  beta, se, LD_blocks, n, response_var = stats::var(y)
+)
+matrix_original <- compute_ss_from_gwas(
+  beta, se, block_diagonal_LD, n, response_var = stats::var(y)
+)
+block_standardized <- compute_ss_from_gwas(beta, se, LD_blocks, n)
+matrix_standardized <- compute_ss_from_gwas(beta, se, block_diagonal_LD, n)
+stopifnot(
+  identical(names(block_original$XtX), names(LD_blocks)),
+  identical(unlist(lapply(block_original$XtX, colnames), use.names = FALSE),
+            predictor_names),
+  all(vapply(seq_along(ld_indices), function(i) {
+    indices <- ld_indices[[i]]
+    isTRUE(all.equal(
+      block_original$XtX[[i]], matrix_original$XtX[indices, indices],
+      tolerance = 1e-10
+    ))
+  }, logical(1))),
+  all(vapply(seq_along(ld_indices), function(i) {
+    indices <- ld_indices[[i]]
+    isTRUE(all.equal(
+      block_standardized$XtX[[i]],
+      matrix_standardized$XtX[indices, indices], tolerance = 1e-10
+    ))
+  }, logical(1))),
+  isTRUE(all.equal(block_original$Xty, matrix_original$Xty,
+                   tolerance = 1e-10)),
+  isTRUE(all.equal(block_standardized$Xty, matrix_standardized$Xty,
+                   tolerance = 1e-10))
+)
+
+# Upper- and lower-triangular symmetric sparse LD blocks remain dsCMatrix
+# objects after reconstruction instead of being expanded to both triangles.
+symmetric_LD_blocks <- Map(function(block, uplo) {
+  methods::as(
+    Matrix::forceSymmetric(Matrix::Matrix(block, sparse = TRUE), uplo = uplo),
+    "dsCMatrix"
+  )
+}, LD_blocks, c("U", "L"))
+names(symmetric_LD_blocks) <- names(LD_blocks)
+symmetric_block_original <- compute_ss_from_gwas(
+  beta, se, symmetric_LD_blocks, n, response_var = stats::var(y)
+)
+stopifnot(
+  all(vapply(symmetric_block_original$XtX, inherits, logical(1),
+             "dsCMatrix")),
+  identical(vapply(symmetric_block_original$XtX, slot, character(1), "uplo"),
+            c(region_a = "U", region_b = "L")),
+  all(vapply(seq_along(ld_indices), function(i) {
+    indices <- ld_indices[[i]]
+    isTRUE(all.equal(
+      as.matrix(symmetric_block_original$XtX[[i]]),
+      matrix_original$XtX[indices, indices], tolerance = 1e-10
+    ))
+  }, logical(1)))
+)
+
+# Direct fits from matrix and list LD follow the same chain, including when
+# prior blocks cross LD-block boundaries.
+crossing_eta <- list(
+  normal = list(indices = c("rs1", "rs3", "rs5"), model = "Normal"),
+  selection = list(indices = c("rs2", "rs4"), model = "SpikeMultiSlab")
+)
+fit_arguments <- list(
+  n = n, Xty = matrix_original$Xty, yty = matrix_original$yty,
+  X_means = matrix_original$X_means, y_mean = matrix_original$y_mean,
+  ETA = crossing_eta, residual_var = 1,
+  iterations = 60, burnin = 20, seed = 903
+)
+matrix_LD_fit <- do.call(
+  blm_ss, c(list(XtX = matrix_original$XtX), fit_arguments)
+)
+block_LD_fit <- do.call(
+  blm_ss, c(list(XtX = block_original$XtX), fit_arguments)
+)
+stopifnot(
+  isTRUE(all.equal(matrix_LD_fit$ETA, block_LD_fit$ETA,
+                   tolerance = 1e-10)),
+  isTRUE(all.equal(matrix_LD_fit$intercept_mean,
+                   block_LD_fit$intercept_mean, tolerance = 1e-10)),
+  identical(block_LD_fit$XtX_representation, "block_diagonal")
+)
+
 # Eigen output contains the complete, unfiltered decomposition.
 eigen_output <- compute_ss_from_gwas(
   beta, se, LD, n, response_var = stats::var(y), output = "eigen"
@@ -140,6 +234,17 @@ invalid_calls <- list(
   ),
   function() compute_ss_from_gwas(
     beta, se, LD, n, residual_df = n
+  ),
+  function() compute_ss_from_gwas(beta, se, list(), n),
+  function() compute_ss_from_gwas(beta, se, LD_blocks[1], n),
+  function() compute_ss_from_gwas(
+    beta, se, list(LD_blocks[[1]], unname(LD_blocks[[2]])), n
+  ),
+  function() compute_ss_from_gwas(
+    beta, se, LD_blocks, n, output = "eigen"
+  ),
+  function() compute_ss_from_gwas(
+    beta, se, list(LD_blocks[[1]], LD_blocks[[2]][, 1, drop = FALSE]), n
   )
 )
 stopifnot(all(vapply(

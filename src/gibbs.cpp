@@ -197,6 +197,283 @@ class SparseSummaryMatrix {
   const Rcpp::NumericVector& center_;
 };
 
+// A block-diagonal sufficient-statistics matrix. Each block may be dense,
+// general sparse, or symmetric sparse. Symmetric sparse blocks retain one
+// triangle and build a reverse index that refers back to the original values.
+class BlockSummaryMatrix {
+ public:
+  BlockSummaryMatrix(
+      const Rcpp::List& matrices,
+      const Rcpp::List& indices,
+      const Rcpp::IntegerVector& types,
+      const Rcpp::NumericVector& center)
+    : center_(center), p_(center.size()),
+      global_block_(p_, -1), global_local_(p_, -1), diagonal_(p_, 0.0) {
+    if (matrices.size() < 1 || matrices.size() != indices.size() ||
+        matrices.size() != types.size()) {
+      Rcpp::stop("Invalid block-diagonal `XtX` representation.");
+    }
+    blocks_.reserve(matrices.size());
+    for (int block_index = 0; block_index < matrices.size(); ++block_index) {
+      Block block;
+      block.type = types[block_index];
+      const Rcpp::IntegerVector mapping = indices[block_index];
+      block.size = mapping.size();
+      block.global.resize(block.size);
+      for (int local = 0; local < block.size; ++local) {
+        const int global = mapping[local] - 1;
+        if (global < 0 || global >= p_ || global_block_[global] >= 0) {
+          Rcpp::stop("Gram-block predictor indices must partition predictors.");
+        }
+        block.global[local] = global;
+        global_block_[global] = block_index;
+        global_local_[global] = local;
+      }
+
+      if (block.type == 0) {
+        const Rcpp::NumericMatrix matrix = matrices[block_index];
+        if (matrix.nrow() != block.size || matrix.ncol() != block.size) {
+          Rcpp::stop("Dense Gram-block dimensions do not match their indices.");
+        }
+        block.dense = matrix.begin();
+        for (int local = 0; local < block.size; ++local) {
+          diagonal_[block.global[local]] =
+            block.dense[local + static_cast<std::size_t>(block.size) * local];
+        }
+      } else if (block.type == 1 || block.type == 2) {
+        const Rcpp::S4 matrix = matrices[block_index];
+        const Rcpp::IntegerVector dimensions = matrix.slot("Dim");
+        if (dimensions[0] != block.size || dimensions[1] != block.size) {
+          Rcpp::stop("Sparse Gram-block dimensions do not match their indices.");
+        }
+        const Rcpp::IntegerVector column_pointer = matrix.slot("p");
+        const Rcpp::IntegerVector row_index = matrix.slot("i");
+        const Rcpp::NumericVector values = matrix.slot("x");
+        block.column_pointer = column_pointer.begin();
+        block.row_index = row_index.begin();
+        block.values = values.begin();
+        block.nonzeros = values.size();
+        for (int column = 0; column < block.size; ++column) {
+          for (int position = block.column_pointer[column];
+               position < block.column_pointer[column + 1]; ++position) {
+            if (block.row_index[position] == column) {
+              diagonal_[block.global[column]] = block.values[position];
+            }
+          }
+        }
+        if (block.type == 2) {
+          build_reverse_index(block);
+        }
+      } else {
+        Rcpp::stop("Unknown Gram-block storage type.");
+      }
+      blocks_.push_back(std::move(block));
+    }
+    for (int global = 0; global < p_; ++global) {
+      if (global_block_[global] < 0) {
+        Rcpp::stop("Gram-block predictor indices must cover every predictor.");
+      }
+    }
+  }
+
+  int cols() const { return p_; }
+
+  double diagonal(const int j) const {
+    return diagonal_[j] - center_[j] * center_[j];
+  }
+
+  double corrected_value(
+      const std::vector<double>& rhs,
+      const int j,
+      const double center_dot) const {
+    return rhs[j] + center_[j] * center_dot;
+  }
+
+  void update(
+      std::vector<double>& rhs,
+      const int j,
+      const double change) const {
+    const Block& block = blocks_[global_block_[j]];
+    const int local = global_local_[j];
+    if (block.type == 0) {
+      const double* column = block.dense +
+        static_cast<std::size_t>(block.size) * local;
+      for (int row = 0; row < block.size; ++row) {
+        rhs[block.global[row]] -= column[row] * change;
+      }
+      return;
+    }
+    for (int position = block.column_pointer[local];
+         position < block.column_pointer[local + 1]; ++position) {
+      rhs[block.global[block.row_index[position]]] -=
+        block.values[position] * change;
+    }
+    if (block.type == 2) {
+      for (int reverse = block.reverse_pointer[local];
+           reverse < block.reverse_pointer[local + 1]; ++reverse) {
+        rhs[block.global[block.reverse_neighbor[reverse]]] -=
+          block.values[block.reverse_position[reverse]] * change;
+      }
+    }
+  }
+
+  void multiply(
+      const std::vector<double>& coefficient,
+      std::vector<double>& fitted) const {
+    std::fill(fitted.begin(), fitted.end(), 0.0);
+    for (const Block& block : blocks_) {
+      if (block.type == 0) {
+        for (int column = 0; column < block.size; ++column) {
+          const double beta = coefficient[block.global[column]];
+          const double* values = block.dense +
+            static_cast<std::size_t>(block.size) * column;
+          for (int row = 0; row < block.size; ++row) {
+            fitted[block.global[row]] += values[row] * beta;
+          }
+        }
+      } else if (block.type == 1) {
+        for (int column = 0; column < block.size; ++column) {
+          const double beta = coefficient[block.global[column]];
+          for (int position = block.column_pointer[column];
+               position < block.column_pointer[column + 1]; ++position) {
+            fitted[block.global[block.row_index[position]]] +=
+              block.values[position] * beta;
+          }
+        }
+      } else {
+        for (int column = 0; column < block.size; ++column) {
+          const int global_column = block.global[column];
+          for (int position = block.column_pointer[column];
+               position < block.column_pointer[column + 1]; ++position) {
+            const int row = block.row_index[position];
+            const int global_row = block.global[row];
+            const double value = block.values[position];
+            fitted[global_row] += value * coefficient[global_column];
+            if (row != column) {
+              fitted[global_column] += value * coefficient[global_row];
+            }
+          }
+        }
+      }
+    }
+  }
+
+  double center_dot(const std::vector<double>& coefficient) const {
+    double result = 0.0;
+    for (int j = 0; j < p_; ++j) result += center_[j] * coefficient[j];
+    return result;
+  }
+
+  double centered_fitted(
+      const double fitted,
+      const int j,
+      const double center_dot) const {
+    return fitted - center_[j] * center_dot;
+  }
+
+  void update_center_dot(
+      double& center_dot,
+      const int j,
+      const double change) const {
+    center_dot += center_[j] * change;
+  }
+
+  double block_quadratic(
+      const std::vector<double>& coefficient,
+      const std::vector<int>& predictors,
+      const Rcpp::IntegerVector& block_id,
+      const int prior_block) const {
+    double result = 0.0;
+    double block_center_dot = 0.0;
+    for (const int j : predictors) {
+      block_center_dot += center_[j] * coefficient[j];
+      const Block& block = blocks_[global_block_[j]];
+      const int local = global_local_[j];
+      if (block.type == 0) {
+        const double* column = block.dense +
+          static_cast<std::size_t>(block.size) * local;
+        for (int row = 0; row < block.size; ++row) {
+          const int global_row = block.global[row];
+          if (block_id[global_row] - 1 == prior_block) {
+            result += coefficient[global_row] * column[row] * coefficient[j];
+          }
+        }
+      } else if (block.type == 1) {
+        for (int position = block.column_pointer[local];
+             position < block.column_pointer[local + 1]; ++position) {
+          const int global_row = block.global[block.row_index[position]];
+          if (block_id[global_row] - 1 == prior_block) {
+            result += coefficient[global_row] * block.values[position] *
+              coefficient[j];
+          }
+        }
+      } else {
+        for (int position = block.column_pointer[local];
+             position < block.column_pointer[local + 1]; ++position) {
+          const int row = block.row_index[position];
+          const int global_row = block.global[row];
+          if (block_id[global_row] - 1 == prior_block) {
+            const double contribution = coefficient[global_row] *
+              block.values[position] * coefficient[j];
+            result += row == local ? contribution : 2.0 * contribution;
+          }
+        }
+      }
+    }
+    return result - block_center_dot * block_center_dot;
+  }
+
+ private:
+  struct Block {
+    int type = -1;
+    int size = 0;
+    int nonzeros = 0;
+    const double* dense = NULL;
+    const int* column_pointer = NULL;
+    const int* row_index = NULL;
+    const double* values = NULL;
+    std::vector<int> global;
+    std::vector<int> reverse_pointer;
+    std::vector<int> reverse_neighbor;
+    std::vector<int> reverse_position;
+  };
+
+  static void build_reverse_index(Block& block) {
+    block.reverse_pointer.assign(block.size + 1, 0);
+    for (int column = 0; column < block.size; ++column) {
+      for (int position = block.column_pointer[column];
+           position < block.column_pointer[column + 1]; ++position) {
+        const int row = block.row_index[position];
+        if (row != column) ++block.reverse_pointer[row + 1];
+      }
+    }
+    for (int row = 0; row < block.size; ++row) {
+      block.reverse_pointer[row + 1] += block.reverse_pointer[row];
+    }
+    const int off_diagonal = block.reverse_pointer[block.size];
+    block.reverse_neighbor.resize(off_diagonal);
+    block.reverse_position.resize(off_diagonal);
+    std::vector<int> next = block.reverse_pointer;
+    for (int column = 0; column < block.size; ++column) {
+      for (int position = block.column_pointer[column];
+           position < block.column_pointer[column + 1]; ++position) {
+        const int row = block.row_index[position];
+        if (row == column) continue;
+        const int destination = next[row]++;
+        block.reverse_neighbor[destination] = column;
+        block.reverse_position[destination] = position;
+      }
+    }
+  }
+
+  const Rcpp::NumericVector& center_;
+  int p_;
+  std::vector<Block> blocks_;
+  std::vector<int> global_block_;
+  std::vector<int> global_local_;
+  std::vector<double> diagonal_;
+};
+
 }  // namespace
 
 // [[Rcpp::depends(RcppEigen)]]
@@ -1264,6 +1541,62 @@ Rcpp::List blm_gibbs_sparse_rcpp_cpp(
   const Rcpp::NumericVector empty_y;
   const Rcpp::NumericMatrix empty_X(0, 0);
   const SparseSummaryMatrix summary_matrix(summary_XtX, summary_center);
+  return blm_gibbs_core(
+    empty_y, empty_X, residual_shape, residual_scale, iterations, burnin, thin,
+    progress_callback, block_id, block_model, normal_shape, normal_scale,
+    pi_alpha, pi_beta, spike_var_shape, spike_var_scale, global_scale,
+    local_a, local_b, multi_gamma_list, multi_pi_alpha_list, multi_var_shape,
+    multi_var_scale, learn_residual_var, fixed_residual_var, store_samples,
+    store_coefficient_cov, effective_n, fit_intercept, intercept_x_mean,
+    intercept_y_mean, true, summary_matrix, summary_Xty, summary_yty,
+    true, 0.0, compute_pve, pve_type_code
+  );
+}
+
+// [[Rcpp::export]]
+Rcpp::List blm_gibbs_block_rcpp_cpp(
+    const double residual_shape,
+    const double residual_scale,
+    const int iterations,
+    const int burnin,
+    const int thin,
+    const Rcpp::Function& progress_callback,
+    const Rcpp::IntegerVector& block_id,
+    const Rcpp::IntegerVector& block_model,
+    const Rcpp::NumericVector& normal_shape,
+    const Rcpp::NumericVector& normal_scale,
+    const Rcpp::NumericVector& pi_alpha,
+    const Rcpp::NumericVector& pi_beta,
+    const Rcpp::NumericVector& spike_var_shape,
+    const Rcpp::NumericVector& spike_var_scale,
+    const Rcpp::NumericVector& global_scale,
+    const Rcpp::NumericVector& local_a,
+    const Rcpp::NumericVector& local_b,
+    const Rcpp::List& multi_gamma_list,
+    const Rcpp::List& multi_pi_alpha_list,
+    const Rcpp::NumericVector& multi_var_shape,
+    const Rcpp::NumericVector& multi_var_scale,
+    const bool learn_residual_var,
+    const double fixed_residual_var,
+    const bool store_samples,
+    const bool store_coefficient_cov,
+    const int effective_n,
+    const bool fit_intercept,
+    const Rcpp::NumericVector& intercept_x_mean,
+    const double intercept_y_mean,
+    const Rcpp::List& summary_XtX,
+    const Rcpp::List& summary_indices,
+    const Rcpp::IntegerVector& summary_types,
+    const Rcpp::NumericVector& summary_center,
+    const Rcpp::NumericVector& summary_Xty,
+    const double summary_yty,
+    const bool compute_pve,
+    const int pve_type_code) {
+  const Rcpp::NumericVector empty_y;
+  const Rcpp::NumericMatrix empty_X(0, 0);
+  const BlockSummaryMatrix summary_matrix(
+    summary_XtX, summary_indices, summary_types, summary_center
+  );
   return blm_gibbs_core(
     empty_y, empty_X, residual_shape, residual_scale, iterations, burnin, thin,
     progress_callback, block_id, block_model, normal_shape, normal_scale,
