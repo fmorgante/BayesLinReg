@@ -271,6 +271,28 @@ expansion would exceed the requested internal-memory budget. The selected
 representation and estimated bytes for every Gram block are returned in
 `fit$XtX_storage`.
 
+When the working predictor means are zero, separate Gram blocks can be updated
+within one chain using `nthreads`. This requires the Rcpp sampler and one chain:
+
+```r
+fit_threaded_ss <- blm_ss(
+  n = n,
+  XtX = list(region_1 = XtX_region_1, region_2 = XtX_region_2),
+  Xty = c(Xty_region_1, Xty_region_2),
+  yty = yty,
+  X_means = numeric(length(c(Xty_region_1, Xty_region_2))),
+  y_mean = 0,
+  ETA = list(model = "SpikeMultiSlab"),
+  nthreads = 4,
+  nchains = 1
+)
+```
+
+Threading is across Gram blocks; coefficient updates within a block remain
+sequential. Prior blocks may still cross Gram-block boundaries. Threaded runs
+are reproducible for fixed inputs, seed, and thread count, but do not reproduce
+the serial sampler draw-for-draw.
+
 ### GWAS summary statistics
 
 `compute_ss_from_gwas()` converts marginal ordinary least-squares effect

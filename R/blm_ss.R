@@ -38,6 +38,9 @@
 #'   \eqn{O(p^3)} validation cost. Symmetry and basic input checks are always
 #'   performed. Sparse or list `XtX` is materialized as one dense matrix for
 #'   this optional validation.
+#' @param nthreads Number of threads used within one Rcpp chain for list `XtX`.
+#'   Values greater than one require `nchains = 1` and zero working predictor
+#'   means. The default preserves the serial sampler and its RNG sequence.
 #' @inheritParams blm
 #'
 #' @return A fitted object with the same block-specific posterior summaries as
@@ -80,6 +83,12 @@
 #'   reverse adjacency index whose entries share the original numerical
 #'   values. The dense rank-one centering correction is maintained separately
 #'   rather than materialized.
+#'   With list input and zero working predictor means, `nthreads > 1` updates
+#'   separate Gram blocks concurrently through `RcppParallel`. Updates remain
+#'   sequential within each Gram block. Shared prior hyperparameters and the
+#'   residual variance are updated after the parallel coefficient sweep. A
+#'   threaded run is reproducible for a fixed seed and thread count, but uses a
+#'   different RNG stream from the serial sampler.
 #'   Set `check_psd = TRUE` when the supplied statistics are not known to come
 #'   from a valid common data matrix and response vector.
 #'
@@ -107,7 +116,7 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
                    reference_response_var = NULL,
                    iterations = 4000L, burnin = 1000L, thin = 1L,
                    seed = NULL, version = c("Rcpp", "R"), verbose = FALSE,
-                   nchains = 1L, store_samples = TRUE,
+                   nchains = 1L, nthreads = 1L, store_samples = TRUE,
                    store_coefficient_cov = TRUE, check_psd = FALSE,
                    XtX_storage = c("auto", "speed", "memory"),
                    XtX_memory_limit = 1024^3,
@@ -125,6 +134,16 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
     stop("Sparse or list `XtX` requires `version = \"Rcpp\"`.", call. = FALSE)
   }
   nchains <- .validate_nchains(nchains)
+  nthreads <- .validate_nthreads(nthreads)
+  if (nthreads > 1L && nchains != 1L) {
+    stop("`nthreads > 1` requires `nchains = 1`.", call. = FALSE)
+  }
+  if (nthreads > 1L && (!list_XtX || version != "Rcpp")) {
+    stop(
+      "`nthreads > 1` requires list `XtX` and `version = \"Rcpp\"`.",
+      call. = FALSE
+    )
+  }
   if (!is.logical(verbose) || length(verbose) != 1L || is.na(verbose)) {
     stop("`verbose` must be TRUE or FALSE.", call. = FALSE)
   }
@@ -347,6 +366,15 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
     } else {
       numeric(p)
     }
+    if (nthreads > 1L && any(working_center != 0)) {
+      stop(
+        paste0(
+          "`nthreads > 1` requires zero working predictor means; use zero ",
+          "`X_means` or fit without an intercept."
+        ),
+        call. = FALSE
+      )
+    }
   } else if (sparse_XtX) {
     working_XtX <- XtX[source_order, source_order, drop = FALSE]
     if (inherits(working_XtX, "symmetricMatrix")) {
@@ -462,6 +490,7 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
   if (list_XtX) {
     sampler_arguments$XtX_indices <- gram_indices
     sampler_arguments$XtX_types <- gram_types
+    sampler_arguments$nthreads <- nthreads
   }
   run_chains <- function(progressor = NULL) {
     .run_blm_chains(
@@ -497,6 +526,7 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
     )
     result$XtX_storage <- gram_plan$metadata
     result$XtX_cross_block_assumption <- "zero"
+    result$nthreads <- nthreads
   }
   result
 }

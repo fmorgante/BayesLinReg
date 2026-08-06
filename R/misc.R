@@ -799,6 +799,14 @@
   as.integer(nchains)
 }
 
+.validate_nthreads <- function(nthreads) {
+  if (!is.numeric(nthreads) || length(nthreads) != 1L || is.na(nthreads) ||
+      !is.finite(nthreads) || nthreads != floor(nthreads) || nthreads < 1) {
+    stop("`nthreads` must be a positive integer.", call. = FALSE)
+  }
+  as.integer(nthreads)
+}
+
 .validate_pve_controls <- function(compute_pve, pve_type) {
   if (!is.logical(compute_pve) || length(compute_pve) != 1L ||
       is.na(compute_pve)) {
@@ -1519,6 +1527,7 @@
                             intercept_y_mean = NULL,
                             XtX = NULL, XtX_center = NULL,
                             XtX_indices = NULL, XtX_types = NULL, Xty = NULL,
+                            nthreads = 1L,
                             yty = NULL, center_observations = TRUE,
                             residual_sse_offset = 0, compute_pve = FALSE,
                             pve_type = c("standalone", "allocated")) {
@@ -1599,7 +1608,8 @@
           summary_types = XtX_types,
           summary_center = XtX_center,
           summary_Xty = Xty,
-          summary_yty = if (is.null(yty)) 0 else yty
+          summary_yty = if (is.null(yty)) 0 else yty,
+          nthreads = nthreads
         )
       )
     )

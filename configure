@@ -53,12 +53,26 @@ else
   echo "configure: using Eigen's native kernels"
 fi
 
+r_home=${R_HOME:-}
+if test -z "$r_home"; then
+  r_home=$(R RHOME) || exit 1
+fi
+if test -x "$r_home/bin/Rscript"; then
+  rscript="$r_home/bin/Rscript"
+else
+  rscript="$r_home/bin${R_ARCH_BIN}/Rscript.exe"
+fi
+rcpp_parallel_libs=$(
+  "$rscript" -e "RcppParallel::RcppParallelLibs()"
+) || exit 1
+
 generate_makevars() {
   template=$1
   target=$2
   sed \
     -e "s|@EIGEN_BLAS_CPPFLAGS@|$eigen_blas_cppflags|g" \
     -e "s|@EIGEN_BLAS_LIBS@|$eigen_blas_libs|g" \
+    -e "s|@RCPP_PARALLEL_LIBS@|$rcpp_parallel_libs|g" \
     "$template" > "$target" || exit 1
 }
 

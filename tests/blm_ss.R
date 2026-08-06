@@ -168,6 +168,49 @@ stopifnot(
   sum(auto_fit$XtX_storage$estimated_bytes) <= 418
 )
 
+# With zero working means, Gram blocks are conditionally independent during
+# the coefficient sweep. Threaded results are reproducible across repeated
+# runs and thread counts, including prior blocks that cross Gram blocks.
+threaded_eta <- list(
+  normal = list(indices = c("l1", "r1"), model = "Normal"),
+  selection = list(indices = c("l2", "r2"), model = "SpikeSlab"),
+  shrinkage = list(indices = c("l3", "r3"), model = "GlobalLocal"),
+  multi = list(indices = c("l4", "r4"), model = "SpikeMultiSlab")
+)
+threaded_arguments <- utils::modifyList(symmetric_arguments, list(
+  residual_var = NULL, residual_shape = 2,
+  residual_scale = 1, yty = 30, iterations = 120, burnin = 40, seed = 515
+))
+threaded_arguments$ETA <- threaded_eta
+threaded_memory <- do.call(
+  blm_ss,
+  c(threaded_arguments, list(XtX_storage = "memory", nthreads = 2))
+)
+threaded_repeat <- do.call(
+  blm_ss,
+  c(threaded_arguments, list(XtX_storage = "memory", nthreads = 2))
+)
+threaded_three <- do.call(
+  blm_ss,
+  c(threaded_arguments, list(XtX_storage = "memory", nthreads = 3))
+)
+threaded_speed <- do.call(
+  blm_ss,
+  c(threaded_arguments, list(XtX_storage = "speed", nthreads = 2))
+)
+stopifnot(
+  identical(threaded_memory, threaded_repeat),
+  identical(threaded_memory$ETA, threaded_three$ETA),
+  identical(threaded_memory$residual_var_samples,
+            threaded_three$residual_var_samples),
+  isTRUE(all.equal(threaded_memory$ETA, threaded_speed$ETA,
+                   tolerance = 1e-10)),
+  isTRUE(all.equal(threaded_memory$residual_var_samples,
+                   threaded_speed$residual_var_samples, tolerance = 1e-10)),
+  identical(threaded_memory$nthreads, 2L),
+  identical(threaded_three$nthreads, 3L)
+)
+
 # List-specific validation prevents ambiguous predictor ordering and unsupported
 # use of the reference R sampler.
 unnamed_gram <- unname(gram_b)
@@ -187,6 +230,24 @@ invalid_gram_list_calls <- list(
   function() blm_ss(
     20, list(gram_a, gram_b), block_Xty,
     list(model = "Normal"), residual_var = 1, XtX_memory_limit = 0
+  ),
+  function() blm_ss(
+    20, list(gram_a, gram_b), block_Xty,
+    list(model = "Normal"), residual_var = 1, nthreads = 0
+  ),
+  function() blm_ss(
+    20, block_gram, block_Xty,
+    list(model = "Normal"), residual_var = 1, nthreads = 2
+  ),
+  function() blm_ss(
+    20, list(gram_a, gram_b), block_Xty,
+    list(model = "Normal"), residual_var = 1,
+    nthreads = 2, nchains = 2
+  ),
+  function() blm_ss(
+    20, list(gram_a, gram_b), block_Xty,
+    list(model = "Normal"), residual_var = 1,
+    X_means = block_means, y_mean = 0, nthreads = 2
   )
 )
 stopifnot(all(vapply(

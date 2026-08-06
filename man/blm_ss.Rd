@@ -23,6 +23,7 @@ blm_ss(
   version = c("Rcpp", "R"),
   verbose = FALSE,
   nchains = 1L,
+  nthreads = 1L,
   store_samples = TRUE,
   store_coefficient_cov = TRUE,
   check_psd = FALSE,
@@ -103,6 +104,10 @@ per chain using \code{\link[progressr:with_progress]{progressr::with_progress()}
 \item{nchains}{Number of independent chains. Multiple chains use a temporary
 \link[future:multisession]{future::multisession} plan.}
 
+\item{nthreads}{Number of threads used within one Rcpp chain for list \code{XtX}.
+Values greater than one require \code{nchains = 1} and zero working predictor
+means. The default preserves the serial sampler and its RNG sequence.}
+
 \item{store_samples}{If \code{TRUE} (the default), retain and return individual
 posterior draws. If \code{FALSE}, compute posterior summaries online without
 allocating draw matrices. Fits without stored samples cannot be passed to
@@ -168,6 +173,12 @@ list input, \code{XtX_storage} can instead retain one triangle and construct a
 reverse adjacency index whose entries share the original numerical
 values. The dense rank-one centering correction is maintained separately
 rather than materialized.
+With list input and zero working predictor means, \code{nthreads > 1} updates
+separate Gram blocks concurrently through \code{RcppParallel}. Updates remain
+sequential within each Gram block. Shared prior hyperparameters and the
+residual variance are updated after the parallel coefficient sweep. A
+threaded run is reproducible for a fixed seed and thread count, but uses a
+different RNG stream from the serial sampler.
 Set \code{check_psd = TRUE} when the supplied statistics are not known to come
 from a valid common data matrix and response vector.
 }
