@@ -533,11 +533,13 @@ class EigenBlockSummaryMatrix {
     const int local = global_local_[j];
     const double* column = block.design +
       static_cast<std::size_t>(block.rows) * local;
-    double result = 0.0;
-    for (int row = 0; row < block.rows; ++row) {
-      result += column[row] * block.residual[row];
-    }
-    return result;
+    const Eigen::Map<const Eigen::VectorXd> design_column(
+      column, block.rows
+    );
+    const Eigen::Map<const Eigen::VectorXd> residual(
+      block.residual.data(), block.rows
+    );
+    return design_column.dot(residual);
   }
 
   void update(
@@ -548,9 +550,13 @@ class EigenBlockSummaryMatrix {
     const int local = global_local_[j];
     const double* column = block.design +
       static_cast<std::size_t>(block.rows) * local;
-    for (int row = 0; row < block.rows; ++row) {
-      block.residual[row] -= column[row] * change;
-    }
+    const Eigen::Map<const Eigen::VectorXd> design_column(
+      column, block.rows
+    );
+    Eigen::Map<Eigen::VectorXd> residual(
+      block.residual.data(), block.rows
+    );
+    residual.noalias() -= change * design_column;
   }
 
   void multiply_block(

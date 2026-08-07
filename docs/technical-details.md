@@ -583,8 +583,11 @@ $$
 
 and coefficient sampling uses the reduced residual $w-Q\theta$. A coordinate
 update costs $O(q)$, where $q$ is retained rank, and a sweep costs
-$O(pq)$. List input applies this representation independently to exact
-eigen blocks and can process independent blocks concurrently.
+$O(pq)$. The coordinate kernel maps each contiguous column of $Q$ and the
+block residual into Eigen vectors, using vectorized dot-product and scaled
+residual-update operations. List input applies this representation
+independently to exact eigen blocks and can process independent blocks
+concurrently.
 
 When `XtX_prop_var = 1`, the supplied eigenvectors must span `Xty`, and the
 representation is treated as exact. Values below one explicitly define an
