@@ -424,14 +424,14 @@ for retained draws.
 
 ### 1.10 Prediction
 
-For new predictors $x_*$, each retained draw gives the conditional mean
+For new predictors $`x_*`$, each retained draw gives the conditional mean
 
 $$
 \eta_*^{(s)}=\mu^{(s)}+x_*'\beta^{(s)}.
 $$
 
 Point prediction uses the posterior mean of this quantity. A credible interval
-uses empirical quantiles of $\{\eta_*^{(s)}\}$. A prediction interval uses
+uses empirical quantiles of $`\{\eta_*^{(s)}\}`$. A prediction interval uses
 quantiles of the equal-weight normal mixture
 
 $$
@@ -444,9 +444,9 @@ are conditional means rather than conditional intercept draws, these intervals
 do not include the additional $\sigma_e^2/n$ uncertainty associated with a
 flat, integrated-out intercept. Including that uncertainty analytically would
 replace each point mass used for the conditional-mean credible distribution by
-$N(\eta_*^{(s)},\sigma_e^{2(s)}/n)$, and would replace each current
+$`N(\eta_*^{(s)},\sigma_e^{2(s)}/n)`$, and would replace each current
 predictive-mixture component by
-$N\{\eta_*^{(s)},\sigma_e^{2(s)}(1+1/n)\}$.
+$`N\{\eta_*^{(s)},\sigma_e^{2(s)}(1+1/n)\}`$.
 
 ## 2. Implementation details
 
