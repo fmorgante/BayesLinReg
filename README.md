@@ -10,9 +10,8 @@ block controls its own standardization, prior family, and prior parameters,
 while coefficients are always returned on their original scale. Gibbs sampling
 is available in R and Rcpp with optional parallel chains.
 
-[!CAUTION]
-
-**DISCLAIMER:** This package was created by OpenAI Codex, supervised by Fabio Morgante. It has not been reviewed and tested carefully.
+> [!CAUTION]
+> **DISCLAIMER:** This package was created by OpenAI Codex, supervised by Fabio Morgante. It has not been reviewed and tested carefully.
 
 ## Installation
 
