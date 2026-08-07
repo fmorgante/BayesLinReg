@@ -67,10 +67,10 @@ $$
 
 For a flat prior, set $1/v_j=0$.
 
-Throughout this document, $x\sim\operatorname{IG}(a,b)$ means the
+Throughout this document, $x\sim\mathrm{IG}(a,b)$ means the
 inverse-gamma distribution with density proportional to
 $x^{-(a+1)}\exp(-b/x)$. Thus, the code samples it as $x=1/G$, where
-$G\sim\operatorname{Gamma}(a,\text{rate}=b)$. Coefficient-prior variances
+$G\sim\mathrm{Gamma}(a,\text{rate}=b)$. Coefficient-prior variances
 are not multiplied by $\sigma_e^2$.
 
 ### 1.2 Fixed
@@ -99,7 +99,7 @@ $$
 \theta_j\mid\sigma_{\beta,b}^2
   \stackrel{\mathrm{ind}}{\sim}N(0,\sigma_{\beta,b}^2),
 \qquad
-\sigma_{\beta,b}^2\sim\operatorname{IG}(a_b,b_b).
+\sigma_{\beta,b}^2\sim\mathrm{IG}(a_b,b_b).
 $$
 
 The user-facing parameters are `var_shape` $=a_b$ and `var_scale`
@@ -107,7 +107,7 @@ $=b_b$. Their defaults are 2 and 1. Coefficients use the common normal
 update with $v_j=\sigma_{\beta,b}^2$. The shared variance update is
 
 $$
-\sigma_{\beta,b}^2\mid-\sim\operatorname{IG}\left(
+\sigma_{\beta,b}^2\mid-\sim\mathrm{IG}\left(
   a_b+\frac{p_b}{2},
   b_b+\frac{1}{2}\sum_{j\in b}\theta_j^2
 \right).
@@ -118,7 +118,7 @@ $$
 For a `SpikeSlab` block,
 
 $$
-\delta_j\mid\pi_b\sim\operatorname{Bernoulli}(\pi_b),
+\delta_j\mid\pi_b\sim\mathrm{Bernoulli}(\pi_b),
 \qquad
 \theta_j\mid\delta_j,\sigma_{\beta,b}^2\sim
 \begin{cases}
@@ -128,9 +128,9 @@ N(0,\sigma_{\beta,b}^2),&\delta_j=1,
 $$
 
 $$
-\pi_b\sim\operatorname{Beta}(a_{\pi,b},b_{\pi,b}),
+\pi_b\sim\mathrm{Beta}(a_{\pi,b},b_{\pi,b}),
 \qquad
-\sigma_{\beta,b}^2\sim\operatorname{IG}(a_b,b_b).
+\sigma_{\beta,b}^2\sim\mathrm{IG}(a_b,b_b).
 $$
 
 The defaults are `pi = c(a = 1, b = 1)`, `var_shape = 2`, and
@@ -147,7 +147,7 @@ $$
 Then
 
 $$
-\delta_j\mid-\sim\operatorname{Bernoulli}\{\operatorname{logit}^{-1}(\ell_j)\},
+\delta_j\mid-\sim\mathrm{Bernoulli}\{\mathrm{logit}^{-1}(\ell_j)\},
 $$
 
 and $\theta_j=0$ if $\delta_j=0$, otherwise
@@ -155,11 +155,11 @@ $\theta_j\sim N(m_j,V_j)$. If $m_b=\sum_{j\in b}\delta_j$,
 
 $$
 \pi_b\mid-\sim
-\operatorname{Beta}(a_{\pi,b}+m_b,b_{\pi,b}+p_b-m_b),
+\mathrm{Beta}(a_{\pi,b}+m_b,b_{\pi,b}+p_b-m_b),
 $$
 
 $$
-\sigma_{\beta,b}^2\mid-\sim\operatorname{IG}\left(
+\sigma_{\beta,b}^2\mid-\sim\mathrm{IG}\left(
   a_b+\frac{m_b}{2},
   b_b+\frac12\sum_{j:\delta_j=1}\theta_j^2
 \right).
@@ -172,7 +172,7 @@ variance. Let $c_j\in\{0,\ldots,K-1\}$ be the component assignment,
 $\gamma_0=0$, and $0<\gamma_1<\cdots<\gamma_{K-1}$. The hierarchy is
 
 $$
-c_j\mid\boldsymbol\pi_b\sim\operatorname{Categorical}(\boldsymbol\pi_b),
+c_j\mid\boldsymbol\pi_b\sim\mathrm{Categorical}(\boldsymbol\pi_b),
 $$
 
 $$
@@ -184,9 +184,9 @@ N(0,\gamma_{c_j}\sigma_{\beta,b}^2),&c_j>0,
 $$
 
 $$
-\boldsymbol\pi_b\sim\operatorname{Dirichlet}(\boldsymbol\alpha_b),
+\boldsymbol\pi_b\sim\mathrm{Dirichlet}(\boldsymbol\alpha_b),
 \qquad
-\sigma_{\beta,b}^2\sim\operatorname{IG}(a_b,b_b).
+\sigma_{\beta,b}^2\sim\mathrm{IG}(a_b,b_b).
 $$
 
 The defaults are
@@ -224,12 +224,12 @@ $N(m_{jc},V_{jc})$ for a slab. If $n_{bc}=\#\{j\in b:c_j=c\}$,
 
 $$
 \boldsymbol\pi_b\mid-\sim
-\operatorname{Dirichlet}(\alpha_{b0}+n_{b0},\ldots,
+\mathrm{Dirichlet}(\alpha_{b0}+n_{b0},\ldots,
                          \alpha_{b,K-1}+n_{b,K-1}),
 $$
 
 $$
-\sigma_{\beta,b}^2\mid-\sim\operatorname{IG}\left(
+\sigma_{\beta,b}^2\mid-\sim\mathrm{IG}\left(
   a_b+\frac12\sum_{c>0}n_{bc},
   b_b+\frac12\sum_{j:c_j>0}\frac{\theta_j^2}{\gamma_{c_j}}
 \right).
@@ -241,7 +241,7 @@ For a `GlobalLocal` block,
 
 $$
 \theta_j\mid\tau_b^2,\psi_j\sim N(0,\tau_b^2\psi_j),
-\qquad \psi_j\sim\operatorname{BetaPrime}(a_b,b_b),
+\qquad \psi_j\sim\mathrm{BetaPrime}(a_b,b_b),
 \qquad \tau_b\sim C^+(0,s_b).
 $$
 
@@ -252,22 +252,22 @@ Here `local_shape = c(a, b)` and `global_scale` $=s_b$. The default
 The beta-prime distribution is represented through
 
 $$
-\psi_j\mid\xi_j\sim\operatorname{Gamma}(a_b,\text{rate}=\xi_j),
-\qquad \xi_j\sim\operatorname{Gamma}(b_b,\text{rate}=1).
+\psi_j\mid\xi_j\sim\mathrm{Gamma}(a_b,\text{rate}=\xi_j),
+\qquad \xi_j\sim\mathrm{Gamma}(b_b,\text{rate}=1).
 $$
 
 The half-Cauchy global scale is represented through
 
 $$
-\tau_b^2\mid\zeta_b\sim\operatorname{IG}(1/2,1/\zeta_b),
-\qquad \zeta_b\sim\operatorname{IG}(1/2,1/s_b^2).
+\tau_b^2\mid\zeta_b\sim\mathrm{IG}(1/2,1/\zeta_b),
+\qquad \zeta_b\sim\mathrm{IG}(1/2,1/s_b^2).
 $$
 
 Coefficient updates use $v_j=\tau_b^2\psi_j$. The remaining full
 conditionals are
 
 $$
-\psi_j\mid-\sim\operatorname{GIG}\left(
+\psi_j\mid-\sim\mathrm{GIG}\left(
   a_b-\frac12,\frac{\theta_j^2}{\tau_b^2},2\xi_j
 \right),
 $$
@@ -277,18 +277,18 @@ $x^{\lambda-1}\exp\{-(\chi/x+\omega x)/2\}$, and
 
 $$
 \xi_j\mid-\sim
-\operatorname{Gamma}(a_b+b_b,\text{rate}=1+\psi_j),
+\mathrm{Gamma}(a_b+b_b,\text{rate}=1+\psi_j),
 $$
 
 $$
-\tau_b^2\mid-\sim\operatorname{IG}\left(
+\tau_b^2\mid-\sim\mathrm{IG}\left(
   \frac{p_b+1}{2},
   \frac{1}{\zeta_b}+\frac12\sum_{j\in b}\frac{\theta_j^2}{\psi_j}
 \right),
 $$
 
 $$
-\zeta_b\mid-\sim\operatorname{IG}\left(
+\zeta_b\mid-\sim\mathrm{IG}\left(
   1,\frac{1}{s_b^2}+\frac{1}{\tau_b^2}
 \right).
 $$
@@ -300,14 +300,14 @@ The C++ sampler obtains GIG draws from the registered `GIGrvg` C interface.
 The residual variance can be fixed by supplying `residual_var`. Otherwise,
 
 $$
-\sigma_e^2\sim\operatorname{IG}(a_e,b_e),
+\sigma_e^2\sim\mathrm{IG}(a_e,b_e),
 $$
 
 where `residual_shape` $=a_e$ and `residual_scale` $=b_e$. Let
 $n_c=n-1$ when an intercept is fitted and $n_c=n$ otherwise. Its update is
 
 $$
-\sigma_e^2\mid-\sim\operatorname{IG}\left(
+\sigma_e^2\mid-\sim\mathrm{IG}\left(
   a_e+\frac{n_c}{2},
   b_e+\frac12\left\|y_c-Z\theta\right\|^2
 \right).
@@ -323,7 +323,7 @@ Let $V_y$ be `reference_response_var`, let $h_b$ be a block's
 
 $$
 V_{g,b}=h_bV_y,\qquad
-D_b=\sum_{j\in b}\operatorname{Var}(Z_j).
+D_b=\sum_{j\in b}\mathrm{Var}(Z_j).
 $$
 
 With default standardization, $D_b=p_b$. The calibration matches the prior
@@ -394,14 +394,14 @@ The total signal variance and total PVE are
 $$
 V_f=\frac{f'f}{d},
 \qquad
-\operatorname{PVE}_{\mathrm{total}}=
+\mathrm{PVE}_{\mathrm{total}}=
 \frac{V_f}{V_f+\sigma_e^2}.
 $$
 
 Standalone block PVE is
 
 $$
-\operatorname{PVE}^{\mathrm{standalone}}_b=
+\mathrm{PVE}^{\mathrm{standalone}}_b=
 \frac{f_b'f_b/d}{V_f+\sigma_e^2}.
 $$
 
@@ -415,7 +415,7 @@ $$
 Allocated block PVE instead uses
 
 $$
-\operatorname{PVE}^{\mathrm{allocated}}_b=
+\mathrm{PVE}^{\mathrm{allocated}}_b=
 \frac{f_b'f/d}{V_f+\sigma_e^2}.
 $$
 
@@ -524,7 +524,7 @@ $$
 The residual sum of squares is maintained incrementally as
 
 $$
-\operatorname{SSE}=y_{2c}-2\theta'g_c+\theta'G_c\theta
+\mathrm{SSE}=y_{2c}-2\theta'g_c+\theta'G_c\theta
 $$
 
 and periodically reconstructed to control numerical drift. Direct sufficient-
@@ -590,7 +590,7 @@ $$
 and uses
 
 $$
-\operatorname{SSE}=c+\|w-Q\theta\|^2.
+\mathrm{SSE}=c+\|w-Q\theta\|^2.
 $$
 
 Block-level eigen PVE reuses allocated work vectors and clears only blocks
@@ -623,7 +623,7 @@ g_j=G_{jj}\widehat\beta_j,\qquad
 y_2=(n-1)V_y,
 $$
 
-where $D=\operatorname{diag}(G_{11},\ldots,G_{pp})$. These are working
+where $D=\mathrm{diag}(G_{11},\ldots,G_{pp})$. These are working
 sufficient statistics when LD and the marginal statistics are not derived from
 the same individual-level sample. The function performs structural validation
 but intentionally does not perform general summary-statistic/LD mismatch
