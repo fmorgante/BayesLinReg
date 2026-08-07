@@ -32,7 +32,7 @@ More precisely, with the flat intercept prior implicit in centering,
 
 $$
 \mu\mid\beta,\sigma_e^2,y,X\sim
-N\left(\bar y-\sum_j\bar x_j\beta_j,\frac{\sigma_e^2}{n}\right).
+N(\bar y-\sum_j\bar x_j\beta_j,\frac{\sigma_e^2}{n}).
 $$
 
 The package currently records the conditional mean
@@ -58,7 +58,7 @@ $$
 For any normal prior $\theta_j\sim N(0,v_j)$, the coefficient update is
 
 $$
-V_j=\left(\frac{d_j}{\sigma_e^2}+\frac{1}{v_j}\right)^{-1},
+V_j=(\frac{d_j}{\sigma_e^2}+\frac{1}{v_j})^{-1},
 \qquad
 m_j=V_j\frac{t_j}{\sigma_e^2},
 \qquad
@@ -107,10 +107,10 @@ $=b_b$. Their defaults are 2 and 1. Coefficients use the common normal
 update with $v_j=\sigma_{\beta,b}^2$. The shared variance update is
 
 $$
-\sigma_{\beta,b}^2\mid-\sim\mathrm{IG}\left(
+\sigma_{\beta,b}^2\mid-\sim\mathrm{IG}(
   a_b+\frac{p_b}{2},
   b_b+\frac{1}{2}\sum_{j\in b}\theta_j^2
-\right).
+).
 $$
 
 ### 1.4 SpikeSlab
@@ -159,10 +159,10 @@ $$
 $$
 
 $$
-\sigma_{\beta,b}^2\mid-\sim\mathrm{IG}\left(
+\sigma_{\beta,b}^2\mid-\sim\mathrm{IG}(
   a_b+\frac{m_b}{2},
   b_b+\frac12\sum_{j:\delta_j=1}\theta_j^2
-\right).
+).
 $$
 
 ### 1.5 SpikeMultiSlab
@@ -201,8 +201,8 @@ var_scale = 1
 For component $c>0$, define
 
 $$
-V_{jc}=\left\{\frac{d_j}{\sigma_e^2}+
-  \frac{1}{\gamma_c\sigma_{\beta,b}^2}\right\}^{-1},
+V_{jc}=\{\frac{d_j}{\sigma_e^2}+
+  \frac{1}{\gamma_c\sigma_{\beta,b}^2}\}^{-1},
 \qquad m_{jc}=V_{jc}\frac{t_j}{\sigma_e^2}.
 $$
 
@@ -220,7 +220,8 @@ $$
 
 The code normalizes these weights with a log-sum-exp calculation, samples
 $c_j$, and sets $\theta_j=0$ for the spike or draws
-$N(m_{jc},V_{jc})$ for a slab. If $n_{bc}=\#\{j\in b:c_j=c\}$,
+$N(m_{jc},V_{jc})$ for a slab. If $n_{bc}$ is the number of indices $j$ in
+block $b$ for which $c_j=c$,
 
 $$
 \boldsymbol\pi_b\mid-\sim
@@ -229,10 +230,10 @@ $$
 $$
 
 $$
-\sigma_{\beta,b}^2\mid-\sim\mathrm{IG}\left(
+\sigma_{\beta,b}^2\mid-\sim\mathrm{IG}(
   a_b+\frac12\sum_{c>0}n_{bc},
   b_b+\frac12\sum_{j:c_j>0}\frac{\theta_j^2}{\gamma_{c_j}}
-\right).
+).
 $$
 
 ### 1.6 GlobalLocal
@@ -267,9 +268,9 @@ Coefficient updates use $v_j=\tau_b^2\psi_j$. The remaining full
 conditionals are
 
 $$
-\psi_j\mid-\sim\mathrm{GIG}\left(
+\psi_j\mid-\sim\mathrm{GIG}(
   a_b-\frac12,\frac{\theta_j^2}{\tau_b^2},2\xi_j
-\right),
+),
 $$
 
 where the GIG density is proportional to
@@ -281,16 +282,16 @@ $$
 $$
 
 $$
-\tau_b^2\mid-\sim\mathrm{IG}\left(
+\tau_b^2\mid-\sim\mathrm{IG}(
   \frac{p_b+1}{2},
   \frac{1}{\zeta_b}+\frac12\sum_{j\in b}\frac{\theta_j^2}{\psi_j}
-\right),
+),
 $$
 
 $$
-\zeta_b\mid-\sim\mathrm{IG}\left(
+\zeta_b\mid-\sim\mathrm{IG}(
   1,\frac{1}{s_b^2}+\frac{1}{\tau_b^2}
-\right).
+).
 $$
 
 The C++ sampler obtains GIG draws from the registered `GIGrvg` C interface.
@@ -307,10 +308,10 @@ where `residual_shape` $=a_e$ and `residual_scale` $=b_e$. Let
 $n_c=n-1$ when an intercept is fitted and $n_c=n$ otherwise. Its update is
 
 $$
-\sigma_e^2\mid-\sim\mathrm{IG}\left(
+\sigma_e^2\mid-\sim\mathrm{IG}(
   a_e+\frac{n_c}{2},
-  b_e+\frac12\left\|y_c-Z\theta\right\|^2
-\right).
+  b_e+\frac12\|y_c-Z\theta\|^2
+).
 $$
 
 For a truncated eigen representation, the residual sum of squares also contains
@@ -424,18 +425,18 @@ for retained draws.
 
 ### 1.10 Prediction
 
-For new predictors $`x_*`$, each retained draw gives the conditional mean
+For new predictors $x_{\ast}$, each retained draw gives the conditional mean
 
 $$
-\eta_*^{(s)}=\mu^{(s)}+x_*'\beta^{(s)}.
+\eta_{\ast}^{(s)}=\mu^{(s)}+x_{\ast}'\beta^{(s)}.
 $$
 
 Point prediction uses the posterior mean of this quantity. A credible interval
-uses empirical quantiles of $`\{\eta_*^{(s)}\}`$. A prediction interval uses
+uses empirical quantiles of $\{\eta_{\ast}^{(s)}\}$. A prediction interval uses
 quantiles of the equal-weight normal mixture
 
 $$
-\frac1S\sum_{s=1}^S N\left(\eta_*^{(s)},\sigma_e^{2(s)}\right).
+\frac1S\sum_{s=1}^S N(\eta_{\ast}^{(s)},\sigma_e^{2(s)}).
 $$
 
 The mixture quantiles are found deterministically by root-finding; no additional
@@ -444,9 +445,9 @@ are conditional means rather than conditional intercept draws, these intervals
 do not include the additional $\sigma_e^2/n$ uncertainty associated with a
 flat, integrated-out intercept. Including that uncertainty analytically would
 replace each point mass used for the conditional-mean credible distribution by
-$`N(\eta_*^{(s)},\sigma_e^{2(s)}/n)`$, and would replace each current
+$N(\eta_{\ast}^{(s)},\sigma_e^{2(s)}/n)$, and would replace each current
 predictive-mixture component by
-$`N\{\eta_*^{(s)},\sigma_e^{2(s)}(1+1/n)\}`$.
+$N\{\eta_{\ast}^{(s)},\sigma_e^{2(s)}(1+1/n)\}$.
 
 ## 2. Implementation details
 
