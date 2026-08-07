@@ -29,14 +29,14 @@ stopifnot(
 )
 
 # A Normal block samples one shared coefficient variance.
+set.seed(41)
 known_fit <- blm(
   y,
   ETA = normal_eta(x, standardize = FALSE),
   residual_var = 1,
   iterations = 1000,
   burnin = 400,
-  thin = 2,
-  seed = 41
+  thin = 2
 )
 known_block <- known_fit$ETA$ETA1
 stopifnot(
@@ -57,21 +57,23 @@ stopifnot(
 )
 
 # Matrix and data-frame inputs use the same fitting engine.
+set.seed(41)
 vector_fit <- blm(
   y,
   ETA = list(
     X = x, model = "Normal", var_shape = 2, var_scale = 10,
     standardize = FALSE
   ),
-  residual_var = 1, iterations = 1000, burnin = 400, thin = 2, seed = 41
+  residual_var = 1, iterations = 1000, burnin = 400, thin = 2
 )
+set.seed(41)
 data_frame_fit <- blm(
   y,
   ETA = list(
     X = as.data.frame(x), model = "Normal", var_shape = 2, var_scale = 10,
     standardize = FALSE
   ),
-  residual_var = 1, iterations = 1000, burnin = 400, thin = 2, seed = 41
+  residual_var = 1, iterations = 1000, burnin = 400, thin = 2
 )
 stopifnot(
   isTRUE(all.equal(known_fit, vector_fit)),
@@ -80,18 +82,20 @@ stopifnot(
 
 # A predictor vector and a one-column matrix use the same fitting engine.
 simple_y <- 1 + 2 * x[, "first"]
+set.seed(42)
 simple_fit <- blm(
   simple_y,
   ETA = list(
     X = x[, "first"], model = "Normal", var_shape = 2, var_scale = 10,
     standardize = FALSE
   ),
-  residual_var = 1, iterations = 1000, burnin = 400, thin = 2, seed = 42
+  residual_var = 1, iterations = 1000, burnin = 400, thin = 2
 )
+set.seed(42)
 one_predictor_fit <- blm(
   simple_y,
   ETA = normal_eta(x[, "first", drop = FALSE], standardize = FALSE),
-  residual_var = 1, iterations = 1000, burnin = 400, thin = 2, seed = 42
+  residual_var = 1, iterations = 1000, burnin = 400, thin = 2
 )
 stopifnot(
   isTRUE(all.equal(
@@ -110,14 +114,16 @@ stopifnot(
 # original predictor scale.
 predictor_sd <- apply(x, 2L, stats::sd)
 working_x <- sweep(x, 2L, predictor_sd, FUN = "/")
+set.seed(43)
 manual_fit <- blm(
   y,
   ETA = normal_eta(working_x, standardize = FALSE),
-  residual_var = 1, iterations = 1000, burnin = 400, thin = 2, seed = 43
+  residual_var = 1, iterations = 1000, burnin = 400, thin = 2
 )
+set.seed(43)
 automatic_fit <- blm(
   y, ETA = normal_eta(x), residual_var = 1,
-  iterations = 1000, burnin = 400, thin = 2, seed = 43
+  iterations = 1000, burnin = 400, thin = 2
 )
 stopifnot(
   isTRUE(all.equal(
@@ -133,6 +139,7 @@ stopifnot(
 )
 
 # Learned residual variance uses Gibbs sampling and remains reproducible.
+set.seed(42)
 learned_fit <- blm(
   y,
   ETA = normal_eta(x),
@@ -140,9 +147,9 @@ learned_fit <- blm(
   residual_scale = 1,
   iterations = 1500,
   burnin = 500,
-  thin = 2,
-  seed = 42
+  thin = 2
 )
+set.seed(42)
 repeated_fit <- blm(
   y,
   ETA = normal_eta(x),
@@ -150,8 +157,7 @@ repeated_fit <- blm(
   residual_scale = 1,
   iterations = 1500,
   burnin = 500,
-  thin = 2,
-  seed = 42
+  thin = 2
 )
 stopifnot(
   isTRUE(all.equal(learned_fit, repeated_fit)),
@@ -167,6 +173,7 @@ stopifnot(
 )
 
 # The R and Rcpp implementations target the same Normal posterior.
+set.seed(42)
 r_fit <- blm(
   y,
   ETA = normal_eta(x),
@@ -175,7 +182,7 @@ r_fit <- blm(
   iterations = 1500,
   burnin = 500,
   thin = 2,
-  seed = 42,
+
   version = "R"
 )
 stopifnot(
@@ -217,6 +224,7 @@ multi_eta <- list(
     global_scale = 0.5
   )
 )
+set.seed(77)
 multi_rcpp <- blm(
   multi_y, ETA = multi_eta,
   residual_shape = 2,
@@ -224,9 +232,10 @@ multi_rcpp <- blm(
   iterations = 1200,
   burnin = 400,
   thin = 2,
-  seed = 77,
+
   version = "Rcpp"
 )
+set.seed(77)
 multi_r <- blm(
   multi_y, ETA = multi_eta,
   residual_shape = 2,
@@ -234,7 +243,7 @@ multi_r <- blm(
   iterations = 1200,
   burnin = 400,
   thin = 2,
-  seed = 77,
+
   version = "R"
 )
 stopifnot(
@@ -271,6 +280,7 @@ stopifnot(
 # Summary-only fits match stored-draw summaries without returning samples.
 for (sampler_version in c("Rcpp", "R")) {
   stored_fit <- if (sampler_version == "Rcpp") multi_rcpp else multi_r
+  set.seed(77)
   summary_fit <- blm(
     multi_y, ETA = multi_eta,
     residual_shape = 2,
@@ -278,10 +288,11 @@ for (sampler_version in c("Rcpp", "R")) {
     iterations = 1200,
     burnin = 400,
     thin = 2,
-    seed = 77,
+
     version = sampler_version,
     store_samples = FALSE
   )
+  set.seed(77)
   variance_only_fit <- blm(
     multi_y, ETA = multi_eta,
     residual_shape = 2,
@@ -289,7 +300,7 @@ for (sampler_version in c("Rcpp", "R")) {
     iterations = 1200,
     burnin = 400,
     thin = 2,
-    seed = 77,
+
     version = sampler_version,
     store_samples = FALSE,
     store_coefficient_cov = FALSE
@@ -359,7 +370,7 @@ stored_variance_only_fit <- blm(
   residual_var = 1,
   iterations = 100,
   burnin = 40,
-  seed = 78,
+
   store_coefficient_cov = FALSE
 )
 stopifnot(
@@ -383,8 +394,7 @@ global_fit <- blm(
   residual_scale = 1,
   iterations = 1000,
   burnin = 400,
-  thin = 2,
-  seed = 109
+  thin = 2
 )
 horseshoe_fit <- blm(
   multi_y,
@@ -395,8 +405,7 @@ horseshoe_fit <- blm(
   ),
   residual_var = 0.25,
   iterations = 500,
-  burnin = 200,
-  seed = 110
+  burnin = 200
 )
 stopifnot(
   identical(global_fit$ETA$ETA1$local_shape, c(a = 1, b = 0.5)),
@@ -410,6 +419,7 @@ stopifnot(
 
 # GlobalLocal can calibrate its global scale from expected sparsity.
 calibrated_scale <- 1 / (ncol(multi_X) - 1) * 0.5 / sqrt(multi_n)
+set.seed(110)
 calibrated_fit <- blm(
   multi_y,
   ETA = list(
@@ -420,9 +430,9 @@ calibrated_fit <- blm(
   ),
   residual_var = 0.25,
   iterations = 100,
-  burnin = 40,
-  seed = 110
+  burnin = 40
 )
+set.seed(110)
 explicit_scale_fit <- blm(
   multi_y,
   ETA = list(
@@ -432,8 +442,7 @@ explicit_scale_fit <- blm(
   ),
   residual_var = 0.25,
   iterations = 100,
-  burnin = 40,
-  seed = 110
+  burnin = 40
 )
 stopifnot(
   identical(
@@ -457,6 +466,7 @@ pve_target <- 0.3
 pve_fits <- lapply(
   c("Normal", "SpikeSlab", "SpikeMultiSlab", "GlobalLocal"),
   function(model) {
+    set.seed(112)
     specification <- list(
       X = multi_X, model = model, var_shape = 3,
       expected_pve = pve_target
@@ -473,7 +483,7 @@ pve_fits <- lapply(
     blm(
       multi_y, ETA = specification, residual_var = 0.25,
       reference_response_var = pve_reference_var,
-      iterations = 60, burnin = 20, seed = 112
+      iterations = 60, burnin = 20
     )
   }
 )
@@ -520,6 +530,7 @@ stopifnot(
 residual_pve_fits <- lapply(
   c("Normal", "SpikeSlab", "SpikeMultiSlab", "GlobalLocal"),
   function(model) {
+    set.seed(114)
     specification <- list(
       X = multi_X, model = model, expected_pve = pve_target
     )
@@ -528,7 +539,7 @@ residual_pve_fits <- lapply(
       multi_y, ETA = specification,
       residual_shape = 3,
       reference_response_var = pve_reference_var,
-      iterations = 60, burnin = 20, seed = 114
+      iterations = 60, burnin = 20
     )
   }
 )
@@ -566,8 +577,7 @@ mixed_pve_fit <- blm(
   residual_var = 0.25,
   reference_response_var = 2,
   iterations = 60,
-  burnin = 20,
-  seed = 113
+  burnin = 20
 )
 stopifnot(
   isTRUE(all.equal(mixed_pve_fit$ETA$dense$var_scale, 0.4)),
@@ -594,8 +604,7 @@ spike_fit <- blm(
   residual_shape = 2,
   residual_scale = 1,
   iterations = 500,
-  burnin = 200,
-  seed = 111
+  burnin = 200
 )
 stopifnot(
   identical(spike_fit$ETA$ETA1$model, "SpikeSlab"),
@@ -611,6 +620,7 @@ stopifnot(
 )
 
 # SpikeSlab supports the same fixed residual-variance interface as other priors.
+set.seed(112)
 fixed_spike_rcpp <- blm(
   multi_y,
   ETA = list(
@@ -623,9 +633,10 @@ fixed_spike_rcpp <- blm(
   residual_var = 0.25,
   iterations = 500,
   burnin = 200,
-  seed = 112,
+
   version = "Rcpp"
 )
+set.seed(112)
 fixed_spike_r <- blm(
   multi_y,
   ETA = list(
@@ -638,7 +649,7 @@ fixed_spike_r <- blm(
   residual_var = 0.25,
   iterations = 500,
   burnin = 200,
-  seed = 112,
+
   version = "R"
 )
 stopifnot(
@@ -699,7 +710,7 @@ for (sampler_version in c("Rcpp", "R")) {
     iterations = 100,
     burnin = 20,
     thin = 1,
-    seed = 42,
+
     normal_shape = 2,
     normal_scale = 10,
     progress_callback = callback
@@ -740,23 +751,25 @@ parallel_test_flags <- Sys.getenv(c(
   "BLM_TEST_FUTURE"
 ))
 if (any(parallel_test_flags == "true")) {
+  set.seed(123)
   parallel_fit <- blm(
     multi_y, ETA = multi_eta,
     residual_shape = 2,
     residual_scale = 1,
     iterations = 100,
     burnin = 20,
-    seed = 123,
+
     nchains = 2,
     verbose = TRUE
   )
+  set.seed(123)
   repeated_parallel_fit <- blm(
     multi_y, ETA = multi_eta,
     residual_shape = 2,
     residual_scale = 1,
     iterations = 100,
     burnin = 20,
-    seed = 123,
+
     nchains = 2,
     verbose = TRUE
   )

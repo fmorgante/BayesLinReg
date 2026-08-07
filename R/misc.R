@@ -757,7 +757,7 @@
   x
 }
 
-.validate_mcmc <- function(iterations, burnin, thin, seed) {
+.validate_mcmc <- function(iterations, burnin, thin) {
   is_whole_number <- function(value) {
     is.numeric(value) && length(value) == 1L && !is.na(value) &&
       is.finite(value) && value == floor(value)
@@ -779,13 +779,6 @@
   retained_iterations <- seq.int(burnin + 1L, iterations, by = thin)
   if (length(retained_iterations) < 2L) {
     stop("The MCMC settings must retain at least two draws.", call. = FALSE)
-  }
-
-  if (!is.null(seed)) {
-    if (!is_whole_number(seed)) {
-      stop("`seed` must be NULL or a finite integer.", call. = FALSE)
-    }
-    set.seed(seed)
   }
 
   retained_iterations
@@ -819,7 +812,7 @@
 }
 
 .blm_gibbs <- function(y, x, residual_shape, residual_scale,
-                       iterations, burnin, thin, seed,
+                       iterations, burnin, thin,
                        progress_callback = NULL,
                        block_id = NULL, block_model = 0L,
                        normal_shape = 2, normal_scale = 1,
@@ -841,7 +834,7 @@
   pve_controls <- .validate_pve_controls(compute_pve, pve_type)
   compute_pve <- pve_controls$compute_pve
   pve_type <- pve_controls$pve_type
-  retained_iterations <- .validate_mcmc(iterations, burnin, thin, seed)
+  retained_iterations <- .validate_mcmc(iterations, burnin, thin)
   use_sufficient_statistics <- !is.null(XtX)
   number_of_predictors <- if (use_sufficient_statistics) {
     ncol(XtX)
@@ -1509,7 +1502,7 @@
 }
 
 .blm_gibbs_rcpp <- function(y, x, residual_shape, residual_scale,
-                            iterations, burnin, thin, seed,
+                            iterations, burnin, thin,
                             progress_callback = NULL,
                             block_id = NULL, block_model = 0L,
                             normal_shape = 2, normal_scale = 1,
@@ -1536,7 +1529,7 @@
   pve_controls <- .validate_pve_controls(compute_pve, pve_type)
   compute_pve <- pve_controls$compute_pve
   pve_type <- pve_controls$pve_type
-  .validate_mcmc(iterations, burnin, thin, seed)
+  .validate_mcmc(iterations, burnin, thin)
   use_sufficient_statistics <- !is.null(XtX) || !is.null(eigen_X)
   if (is.null(block_id)) {
     block_id <- rep.int(
@@ -1729,7 +1722,7 @@
   }
 }
 
-.run_blm_chains <- function(sampler_arguments, version, nchains, seed,
+.run_blm_chains <- function(sampler_arguments, version, nchains,
                             block_model, progressor = NULL) {
   if (nchains == 1L) {
     sampler <- if (version == "Rcpp") .blm_gibbs_rcpp else .blm_gibbs
@@ -1738,7 +1731,6 @@
       c(
         sampler_arguments,
         list(
-          seed = seed,
           progress_callback = .chain_progress_callback(
             progressor,
             chain = 1L,
@@ -1749,17 +1741,11 @@
     ))
   }
 
-  chain_seeds <- if (is.null(seed)) {
-    rep(list(NULL), nchains)
-  } else {
-    as.list((abs(as.double(seed)) + seq_len(nchains) - 1) %% 2147483647)
-  }
   previous_plan <- future::plan()
   on.exit(future::plan(previous_plan), add = TRUE)
   future::plan(future::multisession, workers = nchains)
 
   chain_futures <- lapply(seq_len(nchains), function(chain) {
-    chain_seed <- chain_seeds[[chain]]
     chain_progress <- .chain_progress_callback(progressor, chain, nchains)
     future::future({
       namespace <- asNamespace("BayesLinReg")
@@ -1773,7 +1759,6 @@
         c(
           sampler_arguments,
           list(
-            seed = chain_seed,
             progress_callback = chain_progress
           )
         )

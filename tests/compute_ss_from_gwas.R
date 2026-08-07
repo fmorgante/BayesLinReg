@@ -52,8 +52,7 @@ gwas_fit <- blm_ss(
   residual_shape = 2,
   residual_scale = original$reference_response_var,
   iterations = 30,
-  burnin = 10,
-  seed = 902
+  burnin = 10
 )
 stopifnot(inherits(gwas_fit, "blm_fit"))
 
@@ -164,11 +163,13 @@ fit_arguments <- list(
   n = n, Xty = matrix_original$Xty, yty = matrix_original$yty,
   X_means = matrix_original$X_means, y_mean = matrix_original$y_mean,
   ETA = crossing_eta, residual_var = 1,
-  iterations = 60, burnin = 20, seed = 903
+  iterations = 60, burnin = 20
 )
+set.seed(903)
 matrix_LD_fit <- do.call(
   blm_ss, c(list(XtX = matrix_original$XtX), fit_arguments)
 )
+set.seed(903)
 block_LD_fit <- do.call(
   blm_ss, c(list(XtX = block_original$XtX), fit_arguments)
 )
@@ -228,6 +229,7 @@ selected_block_values <- Map(
   function(values, keep) values[keep],
   block_eigen_output$XtX_eigenvalues_raw, block_keep
 )
+set.seed(903)
 block_eigen_fit <- blm_ss_eigen(
   n = block_eigen_output$n,
   XtX_eigenvectors = selected_block_vectors,
@@ -240,8 +242,7 @@ block_eigen_fit <- blm_ss_eigen(
   ETA = crossing_eta,
   residual_var = 1,
   iterations = 60,
-  burnin = 20,
-  seed = 903
+  burnin = 20
 )
 stopifnot(
   isTRUE(all.equal(

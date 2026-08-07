@@ -87,8 +87,8 @@
 #'   separate Gram blocks concurrently through `RcppParallel`. Updates remain
 #'   sequential within each Gram block. Shared prior hyperparameters and the
 #'   residual variance are updated after the parallel coefficient sweep. A
-#'   threaded run is reproducible for a fixed seed and thread count, but uses a
-#'   different RNG stream from the serial sampler.
+#'   After [set.seed()], threaded runs are reproducible and use a different RNG
+#'   stream from the serial sampler.
 #'   Set `check_psd = TRUE` when the supplied statistics are not known to come
 #'   from a valid common data matrix and response vector.
 #'
@@ -97,6 +97,7 @@
 #' @examples
 #' X <- cbind(x1 = 1:20, x2 = rep(c(0, 1), 10))
 #' y <- 1 + 2 * X[, "x1"] - X[, "x2"]
+#' set.seed(123)
 #' fit <- blm_ss(
 #'   n = nrow(X),
 #'   XtX = crossprod(X),
@@ -107,15 +108,14 @@
 #'   y_mean = mean(y),
 #'   residual_var = 1,
 #'   iterations = 100,
-#'   burnin = 50,
-#'   seed = 123
+#'   burnin = 50
 #' )
 blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
                    y_mean = NULL, residual_var = NULL,
                    residual_shape = NULL, residual_scale = NULL,
                    reference_response_var = NULL,
                    iterations = 4000L, burnin = 1000L, thin = 1L,
-                   seed = NULL, version = c("Rcpp", "R"), verbose = FALSE,
+                   version = c("Rcpp", "R"), verbose = FALSE,
                    nchains = 1L, nthreads = 1L, store_samples = TRUE,
                    store_coefficient_cov = TRUE, check_psd = FALSE,
                    XtX_storage = c("auto", "speed", "memory"),
@@ -494,7 +494,7 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
   }
   run_chains <- function(progressor = NULL) {
     .run_blm_chains(
-      sampler_arguments, version, nchains, seed, block_model, progressor
+      sampler_arguments, version, nchains, block_model, progressor
     )
   }
   samples <- if (verbose) {

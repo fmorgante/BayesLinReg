@@ -28,13 +28,15 @@ for (model in c(
   "Normal", "SpikeSlab", "GlobalLocal", "SpikeMultiSlab"
 )) {
   eta <- list(model = model)
+  set.seed(602)
   dense_fit <- blm_ss(
     n, XtX, Xty, ETA = eta, yty = yty,
     X_means = X_means, y_mean = y_mean,
     residual_shape = 3, residual_scale = 1.5,
-    iterations = 90, burnin = 30, seed = 602,
+    iterations = 90, burnin = 30,
     store_coefficient_cov = FALSE
   )
+  set.seed(602)
   eigen_fit <- blm_ss_eigen(
     n,
     XtX_eigenvectors = eigenvectors,
@@ -49,7 +51,7 @@ for (model in c(
     residual_scale = 1.5,
     iterations = 90,
     burnin = 30,
-    seed = 602,
+
     store_coefficient_cov = FALSE,
     check_eigenvectors = TRUE
   )
@@ -82,18 +84,20 @@ eta_dense <- list(
     expected_pve = 0.3
   )
 )
+set.seed(603)
 pve_dense <- blm_ss(
   n, XtX, Xty, ETA = eta_dense, yty = yty,
   X_means = X_means, y_mean = y_mean,
   residual_shape = 4,
-  iterations = 80, burnin = 30, seed = 603,
+  iterations = 80, burnin = 30,
   store_samples = FALSE, store_coefficient_cov = FALSE
 )
+set.seed(603)
 pve_eigen <- blm_ss_eigen(
   n, eigenvectors, eigenvalues, 1, Xty, ETA = eta_dense, yty = yty,
   X_means = X_means, y_mean = y_mean,
   residual_shape = 4,
-  iterations = 80, burnin = 30, seed = 603,
+  iterations = 80, burnin = 30,
   store_samples = FALSE, store_coefficient_cov = FALSE
 )
 pve_eigen[c(
@@ -119,7 +123,7 @@ truncated_fit <- blm_ss_eigen(
   residual_var = 1,
   iterations = 70,
   burnin = 20,
-  seed = 604,
+
   check_eigenvectors = TRUE
 )
 stopifnot(
@@ -135,7 +139,7 @@ fixed_fit <- blm_ss_eigen(
   ETA = list(model = "Normal"),
   X_means = X_means, y_mean = y_mean,
   residual_var = 1,
-  iterations = 60, burnin = 20, seed = 605
+  iterations = 60, burnin = 20
 )
 stopifnot(all(fixed_fit$residual_var_samples == 1))
 
@@ -230,12 +234,14 @@ block_fit_arguments <- list(
   n = n, Xty = block_Xty, ETA = block_eta, yty = block_yty,
   X_means = block_means, y_mean = block_y_mean,
   residual_shape = 3, residual_scale = 1.5,
-  iterations = 80, burnin = 30, seed = 607,
+  iterations = 80, burnin = 30,
   store_coefficient_cov = FALSE, compute_pve = TRUE
 )
+set.seed(607)
 block_dense_fit <- do.call(
   blm_ss, c(list(XtX = block_XtX), block_fit_arguments)
 )
+set.seed(607)
 block_eigen_fit <- do.call(
   blm_ss_eigen,
   c(
@@ -295,9 +301,12 @@ threaded_arguments <- c(
 )
 threaded_arguments$ETA <- threaded_eta
 threaded_arguments$store_samples <- FALSE
+set.seed(607)
 threaded_eigen_fit <- do.call(blm_ss_eigen, threaded_arguments)
+set.seed(607)
 threaded_eigen_repeat <- do.call(blm_ss_eigen, threaded_arguments)
 threaded_arguments$nthreads <- 3L
+set.seed(607)
 threaded_eigen_three <- do.call(blm_ss_eigen, threaded_arguments)
 stopifnot(
   identical(threaded_eigen_fit, threaded_eigen_repeat),
@@ -331,7 +340,7 @@ block_prop <- c(
 truncated_block_fit <- blm_ss_eigen(
   n, truncated_block_vectors, truncated_block_values, block_prop,
   block_Xty, block_eta, block_yty, block_means, block_y_mean,
-  residual_var = 1, iterations = 50, burnin = 20, seed = 608
+  residual_var = 1, iterations = 50, burnin = 20
 )
 expected_aggregate_prop <-
   sum(vapply(truncated_block_values, sum, numeric(1))) /
@@ -350,7 +359,7 @@ unnamed_block_fit <- blm_ss_eigen(
   n, unnamed_eigenvector_blocks, eigenvalue_blocks, 1,
   stats::setNames(block_Xty, block_predictor_names),
   ETA = list(model = "Normal"), residual_var = 1,
-  iterations = 20, burnin = 10, seed = 609
+  iterations = 20, burnin = 10
 )
 stopifnot(identical(
   names(unnamed_block_fit$ETA[[1L]]$coefficient_mean),

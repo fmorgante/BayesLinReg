@@ -15,13 +15,15 @@ fixed_eta <- list(
 )
 
 # R and Rcpp implement the same flat-prior coefficient update.
+set.seed(702)
 fixed_r <- blm(
   y, fixed_eta, residual_var = 0.49,
-  iterations = 300, burnin = 100, seed = 702, version = "R"
+  iterations = 300, burnin = 100, version = "R"
 )
+set.seed(702)
 fixed_rcpp <- blm(
   y, fixed_eta, residual_var = 0.49,
-  iterations = 300, burnin = 100, seed = 702, version = "Rcpp",
+  iterations = 300, burnin = 100, version = "Rcpp",
   compute_pve = TRUE
 )
 stopifnot(
@@ -51,7 +53,7 @@ stopifnot(
 fixed_learned <- blm(
   y, list(X = X[, 1:2], model = "Fixed"),
   residual_shape = 3, residual_scale = 1,
-  iterations = 250, burnin = 100, seed = 703,
+  iterations = 250, burnin = 100,
   store_samples = FALSE
 )
 stopifnot(
@@ -71,7 +73,7 @@ fixed_pve <- blm(
     )
   ),
   residual_shape = 3, residual_scale = 1,
-  iterations = 80, burnin = 30, seed = 704
+  iterations = 80, burnin = 30
 )
 stopifnot(
   identical(
@@ -88,25 +90,28 @@ ss_eta <- list(
   covariates = list(indices = 1:2, model = "Fixed"),
   markers = list(indices = 3:4, model = "Normal", var_scale = 2)
 )
+set.seed(702)
 fixed_ss <- blm_ss(
   n, XtX, Xty, ss_eta, yty = yty,
   X_means = colMeans(X), y_mean = mean(y), residual_var = 0.49,
-  iterations = 300, burnin = 100, seed = 702
+  iterations = 300, burnin = 100
 )
+set.seed(702)
 fixed_sparse <- blm_ss(
   n, Matrix::Matrix(XtX, sparse = TRUE), Xty, ss_eta, yty = yty,
   X_means = colMeans(X), y_mean = mean(y), residual_var = 0.49,
-  iterations = 300, burnin = 100, seed = 702
+  iterations = 300, burnin = 100
 )
 centered_X <- sweep(X, 2, colMeans(X), FUN = "-")
 decomposition <- eigen(crossprod(centered_X), symmetric = TRUE)
 keep <- decomposition$values > 1e-10
+set.seed(702)
 fixed_eigen <- blm_ss_eigen(
   n,
   decomposition$vectors[, keep, drop = FALSE],
   decomposition$values[keep], 1, Xty, ss_eta, yty = yty,
   X_means = colMeans(X), y_mean = mean(y), residual_var = 0.49,
-  iterations = 300, burnin = 100, seed = 702
+  iterations = 300, burnin = 100
 )
 expected <- fixed_rcpp$ETA$covariates$coefficient_mean
 stopifnot(

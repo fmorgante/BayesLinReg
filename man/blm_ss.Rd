@@ -19,7 +19,6 @@ blm_ss(
   iterations = 4000L,
   burnin = 1000L,
   thin = 1L,
-  seed = NULL,
   version = c("Rcpp", "R"),
   verbose = FALSE,
   nchains = 1L,
@@ -93,8 +92,6 @@ supplied explicitly.}
 \item{burnin}{Number of initial iterations to discard.}
 
 \item{thin}{Interval between retained draws.}
-
-\item{seed}{\code{NULL} or an integer random-number seed.}
 
 \item{version}{Gibbs implementation: \code{"Rcpp"} or \code{"R"}.}
 
@@ -177,14 +174,15 @@ With list input and zero working predictor means, \code{nthreads > 1} updates
 separate Gram blocks concurrently through \code{RcppParallel}. Updates remain
 sequential within each Gram block. Shared prior hyperparameters and the
 residual variance are updated after the parallel coefficient sweep. A
-threaded run is reproducible for a fixed seed and thread count, but uses a
-different RNG stream from the serial sampler.
+threaded run is reproducible after \code{\link[=set.seed]{set.seed()}} and uses a different RNG
+stream from the serial sampler.
 Set \code{check_psd = TRUE} when the supplied statistics are not known to come
 from a valid common data matrix and response vector.
 }
 \examples{
 X <- cbind(x1 = 1:20, x2 = rep(c(0, 1), 10))
 y <- 1 + 2 * X[, "x1"] - X[, "x2"]
+set.seed(123)
 fit <- blm_ss(
   n = nrow(X),
   XtX = crossprod(X),
@@ -195,7 +193,6 @@ fit <- blm_ss(
   y_mean = mean(y),
   residual_var = 1,
   iterations = 100,
-  burnin = 50,
-  seed = 123
+  burnin = 50
 )
 }

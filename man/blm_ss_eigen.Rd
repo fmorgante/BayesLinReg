@@ -21,7 +21,6 @@ blm_ss_eigen(
   iterations = 4000L,
   burnin = 1000L,
   thin = 1L,
-  seed = NULL,
   verbose = FALSE,
   nchains = 1L,
   nthreads = 1L,
@@ -80,8 +79,6 @@ its value from the response variance not assigned to the blocks.}
 \item{burnin}{Number of initial iterations to discard.}
 
 \item{thin}{Interval between retained draws.}
-
-\item{seed}{\code{NULL} or an integer random-number seed.}
 
 \item{verbose}{If \code{TRUE}, display aggregate progress at 10-percent intervals
 per chain using \code{\link[progressr:with_progress]{progressr::with_progress()}}.}
@@ -168,6 +165,7 @@ y <- 1 + 2 * X[, "x1"] - X[, "x2"]
 X_centered <- sweep(X, 2, colMeans(X), FUN = "-")
 decomposition <- eigen(crossprod(X_centered), symmetric = TRUE)
 keep <- decomposition$values > 1e-10
+set.seed(123)
 fit <- blm_ss_eigen(
   n = nrow(X),
   XtX_eigenvectors = decomposition$vectors[, keep, drop = FALSE],
@@ -180,7 +178,6 @@ fit <- blm_ss_eigen(
   y_mean = mean(y),
   residual_var = 1,
   iterations = 100,
-  burnin = 50,
-  seed = 123
+  burnin = 50
 )
 }

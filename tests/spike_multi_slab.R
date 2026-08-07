@@ -16,14 +16,16 @@ custom_eta <- list(
 )
 
 for (sampler_version in c("Rcpp", "R")) {
+  set.seed(702)
   stored_fit <- blm(
     y, ETA = custom_eta, residual_var = 1,
-    iterations = 500, burnin = 200, seed = 702,
+    iterations = 500, burnin = 200,
     version = sampler_version
   )
+  set.seed(702)
   summary_fit <- blm(
     y, ETA = custom_eta, residual_var = 1,
-    iterations = 500, burnin = 200, seed = 702,
+    iterations = 500, burnin = 200,
     version = sampler_version, store_samples = FALSE
   )
   block <- stored_fit$ETA$ETA1
@@ -58,11 +60,12 @@ for (sampler_version in c("Rcpp", "R")) {
     isTRUE(all.equal(block$var_var, summary_fit$ETA$ETA1$var_var))
   )
 
+  set.seed(702)
   ss_fit <- blm_ss(
     n, crossprod(X), crossprod(X, y),
     ETA = custom_eta[names(custom_eta) != "X"],
     X_means = colMeans(X), y_mean = mean(y), residual_var = 1,
-    iterations = 500, burnin = 200, seed = 702,
+    iterations = 500, burnin = 200,
     version = sampler_version
   )
   stopifnot(isTRUE(all.equal(stored_fit, ss_fit, tolerance = 1e-8)))
@@ -80,14 +83,16 @@ for (sampler_version in c("Rcpp", "R")) {
   single_eta <- list(
     X = X[, "x1", drop = FALSE], model = "SpikeMultiSlab"
   )
+  set.seed(707)
   single_stored <- blm(
     y, ETA = single_eta, residual_var = 1,
-    iterations = 80, burnin = 30, seed = 707,
+    iterations = 80, burnin = 30,
     version = sampler_version
   )
+  set.seed(707)
   single_online <- blm(
     y, ETA = single_eta, residual_var = 1,
-    iterations = 80, burnin = 30, seed = 707,
+    iterations = 80, burnin = 30,
     version = sampler_version, store_samples = FALSE
   )
   stopifnot(
@@ -116,7 +121,7 @@ mixed_fit <- blm(
       gamma = c(0, 0.01, 0.1, 1, 10)
     )
   ),
-  residual_var = 1, iterations = 100, burnin = 40, seed = 703
+  residual_var = 1, iterations = 100, burnin = 40
 )
 stopifnot(
   identical(dim(mixed_fit$ETA$three$pi_samples), c(60L, 3L)),
@@ -131,13 +136,15 @@ all_prior_eta <- list(
   shrinkage = list(X = X[, 3, drop = FALSE], model = "GlobalLocal"),
   mixture = list(X = X[, 4:6, drop = FALSE], model = "SpikeMultiSlab")
 )
+set.seed(705)
 all_prior_stored <- blm(
   y, ETA = all_prior_eta, residual_var = 1,
-  iterations = 100, burnin = 40, seed = 705
+  iterations = 100, burnin = 40
 )
+set.seed(705)
 all_prior_online <- blm(
   y, ETA = all_prior_eta, residual_var = 1,
-  iterations = 100, burnin = 40, seed = 705,
+  iterations = 100, burnin = 40,
   store_samples = FALSE
 )
 stopifnot(
@@ -180,7 +187,7 @@ compact_arguments <- list(
   iterations = 30,
   burnin = 20,
   thin = 1,
-  seed = 706,
+
   block_id = c(1L, 2L, 3L, 4L, 4L, 4L),
   block_model = 0:3,
   normal_shape = rep(2, 4),
@@ -208,10 +215,12 @@ for (sampler in list(
   BayesLinReg:::.blm_gibbs_rcpp,
   BayesLinReg:::.blm_gibbs
 )) {
+  set.seed(706)
   compact_stored <- do.call(
     sampler,
     c(compact_arguments, list(store_samples = TRUE))
   )
+  set.seed(706)
   compact_online <- do.call(
     sampler,
     c(compact_arguments, list(store_samples = FALSE))
@@ -233,7 +242,7 @@ renamed_fit <- blm(
   ETA = list(
     X = X, model = "SpikeSlab", var_shape = 3, var_scale = 4
   ),
-  residual_var = 1, iterations = 60, burnin = 20, seed = 704
+  residual_var = 1, iterations = 60, burnin = 20
 )
 stopifnot(
   identical(renamed_fit$ETA$ETA1$var_shape, 3),

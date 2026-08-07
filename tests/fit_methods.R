@@ -3,9 +3,10 @@ library(BayesLinReg)
 X <- cbind(first = 1:20, second = rep(c(0, 1), 10))
 y <- 1 + 2 * X[, "first"] - X[, "second"]
 
+set.seed(601)
 single_fit <- blm(
   y, ETA = list(X = X, model = "Normal"), residual_var = 1,
-  iterations = 100, burnin = 40, seed = 601, compute_pve = TRUE
+  iterations = 100, burnin = 40, compute_pve = TRUE
 )
 single_coef <- coef(single_fit)
 stopifnot(
@@ -86,9 +87,10 @@ stopifnot(
   nrow(all_summary$coefficients) == 2L
 )
 
+set.seed(604)
 spike_fit <- blm(
   y, ETA = list(X = X, model = "SpikeSlab"), residual_var = 1,
-  iterations = 80, burnin = 30, seed = 604
+  iterations = 80, burnin = 30
 )
 spike_summary <- summary(
   spike_fit, coefficients = "top", max_coefficients = 1,
@@ -105,9 +107,10 @@ stopifnot(
   ))
 )
 
+set.seed(603)
 summary_fit <- blm(
   y, ETA = list(X = X, model = "Normal"), residual_var = 1,
-  iterations = 60, burnin = 20, seed = 603, store_samples = FALSE,
+  iterations = 60, burnin = 20, store_samples = FALSE,
   store_coefficient_cov = FALSE
 )
 stopifnot(
@@ -123,13 +126,14 @@ stopifnot(
   )
 )
 
+set.seed(602)
 multi_fit <- blm(
   y,
   ETA = list(
     first_block = list(X = X[, "first", drop = FALSE], model = "Normal"),
     second_block = list(X = X[, "second", drop = FALSE], model = "Normal")
   ),
-  residual_var = 1, iterations = 100, burnin = 40, seed = 602
+  residual_var = 1, iterations = 100, burnin = 40
 )
 stopifnot(
   identical(

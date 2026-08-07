@@ -37,14 +37,14 @@ excluded.
 \examples{
 X <- cbind(x1 = 1:20, x2 = rep(c(0, 1), 10))
 y <- 1 + 2 * X[, "x1"] - X[, "x2"]
+set.seed(123)
 fit <- blm(
   y,
   ETA = list(X = X, model = "Normal", var_shape = 2, var_scale = 10),
   residual_shape = 2,
   residual_scale = 1,
   iterations = 100,
-  burnin = 50,
-  seed = 123
+  burnin = 50
 )
 diagnostics <- assess_convergence(fit, plot = FALSE)
 }

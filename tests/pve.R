@@ -13,22 +13,25 @@ eta <- list(
 # PVE is evaluated at retained draws and agrees with direct fitted-value
 # calculations and online summaries in both sampling implementations.
 for (sampler_version in c("Rcpp", "R")) {
+  set.seed(802)
   baseline <- blm(
     y, eta, residual_shape = 2, residual_scale = 1,
     iterations = 90, burnin = 30, thin = 2,
-    seed = 802, version = sampler_version
+    version = sampler_version
   )
   for (pve_type in c("standalone", "allocated")) {
+    set.seed(802)
     stored <- blm(
       y, eta, residual_shape = 2, residual_scale = 1,
       iterations = 90, burnin = 30, thin = 2,
-      seed = 802, version = sampler_version, compute_pve = TRUE,
+      version = sampler_version, compute_pve = TRUE,
       pve_type = pve_type
     )
+    set.seed(802)
     online <- blm(
       y, eta, residual_shape = 2, residual_scale = 1,
       iterations = 90, burnin = 30, thin = 2,
-      seed = 802, version = sampler_version, compute_pve = TRUE,
+      version = sampler_version, compute_pve = TRUE,
       pve_type = pve_type, store_samples = FALSE
     )
     stopifnot(
@@ -112,9 +115,11 @@ ss_eta <- list(
 ss_arguments <- list(
   n = n, Xty = Xty, ETA = ss_eta, yty = yty,
   X_means = colMeans(X), y_mean = mean(y), residual_var = 1,
-  iterations = 70, burnin = 30, seed = 803, compute_pve = TRUE
+  iterations = 70, burnin = 30, compute_pve = TRUE
 )
+set.seed(803)
 dense <- do.call(blm_ss, c(list(XtX = XtX), ss_arguments))
+set.seed(803)
 sparse <- do.call(
   blm_ss,
   c(list(XtX = Matrix::Matrix(XtX, sparse = TRUE)), ss_arguments)
@@ -123,11 +128,12 @@ centered_X <- sweep(X, 2L, colMeans(X), FUN = "-")
 decomposition <- eigen(crossprod(centered_X), symmetric = TRUE)
 keep <- decomposition$values >
   sqrt(.Machine$double.eps) * max(decomposition$values)
+set.seed(803)
 eigen_fit <- blm_ss_eigen(
   n, decomposition$vectors[, keep, drop = FALSE],
   decomposition$values[keep], 1, Xty, ETA = ss_eta, yty = yty,
   X_means = colMeans(X), y_mean = mean(y), residual_var = 1,
-  iterations = 70, burnin = 30, seed = 803, compute_pve = TRUE
+  iterations = 70, burnin = 30, compute_pve = TRUE
 )
 stopifnot(
   isTRUE(all.equal(dense, sparse, tolerance = 1e-8)),

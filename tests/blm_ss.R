@@ -14,6 +14,7 @@ for (sampler_version in c("Rcpp", "R")) {
   for (model in c(
     "Normal", "SpikeSlab", "GlobalLocal", "SpikeMultiSlab"
   )) {
+    set.seed(502)
     raw_fit <- blm(
       y,
       ETA = list(X = X, model = model),
@@ -21,9 +22,10 @@ for (sampler_version in c("Rcpp", "R")) {
       residual_scale = 1,
       iterations = 300,
       burnin = 100,
-      seed = 502,
+
       version = sampler_version
     )
+    set.seed(502)
     ss_fit <- blm_ss(
       n = n,
       XtX = XtX,
@@ -36,7 +38,7 @@ for (sampler_version in c("Rcpp", "R")) {
       residual_scale = 1,
       iterations = 300,
       burnin = 100,
-      seed = 502,
+
       version = sampler_version
     )
     stopifnot(
@@ -56,14 +58,16 @@ ss_eta <- list(
   selection = list(indices = 2, model = "SpikeSlab"),
   shrinkage = list(indices = c(4, 5), model = "GlobalLocal")
 )
+set.seed(503)
 raw_multi <- blm(
   y, ETA = raw_eta, residual_var = 1,
-  iterations = 250, burnin = 100, seed = 503, version = "Rcpp"
+  iterations = 250, burnin = 100, version = "Rcpp"
 )
+set.seed(503)
 ss_multi <- blm_ss(
   n, XtX, Xty, ETA = ss_eta, yty = yty,
   X_means = colMeans(X), y_mean = mean(y), residual_var = 1,
-  iterations = 250, burnin = 100, seed = 503, version = "Rcpp"
+  iterations = 250, burnin = 100, version = "Rcpp"
 )
 stopifnot(isTRUE(all.equal(raw_multi, ss_multi, tolerance = 1e-8)))
 
@@ -92,12 +96,14 @@ block_arguments <- list(
   n = 20L, Xty = block_Xty, ETA = crossing_eta, yty = 20,
   X_means = block_means, y_mean = 0.02,
   residual_shape = 2, residual_scale = 1,
-  iterations = 120, burnin = 40, seed = 512,
+  iterations = 120, burnin = 40,
   compute_pve = TRUE, check_psd = TRUE
 )
+set.seed(512)
 single_gram_fit <- do.call(
   blm_ss, c(list(XtX = block_gram), block_arguments)
 )
+set.seed(512)
 list_gram_fit <- do.call(
   blm_ss,
   c(list(XtX = list(region_a = gram_a, region_b = gram_b)), block_arguments)
@@ -142,14 +148,17 @@ symmetric_arguments <- list(
   n = 30L, XtX = symmetric_sparse, Xty = symmetric_Xty,
   ETA = list(model = "SpikeSlab"), residual_var = 1,
   X_means = stats::setNames(numeric(8L), names(symmetric_Xty)), y_mean = 0,
-  iterations = 100, burnin = 40, seed = 514, compute_pve = TRUE
+  iterations = 100, burnin = 40, compute_pve = TRUE
 )
+set.seed(514)
 memory_fit <- do.call(
   blm_ss, c(symmetric_arguments, list(XtX_storage = "memory"))
 )
+set.seed(514)
 speed_fit <- do.call(
   blm_ss, c(symmetric_arguments, list(XtX_storage = "speed"))
 )
+set.seed(514)
 auto_fit <- do.call(
   blm_ss,
   c(symmetric_arguments, list(XtX_storage = "auto", XtX_memory_limit = 418))
@@ -179,21 +188,25 @@ threaded_eta <- list(
 )
 threaded_arguments <- utils::modifyList(symmetric_arguments, list(
   residual_var = NULL, residual_shape = 2,
-  residual_scale = 1, yty = 30, iterations = 120, burnin = 40, seed = 515
+  residual_scale = 1, yty = 30, iterations = 120, burnin = 40
 ))
 threaded_arguments$ETA <- threaded_eta
+set.seed(515)
 threaded_memory <- do.call(
   blm_ss,
   c(threaded_arguments, list(XtX_storage = "memory", nthreads = 2))
 )
+set.seed(515)
 threaded_repeat <- do.call(
   blm_ss,
   c(threaded_arguments, list(XtX_storage = "memory", nthreads = 2))
 )
+set.seed(515)
 threaded_three <- do.call(
   blm_ss,
   c(threaded_arguments, list(XtX_storage = "memory", nthreads = 3))
 )
+set.seed(515)
 threaded_speed <- do.call(
   blm_ss,
   c(threaded_arguments, list(XtX_storage = "speed", nthreads = 2))
@@ -267,14 +280,16 @@ calibration_eta_ss <- list(
   reference_residual_var = 0.64
 )
 calibration_scale <- 1.5 / (ncol(X) - 1.5) * 0.8 / sqrt(n)
+set.seed(503)
 calibrated_raw <- blm(
   y, ETA = calibration_eta_raw, residual_var = 1,
-  iterations = 80, burnin = 30, seed = 503
+  iterations = 80, burnin = 30
 )
+set.seed(503)
 calibrated_ss <- blm_ss(
   n, XtX, Xty, ETA = calibration_eta_ss, yty = yty,
   X_means = colMeans(X), y_mean = mean(y), residual_var = 1,
-  iterations = 80, burnin = 30, seed = 503
+  iterations = 80, burnin = 30
 )
 stopifnot(
   identical(calibrated_raw$ETA$ETA1$global_scale, calibration_scale),
@@ -295,14 +310,16 @@ for (model in c(
     raw_specification$expected_nonzero <- 1
     ss_specification$expected_nonzero <- 1
   }
+  set.seed(504)
   pve_raw <- blm(
     y, ETA = raw_specification, residual_shape = 3,
-    iterations = 80, burnin = 30, seed = 504
+    iterations = 80, burnin = 30
   )
+  set.seed(504)
   pve_ss <- blm_ss(
     n, XtX, Xty, ETA = ss_specification, yty = yty,
     X_means = colMeans(X), y_mean = mean(y), residual_shape = 3,
-    iterations = 80, burnin = 30, seed = 504
+    iterations = 80, burnin = 30
   )
   expected_residual_var <- 0.75 * stats::var(y)
   stopifnot(
@@ -355,17 +372,20 @@ sparse_args <- list(
   residual_scale = 1,
   iterations = 180,
   burnin = 60,
-  seed = 512,
+
   version = "Rcpp"
 )
+set.seed(512)
 sparse_dense_fit <- do.call(
   blm_ss,
   c(list(XtX = as.matrix(sparse_XtX)), sparse_args)
 )
+set.seed(512)
 sparse_symmetric_fit <- do.call(
   blm_ss,
   c(list(XtX = sparse_XtX), sparse_args)
 )
+set.seed(512)
 sparse_general_fit <- do.call(
   blm_ss,
   c(list(XtX = methods::as(sparse_XtX, "generalMatrix")), sparse_args)
@@ -388,14 +408,15 @@ for (sparse_model in c(
     residual_shape = NULL,
     residual_scale = NULL,
     iterations = 120,
-    burnin = 40,
-    seed = 513
+    burnin = 40
   ))
   model_args$ETA <- list(model = sparse_model)
+  set.seed(513)
   dense_model_fit <- do.call(
     blm_ss,
     c(list(XtX = as.matrix(sparse_XtX)), model_args)
   )
+  set.seed(513)
   sparse_model_fit <- do.call(
     blm_ss,
     c(list(XtX = sparse_XtX), model_args)
@@ -450,14 +471,16 @@ stopifnot(
 
 # yty is unnecessary when the residual variance is fixed, including when
 # means are used to fit an intercept.
+set.seed(507)
 raw_fixed <- blm(
   y, ETA = list(X = X, model = "SpikeSlab"), residual_var = 1,
-  iterations = 200, burnin = 80, seed = 507, version = "Rcpp"
+  iterations = 200, burnin = 80, version = "Rcpp"
 )
+set.seed(507)
 ss_fixed <- blm_ss(
   n, XtX, Xty, ETA = list(model = "SpikeSlab"),
   X_means = colMeans(X), y_mean = mean(y), residual_var = 1,
-  iterations = 200, burnin = 80, seed = 507, version = "Rcpp"
+  iterations = 200, burnin = 80, version = "Rcpp"
 )
 stopifnot(isTRUE(all.equal(raw_fixed, ss_fixed, tolerance = 1e-8)))
 
@@ -469,7 +492,7 @@ fixed_spike <- suppressWarnings(blm_ss(
   residual_var = 1,
   iterations = 150,
   burnin = 50,
-  seed = 504,
+
   store_samples = FALSE,
   store_coefficient_cov = FALSE
 ))
@@ -486,7 +509,7 @@ warnings <- character()
 no_intercept_fit <- withCallingHandlers(
   blm_ss(
     n, XtX, Xty, ETA = list(model = "Normal"), residual_var = 1,
-    iterations = 100, burnin = 40, seed = 505
+    iterations = 100, burnin = 40
   ),
   warning = function(condition) {
     warnings <<- c(warnings, conditionMessage(condition))
@@ -504,15 +527,17 @@ stopifnot(
 )
 
 # yty permits learning the residual variance in a no-intercept model.
+set.seed(508)
 no_intercept_r <- suppressWarnings(blm_ss(
   n, XtX, Xty, ETA = list(model = "Normal"), yty = yty,
   residual_shape = 2, residual_scale = 1,
-  iterations = 150, burnin = 50, seed = 508, version = "R"
+  iterations = 150, burnin = 50, version = "R"
 ))
+set.seed(508)
 no_intercept_rcpp <- suppressWarnings(blm_ss(
   n, XtX, Xty, ETA = list(model = "Normal"), yty = yty,
   residual_shape = 2, residual_scale = 1,
-  iterations = 150, burnin = 50, seed = 508, version = "Rcpp"
+  iterations = 150, burnin = 50, version = "Rcpp"
 ))
 stopifnot(
   is.null(no_intercept_r$intercept_mean),
@@ -534,12 +559,13 @@ rank_X <- cbind(
 )
 rank_y <- drop(2 + rank_X %*% c(0.5, -0.25, 0.1) + rnorm(40, sd = 0.2))
 rank_fits <- lapply(c("R", "Rcpp"), function(sampler_version) {
+  set.seed(509)
   blm_ss(
     nrow(rank_X), crossprod(rank_X), crossprod(rank_X, rank_y),
     ETA = list(model = "Normal"), yty = sum(rank_y^2),
     X_means = colMeans(rank_X), y_mean = mean(rank_y),
     residual_shape = 2, residual_scale = 1,
-    iterations = 150, burnin = 50, seed = 509,
+    iterations = 150, burnin = 50,
     version = sampler_version
   )
 })
@@ -559,7 +585,7 @@ invisible(withCallingHandlers(
   blm_ss(
     n, XtX, Xty,
     ETA = list(model = "Normal", standardize = FALSE),
-    residual_var = 1, iterations = 50, burnin = 20, seed = 506
+    residual_var = 1, iterations = 50, burnin = 20
   ),
   warning = function(condition) {
     warnings <<- c(warnings, conditionMessage(condition))
@@ -575,7 +601,7 @@ stopifnot(
 unchecked_fit <- blm_ss(
   n, XtX, Xty, yty = 0, ETA = list(model = "Normal"),
   X_means = colMeans(X), y_mean = mean(y), residual_var = 1,
-  iterations = 50, burnin = 20, seed = 510
+  iterations = 50, burnin = 20
 )
 stopifnot(inherits(unchecked_fit, "blm_fit"))
 

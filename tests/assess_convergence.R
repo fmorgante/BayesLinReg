@@ -22,6 +22,7 @@ diagnostic_eta <- list(
   )
 )
 
+set.seed(101)
 fit_one <- blm(
   y,
   ETA = diagnostic_eta,
@@ -29,9 +30,10 @@ fit_one <- blm(
   residual_scale = 1,
   iterations = 100,
   burnin = 40,
-  seed = 101,
+
   version = "R"
 )
+set.seed(102)
 fit_two <- blm(
   y,
   ETA = diagnostic_eta,
@@ -39,7 +41,7 @@ fit_two <- blm(
   residual_scale = 1,
   iterations = 100,
   burnin = 40,
-  seed = 102,
+
   version = "R"
 )
 
@@ -126,21 +128,22 @@ stopifnot(
   all(is.na(single_chain_diagnostics$rhat))
 )
 
+set.seed(103)
 known_fit <- blm(
   y,
   ETA = list(X = X, model = "Normal", var_shape = 2, var_scale = 10),
   residual_var = 1,
   iterations = 100,
-  burnin = 40,
-  seed = 103
+  burnin = 40
 )
+set.seed(104)
 summary_only_fit <- blm(
   y,
   ETA = list(X = X, model = "Normal"),
   residual_var = 1,
   iterations = 100,
   burnin = 40,
-  seed = 104,
+
   store_samples = FALSE
 )
 stopifnot(

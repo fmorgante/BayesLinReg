@@ -84,6 +84,7 @@
 #' X_centered <- sweep(X, 2, colMeans(X), FUN = "-")
 #' decomposition <- eigen(crossprod(X_centered), symmetric = TRUE)
 #' keep <- decomposition$values > 1e-10
+#' set.seed(123)
 #' fit <- blm_ss_eigen(
 #'   n = nrow(X),
 #'   XtX_eigenvectors = decomposition$vectors[, keep, drop = FALSE],
@@ -96,15 +97,14 @@
 #'   y_mean = mean(y),
 #'   residual_var = 1,
 #'   iterations = 100,
-#'   burnin = 50,
-#'   seed = 123
+#'   burnin = 50
 #' )
 blm_ss_eigen <- function(
     n, XtX_eigenvectors, XtX_eigenvalues, XtX_prop_var, Xty, ETA,
     yty = NULL, X_means = NULL, y_mean = NULL, residual_var = NULL,
     residual_shape = NULL, residual_scale = NULL,
     reference_response_var = NULL,
-    iterations = 4000L, burnin = 1000L, thin = 1L, seed = NULL,
+    iterations = 4000L, burnin = 1000L, thin = 1L,
     verbose = FALSE, nchains = 1L, nthreads = 1L, store_samples = TRUE,
     store_coefficient_cov = TRUE, check_eigenvectors = FALSE,
     compute_pve = FALSE,
@@ -455,7 +455,7 @@ blm_ss_eigen <- function(
   }
   run_chains <- function(progressor = NULL) {
     .run_blm_chains(
-      sampler_arguments, "Rcpp", nchains, seed, block_model, progressor
+      sampler_arguments, "Rcpp", nchains, block_model, progressor
     )
   }
   samples <- if (verbose) {
