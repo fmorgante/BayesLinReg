@@ -32,7 +32,8 @@ Supply signed correlations, not squared correlations.}
 \item{n}{Number of observations used to calculate the GWAS statistics.}
 
 \item{response_var}{Optional positive sample variance of the response. It is
-required for \code{scale = "original"}.}
+required for \code{scale = "original"} and must be \code{NULL} for
+\code{scale = "standardized"}.}
 
 \item{scale}{Scale on which to construct the sufficient statistics.
 \code{"auto"} uses the original coefficient scale when \code{response_var} is

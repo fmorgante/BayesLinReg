@@ -545,6 +545,12 @@ class EigenBlockSummaryMatrix {
         Rcpp::stop("Eigen-block predictor indices must cover every predictor.");
       }
     }
+    pve_fitted_.reserve(blocks_.size());
+    for (const Block& block : blocks_) {
+      pve_fitted_.emplace_back(block.rows, 0.0);
+    }
+    pve_touched_.assign(blocks_.size(), 0);
+    pve_touched_blocks_.reserve(blocks_.size());
   }
 
   int cols() const { return p_; }
@@ -626,23 +632,38 @@ class EigenBlockSummaryMatrix {
       const std::vector<int>& predictors,
       const Rcpp::IntegerVector&,
       const int) const {
-    std::vector< std::vector<double> > fitted(blocks_.size());
-    for (std::size_t block = 0; block < blocks_.size(); ++block) {
-      fitted[block].assign(blocks_[block].rows, 0.0);
-    }
+    pve_touched_blocks_.clear();
     for (const int j : predictors) {
       const int block_index = global_block_[j];
       const Block& block = blocks_[block_index];
       const int local = global_local_[j];
+      if (pve_touched_[block_index] == 0) {
+        std::fill(
+          pve_fitted_[block_index].begin(),
+          pve_fitted_[block_index].end(),
+          0.0
+        );
+        pve_touched_[block_index] = 1;
+        pve_touched_blocks_.push_back(block_index);
+      }
       const double* column = block.design +
         static_cast<std::size_t>(block.rows) * local;
-      for (int row = 0; row < block.rows; ++row) {
-        fitted[block_index][row] += column[row] * coefficient[j];
-      }
+      Eigen::Map<Eigen::VectorXd> fitted(
+        pve_fitted_[block_index].data(), block.rows
+      );
+      const Eigen::Map<const Eigen::VectorXd> design_column(
+        column, block.rows
+      );
+      fitted.noalias() += coefficient[j] * design_column;
     }
     double result = 0.0;
-    for (const std::vector<double>& values : fitted) {
-      for (const double value : values) result += value * value;
+    for (const int block_index : pve_touched_blocks_) {
+      const std::vector<double>& values = pve_fitted_[block_index];
+      const Eigen::Map<const Eigen::VectorXd> fitted(
+        values.data(), values.size()
+      );
+      result += fitted.squaredNorm();
+      pve_touched_[block_index] = 0;
     }
     return result;
   }
@@ -663,6 +684,9 @@ class EigenBlockSummaryMatrix {
   std::vector<int> global_local_;
   std::vector<double> diagonal_;
   int nthreads_;
+  mutable std::vector< std::vector<double> > pve_fitted_;
+  mutable std::vector<unsigned char> pve_touched_;
+  mutable std::vector<int> pve_touched_blocks_;
 };
 
 class BlockMultiplyWorker : public RcppParallel::Worker {

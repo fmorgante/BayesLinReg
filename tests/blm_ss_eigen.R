@@ -274,28 +274,47 @@ stopifnot(
   identical(block_diagnostics$nthreads, 1L)
 )
 
-# Threaded block-eigen sweeps are reproducible and accept nonzero means because
-# the supplied eigenpairs already represent centered XtX.
+# Threaded block-eigen sweeps cover every prior, learned residual variance,
+# PVE, and online summaries. They are reproducible across runs and thread
+# counts and accept nonzero means because the eigenpairs represent centered
+# XtX.
+threaded_eta <- list(
+  normal = list(indices = c("b1", "b5"), model = "Normal"),
+  selection = list(indices = c("b2", "b6"), model = "SpikeSlab"),
+  shrinkage = list(indices = c("b3", "b7"), model = "GlobalLocal"),
+  multi = list(indices = c("b4", "b8", "b9"), model = "SpikeMultiSlab")
+)
 threaded_arguments <- c(
   list(
     XtX_eigenvectors = eigenvector_blocks,
     XtX_eigenvalues = eigenvalue_blocks,
     XtX_prop_var = 1,
-    nthreads = 2L,
-    residual_var = 1,
-    compute_pve = FALSE
+    nthreads = 2L
   ),
-  block_fit_arguments[setdiff(
-    names(block_fit_arguments),
-    c("residual_shape", "residual_scale", "compute_pve")
-  )]
+  block_fit_arguments
 )
+threaded_arguments$ETA <- threaded_eta
+threaded_arguments$store_samples <- FALSE
 threaded_eigen_fit <- do.call(blm_ss_eigen, threaded_arguments)
 threaded_eigen_repeat <- do.call(blm_ss_eigen, threaded_arguments)
+threaded_arguments$nthreads <- 3L
+threaded_eigen_three <- do.call(blm_ss_eigen, threaded_arguments)
 stopifnot(
   identical(threaded_eigen_fit, threaded_eigen_repeat),
   identical(threaded_eigen_fit$nthreads, 2L),
-  all(is.finite(threaded_eigen_fit$ETA$crossing$coefficient_mean))
+  identical(threaded_eigen_three$nthreads, 3L),
+  identical(threaded_eigen_fit$ETA, threaded_eigen_three$ETA),
+  identical(
+    threaded_eigen_fit$residual_var_mean,
+    threaded_eigen_three$residual_var_mean
+  ),
+  identical(threaded_eigen_fit$total_pve_mean,
+            threaded_eigen_three$total_pve_mean),
+  identical(threaded_eigen_fit$cross_block_pve_mean,
+            threaded_eigen_three$cross_block_pve_mean),
+  is.null(threaded_eigen_fit$residual_var_samples),
+  threaded_eigen_fit$residual_var_mean > 0,
+  is.finite(threaded_eigen_fit$total_pve_mean)
 )
 
 # Per-block truncation metadata includes a trace-weighted aggregate fraction.

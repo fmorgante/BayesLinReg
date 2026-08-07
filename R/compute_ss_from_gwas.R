@@ -16,7 +16,8 @@
 #'   Supply signed correlations, not squared correlations.
 #' @param n Number of observations used to calculate the GWAS statistics.
 #' @param response_var Optional positive sample variance of the response. It is
-#'   required for `scale = "original"`.
+#'   required for `scale = "original"` and must be `NULL` for
+#'   `scale = "standardized"`.
 #' @param scale Scale on which to construct the sufficient statistics.
 #'   `"auto"` uses the original coefficient scale when `response_var` is
 #'   supplied and otherwise standardizes both predictors and response.
