@@ -159,6 +159,17 @@ invalid_calls <- list(
     check_eigenvectors = TRUE
   ),
   function() blm_ss_eigen(
+    n, eigenvectors, eigenvalues, 1,
+    stats::setNames(as.numeric(Xty), rev(rownames(eigenvectors))),
+    ETA = list(model = "Normal"), residual_var = 1
+  ),
+  function() blm_ss_eigen(
+    n, eigenvectors, eigenvalues, 1, Xty,
+    ETA = list(model = "Normal"),
+    X_means = stats::setNames(X_means, rev(rownames(eigenvectors))),
+    y_mean = y_mean, residual_var = 1
+  ),
+  function() blm_ss_eigen(
     n, eigenvectors, eigenvalues, 1, Xty + seq_along(Xty),
     ETA = list(model = "Normal"), residual_var = 1
   ),
@@ -312,6 +323,26 @@ stopifnot(
   identical(truncated_block_fit$XtX_prop_var_by_block, block_prop)
 )
 
+unnamed_eigenvector_blocks <- lapply(eigenvector_blocks, function(value) {
+  rownames(value) <- NULL
+  value
+})
+unnamed_block_fit <- blm_ss_eigen(
+  n, unnamed_eigenvector_blocks, eigenvalue_blocks, 1,
+  stats::setNames(block_Xty, block_predictor_names),
+  ETA = list(model = "Normal"), residual_var = 1,
+  iterations = 20, burnin = 10, seed = 609
+)
+stopifnot(identical(
+  names(unnamed_block_fit$ETA[[1L]]$coefficient_mean),
+  block_predictor_names
+))
+
+partially_named_eigenvectors <- eigenvector_blocks
+rownames(partially_named_eigenvectors[[2L]]) <- NULL
+duplicated_eigenvector_names <- eigenvector_blocks
+rownames(duplicated_eigenvector_names[[2L]])[1L] <-
+  rownames(duplicated_eigenvector_names[[1L]])[1L]
 block_invalid_calls <- list(
   function() blm_ss_eigen(
     n, eigenvector_blocks, eigenvalues, 1, block_Xty, block_eta,
@@ -328,6 +359,19 @@ block_invalid_calls <- list(
   function() blm_ss_eigen(
     n, eigenvector_blocks, eigenvalue_blocks, 1, block_Xty, block_eta,
     residual_var = 1, nthreads = 2, nchains = 2
+  ),
+  function() blm_ss_eigen(
+    n, partially_named_eigenvectors, eigenvalue_blocks, 1, block_Xty,
+    block_eta, residual_var = 1
+  ),
+  function() blm_ss_eigen(
+    n, duplicated_eigenvector_names, eigenvalue_blocks, 1, block_Xty,
+    block_eta, residual_var = 1
+  ),
+  function() blm_ss_eigen(
+    n, eigenvector_blocks, eigenvalue_blocks, 1,
+    stats::setNames(block_Xty, rev(block_predictor_names)), block_eta,
+    residual_var = 1
   )
 )
 stopifnot(all(vapply(

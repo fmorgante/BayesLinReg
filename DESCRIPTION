@@ -1,6 +1,6 @@
 Package: BayesLinReg
 Title: Bayesian Linear Regression with Flexible Coefficient Priors
-Version: 11.16.0
+Version: 11.17.0
 Authors@R:
     person(
         "Fabio", "Morgante",
@@ -42,4 +42,5 @@ LinkingTo:
     Rcpp,
     RcppEigen,
     RcppParallel
+SystemRequirements: C++17
 Config/roxygen2/version: 8.0.0

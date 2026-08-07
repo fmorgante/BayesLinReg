@@ -605,14 +605,14 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
       any(predictor_names == "") || anyDuplicated(predictor_names)) {
     stop("Predictor names must be nonempty and unique.", call. = FALSE)
   }
-  if (list_input && !is.null(names(Xty)) &&
+  if (!is.null(names(Xty)) &&
       !identical(names(Xty), predictor_names)) {
-    stop("Names of `Xty` must match the concatenated `XtX` names.",
+    stop("Names of `Xty` must match the `XtX` predictor names and order.",
          call. = FALSE)
   }
-  if (list_input && !is.null(X_means) && !is.null(names(X_means)) &&
+  if (!is.null(X_means) && !is.null(names(X_means)) &&
       !identical(names(X_means), predictor_names)) {
-    stop("Names of `X_means` must match the concatenated `XtX` names.",
+    stop("Names of `X_means` must match the `XtX` predictor names and order.",
          call. = FALSE)
   }
   list(

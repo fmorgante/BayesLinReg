@@ -603,30 +603,60 @@ blm_ss_eigen <- function(
     if (!is.null(X_means) && length(X_means) != p) {
       stop("`X_means` must have one finite value per predictor.", call. = FALSE)
     }
+    supplied_block_names <- vapply(
+      eigenvectors, function(value) !is.null(rownames(value)), logical(1)
+    )
+    if (any(supplied_block_names) && !all(supplied_block_names)) {
+      stop(
+        paste0(
+          "List `XtX_eigenvectors` must name predictors in every matrix ",
+          "or in none of them."
+        ),
+        call. = FALSE
+      )
+    }
+    predictor_names <- if (all(supplied_block_names)) {
+      unlist(lapply(eigenvectors, rownames), use.names = FALSE)
+    } else {
+      names(Xty)
+    }
+    if (is.null(predictor_names)) predictor_names <- paste0("x", seq_len(p))
+    if (length(predictor_names) != p || anyNA(predictor_names) ||
+        any(predictor_names == "") || anyDuplicated(predictor_names)) {
+      stop("Predictor names must be nonempty and unique.", call. = FALSE)
+    }
+    if (!is.null(names(Xty)) &&
+        !identical(names(Xty), predictor_names)) {
+      stop(
+        paste0(
+          "Names of `Xty` must match the concatenated ",
+          "`XtX_eigenvectors` row names and order."
+        ),
+        call. = FALSE
+      )
+    }
+    if (!is.null(X_means) && !is.null(names(X_means)) &&
+        !identical(names(X_means), predictor_names)) {
+      stop(
+        paste0(
+          "Names of `X_means` must match the concatenated ",
+          "`XtX_eigenvectors` row names and order."
+        ),
+        call. = FALSE
+      )
+    }
     ends <- cumsum(block_sizes)
     starts <- ends - block_sizes + 1L
     eigen_indices <- Map(seq.int, starts, ends)
-    supplied_predictor_names <- !is.null(names(Xty)) ||
-      any(vapply(eigenvectors, function(value) !is.null(rownames(value)), logical(1)))
     validated <- lapply(seq_along(eigenvectors), function(block) {
       indices <- eigen_indices[[block]]
       .validate_eigen_sufficient_statistics(
         n, eigenvectors[[block]], eigenvalues[[block]], prop_var[[block]],
-        Xty[indices], yty,
+        stats::setNames(Xty[indices], predictor_names[indices]), yty,
         if (is.null(X_means)) NULL else X_means[indices], y_mean,
         check_eigenvectors
       )
     })
-    predictor_names <- unlist(lapply(validated, `[[`, "predictor_names"))
-    if (!is.null(names(Xty))) {
-      missing_predictor_name <- is.na(predictor_names) | predictor_names == ""
-      predictor_names[missing_predictor_name] <- names(Xty)[missing_predictor_name]
-    }
-    predictor_names <- if (supplied_predictor_names) {
-      make.unique(predictor_names)
-    } else {
-      paste0("x", seq_len(p))
-    }
     eigenvectors <- lapply(validated, `[[`, "eigenvectors")
     eigenvalues <- lapply(validated, `[[`, "eigenvalues")
     names(eigenvectors) <- names(eigenvalues) <- block_names
@@ -722,12 +752,30 @@ blm_ss_eigen <- function(
   }
   predictor_names <- rownames(eigenvectors)
   if (is.null(predictor_names)) predictor_names <- names(Xty)
-  if (is.null(predictor_names)) {
-    predictor_names <- paste0("x", seq_len(p))
-  } else {
-    missing_name <- is.na(predictor_names) | predictor_names == ""
-    predictor_names[missing_name] <- paste0("x", which(missing_name))
-    predictor_names <- make.unique(predictor_names)
+  if (is.null(predictor_names)) predictor_names <- paste0("x", seq_len(p))
+  if (length(predictor_names) != p || anyNA(predictor_names) ||
+      any(predictor_names == "") || anyDuplicated(predictor_names)) {
+    stop("Predictor names must be nonempty and unique.", call. = FALSE)
+  }
+  if (!is.null(names(Xty)) &&
+      !identical(names(Xty), predictor_names)) {
+    stop(
+      paste0(
+        "Names of `Xty` must match the `XtX_eigenvectors` row names ",
+        "and order."
+      ),
+      call. = FALSE
+    )
+  }
+  if (!is.null(X_means) && !is.null(names(X_means)) &&
+      !identical(names(X_means), predictor_names)) {
+    stop(
+      paste0(
+        "Names of `X_means` must match the `XtX_eigenvectors` row names ",
+        "and order."
+      ),
+      call. = FALSE
+    )
   }
   storage.mode(eigenvectors) <- "double"
   list(

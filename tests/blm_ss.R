@@ -597,6 +597,15 @@ invalid_calls <- list(
     n, XtX, Xty[-1], ETA = list(model = "Normal"), residual_var = 1
   ),
   function() blm_ss(
+    n, XtX, stats::setNames(as.numeric(Xty), rev(colnames(XtX))),
+    ETA = list(model = "Normal"), residual_var = 1
+  ),
+  function() blm_ss(
+    n, XtX, Xty, ETA = list(model = "Normal"),
+    X_means = stats::setNames(colMeans(X), rev(colnames(XtX))),
+    y_mean = mean(y), residual_var = 1
+  ),
+  function() blm_ss(
     n, XtX + upper.tri(XtX), Xty,
     ETA = list(model = "Normal"), residual_var = 1
   ),
