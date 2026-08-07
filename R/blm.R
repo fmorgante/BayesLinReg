@@ -251,21 +251,10 @@ blm <- function(y, ETA, residual_var = NULL,
       blocks, predictor_variance_sums, reference_response_var, length(y)
     )
   }
-  block_sizes <- vapply(blocks, function(block) ncol(block$x), integer(1))
-  block_ends <- cumsum(block_sizes)
-  block_starts <- block_ends - block_sizes + 1L
-  block_indices <- Map(seq.int, block_starts, block_ends)
-  block_model <- vapply(blocks, `[[`, integer(1), "model_code")
-  block_id <- rep.int(seq_along(blocks), block_sizes)
-
-  x <- do.call(cbind, lapply(seq_along(blocks), function(block_index) {
-    block_x <- blocks[[block_index]]$x
-    colnames(block_x) <- paste0(
-      names(blocks)[block_index], "::", blocks[[block_index]]$predictor_names
-    )
-    block_x
-  }))
-  fixed_indices <- .fixed_predictor_indices(blocks, block_indices)
+  layout <- .prepare_block_layout(blocks)
+  x <- do.call(cbind, lapply(blocks, `[[`, "x"))
+  colnames(x) <- layout$internal_names
+  fixed_indices <- .fixed_predictor_indices(blocks, layout$block_indices)
   .validate_fixed_design(
     x, fixed_indices, colnames(x)[fixed_indices]
   )
@@ -286,43 +275,17 @@ blm <- function(y, ETA, residual_var = NULL,
   residual_shape <- residual_prior$residual_shape
   residual_scale <- residual_prior$residual_scale
 
-  normal_shape <- vapply(blocks, `[[`, numeric(1), "normal_shape")
-  normal_scale <- vapply(blocks, `[[`, numeric(1), "normal_scale")
-  pi_alpha <- vapply(blocks, `[[`, numeric(1), "pi_alpha")
-  pi_beta <- vapply(blocks, `[[`, numeric(1), "pi_beta")
-  spike_var_shape <- vapply(blocks, `[[`, numeric(1), "spike_var_shape")
-  spike_var_scale <- vapply(blocks, `[[`, numeric(1), "spike_var_scale")
-  global_scale <- vapply(blocks, `[[`, numeric(1), "global_scale")
-  local_a <- vapply(blocks, function(block) block$local_shape[1L], numeric(1))
-  local_b <- vapply(blocks, function(block) block$local_shape[2L], numeric(1))
-  multi_gamma <- lapply(blocks, `[[`, "multi_gamma")
-  multi_pi_alpha <- lapply(blocks, `[[`, "multi_pi_alpha")
-  multi_var_shape <- vapply(blocks, `[[`, numeric(1), "multi_var_shape")
-  multi_var_scale <- vapply(blocks, `[[`, numeric(1), "multi_var_scale")
-  sampler_arguments <- list(
+  sampler_arguments <- .prepare_sampler_arguments(
+    blocks = blocks,
+    layout = layout,
     y = centered_y,
     x = x,
-    residual_shape = if (is.null(residual_shape)) 1 else residual_shape,
-    residual_scale = if (is.null(residual_scale)) 1 else residual_scale,
+    residual_shape = residual_shape,
+    residual_scale = residual_scale,
     residual_var = residual_var,
     iterations = iterations,
     burnin = burnin,
     thin = thin,
-    block_id = block_id,
-    block_model = block_model,
-    normal_shape = normal_shape,
-    normal_scale = normal_scale,
-    pi_alpha = pi_alpha,
-    pi_beta = pi_beta,
-    spike_var_shape = spike_var_shape,
-    spike_var_scale = spike_var_scale,
-    global_scale = global_scale,
-    local_a = local_a,
-    local_b = local_b,
-    multi_gamma = multi_gamma,
-    multi_pi_alpha = multi_pi_alpha,
-    multi_var_shape = multi_var_shape,
-    multi_var_scale = multi_var_scale,
     store_samples = store_samples,
     store_coefficient_cov = store_coefficient_cov,
     compute_pve = compute_pve,
@@ -333,26 +296,13 @@ blm <- function(y, ETA, residual_var = NULL,
     intercept_y_mean = mean(y),
     center_observations = FALSE
   )
-  run_chains <- function(progressor = NULL) {
-    .run_blm_chains(
-      sampler_arguments = sampler_arguments,
-      version = version,
-      nchains = nchains,
-      block_model = block_model,
-      progressor = progressor
-    )
-  }
-  samples <- if (verbose) {
-    progressr::with_progress({
-      progress <- progressr::progressor(steps = nchains * iterations)
-      run_chains(progress)
-    }, enable = TRUE)
-  } else {
-    run_chains()
-  }
+  samples <- .run_prepared_sampler(
+    sampler_arguments, version, nchains, layout$block_model,
+    verbose, iterations
+  )
 
   .assemble_blm_result(
-    blocks, block_indices, samples, nchains, store_samples,
+    blocks, layout$block_indices, samples, nchains, store_samples,
     store_coefficient_cov, fit_intercept = TRUE,
     compute_pve = compute_pve, pve_type = pve_type,
     residual_shape = residual_shape,

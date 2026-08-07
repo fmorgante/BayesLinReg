@@ -683,7 +683,16 @@ The main implementations are located in:
 - `R/blm_ss.R`: direct sufficient-statistic validation and storage planning.
 - `R/blm_ss_eigen.R`: low-rank transformation and validation.
 - `R/compute_ss_from_gwas.R`: GWAS/LD reconstruction.
-- `R/misc.R`: prior validation, calibration, and reference R sampler.
+- `R/fit_preparation.R`: shared block layouts, prior arguments, and sampler
+  execution used by all fitting interfaces.
+- `R/prior_specification.R`: prior validation, normalization, calibration, and
+  predictor preparation.
+- `R/mcmc_validation.R`: MCMC, chain, thread, and PVE control validation.
+- `R/gibbs_r.R`: reference R Gibbs sampler.
+- `R/sampler_interface.R`: Rcpp dispatch, progress handling, and chain
+  combination.
+- `R/posterior_conversion.R`: retained-draw conversion and convergence helper
+  calculations.
 - `src/gibbs.cpp`: Rcpp coefficient, hyperparameter, sparse, block, and eigen
   sampling kernels.
 - `src/eigen_preprocessing.cpp`: memory-efficient eigen sufficient-statistic
