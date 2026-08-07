@@ -41,11 +41,11 @@ cross-product. Dense base-R matrices and compressed sparse \code{Matrix}
 objects of class \code{dgCMatrix} or \code{dsCMatrix} are supported. List and sparse
 inputs require \code{version = "Rcpp"}.}
 
-\item{XtX_storage}{Storage policy for symmetric sparse matrices in list
-input. \code{"speed"} expands them to general sparse matrices, \code{"memory"}
-chooses the smaller exact representation, and \code{"auto"} expands
-blocks only while the estimated total representation remains within
-\code{XtX_memory_limit}.}
+\item{XtX_storage}{Storage policy for symmetric sparse matrices, supplied
+either directly or within list input. \code{"speed"} expands them to general
+sparse matrices, \code{"memory"} chooses the smaller exact representation, and
+\code{"auto"} expands them only while the estimated total representation
+remains within \code{XtX_memory_limit}.}
 
 \item{XtX_memory_limit}{Positive approximate byte limit used by
 \code{XtX_storage = "auto"}. It controls internal Gram storage, not posterior
@@ -128,9 +128,9 @@ that block PVE values sum to total PVE. It is used only when
 \value{
 A fitted object with the same block-specific posterior summaries as
 \code{\link[=blm]{blm()}}. Intercept components are present only when both \code{X_means} and
-\code{y_mean} are supplied. For list \code{XtX}, the result also records the
-block-diagonal assumption, block sizes, and selected storage
-representation for each Gram block.
+\code{y_mean} are supplied. For sparse \code{XtX}, the result records the selected
+storage representation. For list \code{XtX}, it also records the block-diagonal
+assumption and block sizes.
 }
 \description{
 Fits the same prior models as \code{\link[=blm]{blm()}} directly from cross-products instead
@@ -164,18 +164,18 @@ dense \code{XtX} and proportional to the relevant stored entries for sparse
 input, at each retained draw.
 Coefficients are sampled with a right-hand-side update that maintains
 \eqn{X'y-X'X\beta}; individual-level pseudo-observations are not formed.
-For sparse \code{XtX}, the Rcpp sampler traverses only stored entries. A single
-symmetric \code{dsCMatrix} is expanded once to a general \code{dgCMatrix}. Within
-list input, \code{XtX_storage} can instead retain a lower triangle and stream
-each ascending Gibbs sweep without a reverse adjacency index. The full
-right-hand-side state is reconstructed once after each sweep. The dense
-rank-one centering correction is maintained separately rather than
-materialized.
+For sparse \code{XtX}, the Rcpp sampler traverses only stored entries.
+\code{XtX_storage} can expand a symmetric \code{dsCMatrix} once to a general
+\code{dgCMatrix}, or retain a lower triangle and stream each ascending Gibbs
+sweep without a reverse adjacency index. This applies to both direct and
+list input. The full right-hand-side state is reconstructed once after
+each streaming sweep. The dense rank-one centering correction is
+maintained separately rather than materialized.
 With list input and zero working predictor means, \code{nthreads > 1} updates
 separate Gram blocks concurrently through \code{RcppParallel}. Updates remain
 sequential within each Gram block. Shared prior hyperparameters and the
-residual variance are updated after the parallel coefficient sweep. A
-threaded run is reproducible after \code{\link[=set.seed]{set.seed()}} and uses a different RNG
+residual variance are updated after the parallel coefficient sweep.
+After \code{\link[=set.seed]{set.seed()}}, threaded runs are reproducible and use a different RNG
 stream from the serial sampler.
 Set \code{check_psd = TRUE} when the supplied statistics are not known to come
 from a valid common data matrix and response vector.

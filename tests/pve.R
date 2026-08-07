@@ -124,6 +124,9 @@ sparse <- do.call(
   blm_ss,
   c(list(XtX = Matrix::Matrix(XtX, sparse = TRUE)), ss_arguments)
 )
+sparse_without_storage <- sparse
+sparse_without_storage$XtX_representation <- NULL
+sparse_without_storage$XtX_storage <- NULL
 centered_X <- sweep(X, 2L, colMeans(X), FUN = "-")
 decomposition <- eigen(crossprod(centered_X), symmetric = TRUE)
 keep <- decomposition$values >
@@ -136,7 +139,7 @@ eigen_fit <- blm_ss_eigen(
   iterations = 70, burnin = 30, compute_pve = TRUE
 )
 stopifnot(
-  isTRUE(all.equal(dense, sparse, tolerance = 1e-8)),
+  isTRUE(all.equal(dense, sparse_without_storage, tolerance = 1e-8)),
   max(abs(dense$total_pve_samples - eigen_fit$total_pve_samples)) < 1e-8,
   max(abs(
     dense$ETA$first$pve_samples - eigen_fit$ETA$first$pve_samples

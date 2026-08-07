@@ -177,6 +177,50 @@ stopifnot(
   sum(auto_fit$XtX_storage$estimated_bytes) <= 280
 )
 
+# A directly supplied dsCMatrix can use the same one-block triangular kernel.
+# The storage policy changes only the exact internal representation.
+direct_symmetric_arguments <- utils::modifyList(symmetric_arguments, list(
+  XtX = symmetric_sparse[[1L]],
+  Xty = symmetric_Xty[seq_len(4L)],
+  X_means = stats::setNames(numeric(4L), names(symmetric_Xty)[seq_len(4L)])
+))
+set.seed(515)
+direct_memory_fit <- do.call(
+  blm_ss,
+  c(direct_symmetric_arguments, list(XtX_storage = "memory"))
+)
+set.seed(515)
+direct_speed_fit <- do.call(
+  blm_ss,
+  c(direct_symmetric_arguments, list(XtX_storage = "speed"))
+)
+set.seed(515)
+direct_auto_fit <- do.call(
+  blm_ss,
+  c(
+    direct_symmetric_arguments,
+    list(XtX_storage = "auto", XtX_memory_limit = 175)
+  )
+)
+stopifnot(
+  isTRUE(all.equal(
+    direct_memory_fit$ETA, direct_speed_fit$ETA, tolerance = 1e-10
+  )),
+  isTRUE(all.equal(
+    direct_memory_fit$ETA, direct_auto_fit$ETA, tolerance = 1e-10
+  )),
+  isTRUE(all.equal(
+    direct_memory_fit$total_pve_mean,
+    direct_speed_fit$total_pve_mean,
+    tolerance = 1e-10
+  )),
+  identical(direct_memory_fit$XtX_representation, "symmetric_streaming"),
+  identical(direct_speed_fit$XtX_representation, "general_sparse"),
+  identical(direct_auto_fit$XtX_representation, "symmetric_streaming"),
+  direct_memory_fit$XtX_storage$estimated_bytes <
+    direct_speed_fit$XtX_storage$estimated_bytes
+)
+
 # The separate dense centering correction remains exact with streaming blocks.
 centered_arguments <- utils::modifyList(symmetric_arguments, list(
   X_means = stats::setNames(seq(-0.2, 0.2, length.out = 8L),
@@ -411,13 +455,20 @@ sparse_general_fit <- do.call(
   blm_ss,
   c(list(XtX = methods::as(sparse_XtX, "generalMatrix")), sparse_args)
 )
+without_sparse_storage <- function(fit) {
+  fit$XtX_representation <- NULL
+  fit$XtX_storage <- NULL
+  fit
+}
 stopifnot(
   inherits(sparse_XtX, "dsCMatrix"),
   isTRUE(all.equal(
-    sparse_dense_fit, sparse_symmetric_fit, tolerance = 1e-8
+    sparse_dense_fit, without_sparse_storage(sparse_symmetric_fit),
+    tolerance = 1e-8
   )),
   isTRUE(all.equal(
-    sparse_dense_fit, sparse_general_fit, tolerance = 1e-8
+    sparse_dense_fit, without_sparse_storage(sparse_general_fit),
+    tolerance = 1e-8
   ))
 )
 
@@ -443,7 +494,8 @@ for (sparse_model in c(
     c(list(XtX = sparse_XtX), model_args)
   )
   stopifnot(isTRUE(all.equal(
-    dense_model_fit, sparse_model_fit, tolerance = 1e-8
+    dense_model_fit, without_sparse_storage(sparse_model_fit),
+    tolerance = 1e-8
   )))
 }
 

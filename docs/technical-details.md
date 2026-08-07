@@ -538,11 +538,12 @@ Supported Gram representations are:
 - A general sparse `dgCMatrix`, traversed through `RcppEigen`.
 - A list of exactly independent dense or sparse Gram blocks. Omitted
   cross-block entries are assumed to be zero.
-- A symmetric sparse `dsCMatrix` within list input. The speed representation
-  expands both triangles. The memory representation keeps a lower triangle,
-  updates only not-yet-visited coordinates during the ascending Gibbs scan, and
-  reconstructs the complete $q$ vector once per sweep. It therefore avoids a
-  reverse adjacency index while preserving an exact serial Gibbs transition.
+- A symmetric sparse `dsCMatrix`, supplied directly or within list input. The
+  speed representation expands both triangles. The memory representation uses
+  the block kernel with one or more blocks, keeps a lower triangle, updates only
+  not-yet-visited coordinates during the ascending Gibbs scan, and reconstructs
+  the complete $q$ vector once per sweep. It therefore avoids a reverse
+  adjacency index while preserving an exact serial Gibbs transition.
 
 With zero working predictor means, exactly independent Gram blocks can be
 sampled concurrently through `RcppParallel`. Updates within a Gram block remain

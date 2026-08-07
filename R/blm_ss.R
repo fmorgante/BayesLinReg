@@ -9,11 +9,11 @@
 #'   cross-product. Dense base-R matrices and compressed sparse `Matrix`
 #'   objects of class `dgCMatrix` or `dsCMatrix` are supported. List and sparse
 #'   inputs require `version = "Rcpp"`.
-#' @param XtX_storage Storage policy for symmetric sparse matrices in list
-#'   input. `"speed"` expands them to general sparse matrices, `"memory"`
-#'   chooses the smaller exact representation, and `"auto"` expands
-#'   blocks only while the estimated total representation remains within
-#'   `XtX_memory_limit`.
+#' @param XtX_storage Storage policy for symmetric sparse matrices, supplied
+#'   either directly or within list input. `"speed"` expands them to general
+#'   sparse matrices, `"memory"` chooses the smaller exact representation, and
+#'   `"auto"` expands them only while the estimated total representation
+#'   remains within `XtX_memory_limit`.
 #' @param XtX_memory_limit Positive approximate byte limit used by
 #'   `XtX_storage = "auto"`. It controls internal Gram storage, not posterior
 #'   draws or other fit allocations.
@@ -45,9 +45,9 @@
 #'
 #' @return A fitted object with the same block-specific posterior summaries as
 #'   [blm()]. Intercept components are present only when both `X_means` and
-#'   `y_mean` are supplied. For list `XtX`, the result also records the
-#'   block-diagonal assumption, block sizes, and selected storage
-#'   representation for each Gram block.
+#'   `y_mean` are supplied. For sparse `XtX`, the result records the selected
+#'   storage representation. For list `XtX`, it also records the block-diagonal
+#'   assumption and block sizes.
 #'
 #' @details If means are supplied, `XtX`, `Xty`, and `yty` are interpreted as
 #'   uncentered cross-products and are centered internally. Without means,
@@ -77,17 +77,17 @@
 #'
 #'   Coefficients are sampled with a right-hand-side update that maintains
 #'   \eqn{X'y-X'X\beta}; individual-level pseudo-observations are not formed.
-#'   For sparse `XtX`, the Rcpp sampler traverses only stored entries. A single
-#'   symmetric `dsCMatrix` is expanded once to a general `dgCMatrix`. Within
-#'   list input, `XtX_storage` can instead retain a lower triangle and stream
-#'   each ascending Gibbs sweep without a reverse adjacency index. The full
-#'   right-hand-side state is reconstructed once after each sweep. The dense
-#'   rank-one centering correction is maintained separately rather than
-#'   materialized.
+#'   For sparse `XtX`, the Rcpp sampler traverses only stored entries.
+#'   `XtX_storage` can expand a symmetric `dsCMatrix` once to a general
+#'   `dgCMatrix`, or retain a lower triangle and stream each ascending Gibbs
+#'   sweep without a reverse adjacency index. This applies to both direct and
+#'   list input. The full right-hand-side state is reconstructed once after
+#'   each streaming sweep. The dense rank-one centering correction is
+#'   maintained separately rather than materialized.
 #'   With list input and zero working predictor means, `nthreads > 1` updates
 #'   separate Gram blocks concurrently through `RcppParallel`. Updates remain
 #'   sequential within each Gram block. Shared prior hyperparameters and the
-#'   residual variance are updated after the parallel coefficient sweep. A
+#'   residual variance are updated after the parallel coefficient sweep.
 #'   After [set.seed()], threaded runs are reproducible and use a different RNG
 #'   stream from the serial sampler.
 #'   Set `check_psd = TRUE` when the supplied statistics are not known to come
@@ -341,6 +341,7 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
   gram_plan <- NULL
   gram_indices <- NULL
   gram_types <- NULL
+  direct_streaming_XtX <- FALSE
   if (list_XtX) {
     p <- length(predictor_names)
     original_scale <- numeric(p)
@@ -378,15 +379,15 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
     }
   } else if (sparse_XtX) {
     working_XtX <- XtX[source_order, source_order, drop = FALSE]
-    if (inherits(working_XtX, "symmetricMatrix")) {
-      working_XtX <- methods::as(working_XtX, "generalMatrix")
-    }
-    inverse_scale <- 1 / scale_order
-    scaling <- Matrix::Diagonal(x = inverse_scale)
-    working_XtX <- scaling %*% working_XtX %*% scaling
-    if (!inherits(working_XtX, "dgCMatrix")) {
-      working_XtX <- methods::as(working_XtX, "dgCMatrix")
-    }
+    gram_plan <- .plan_gram_storage(
+      list(XtX = working_XtX), "XtX", XtX_storage, XtX_memory_limit
+    )
+    working_XtX <- .scale_gram_block(
+      gram_plan$blocks[[1L]], 1 / scale_order
+    )
+    gram_plan$blocks[[1L]] <- working_XtX
+    gram_types <- gram_plan$types
+    direct_streaming_XtX <- identical(gram_types[[1L]], 2L)
     working_center <- if (fit_intercept) {
       sqrt(n) * X_means[source_order] / scale_order
     } else {
@@ -450,7 +451,7 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
   sampler_arguments <- list(
     y = numeric(),
     x = matrix(numeric(), nrow = 0L, ncol = length(working_Xty)),
-    XtX = working_XtX,
+    XtX = if (direct_streaming_XtX) list(XtX = working_XtX) else working_XtX,
     XtX_center = working_center,
     Xty = working_Xty,
     yty = centered_yty,
@@ -488,10 +489,14 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
     },
     intercept_y_mean = if (fit_intercept) y_mean else 0
   )
-  if (list_XtX) {
-    sampler_arguments$XtX_indices <- gram_indices
+  if (list_XtX || direct_streaming_XtX) {
+    sampler_arguments$XtX_indices <- if (list_XtX) {
+      gram_indices
+    } else {
+      list(seq_along(working_Xty))
+    }
     sampler_arguments$XtX_types <- gram_types
-    sampler_arguments$nthreads <- nthreads
+    sampler_arguments$nthreads <- if (list_XtX) nthreads else 1L
   }
   run_chains <- function(progressor = NULL) {
     .run_blm_chains(
@@ -528,6 +533,9 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
     result$XtX_storage <- gram_plan$metadata
     result$XtX_cross_block_assumption <- "zero"
     result$nthreads <- nthreads
+  } else if (sparse_XtX) {
+    result$XtX_representation <- gram_plan$metadata$representation[[1L]]
+    result$XtX_storage <- gram_plan$metadata
   }
   result
 }

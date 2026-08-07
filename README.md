@@ -265,12 +265,13 @@ fit_block_ss <- blm_ss(
 )
 ```
 
-For symmetric sparse matrices in a list, `XtX_storage = "speed"` expands both
-triangles, while `"memory"` chooses the smaller exact representation.
+For symmetric sparse matrices supplied directly or in a list,
+`XtX_storage = "speed"` expands both triangles, while `"memory"` chooses the
+smaller exact representation.
 The default `"auto"` uses `XtX_memory_limit` to retain triangular storage when
 expansion would exceed the requested internal-memory budget. The selected
-representation and estimated bytes for every Gram block are returned in
-`fit$XtX_storage`. The memory representation stores a lower triangle and
+representation and estimated bytes are returned in `fit$XtX_storage`. The
+memory representation stores a lower triangle and
 streams updates to not-yet-visited coefficients, then reconstructs the complete
 right-hand-side state once per Gibbs sweep; it does not allocate a reverse
 adjacency index.
