@@ -693,8 +693,14 @@ The main implementations are located in:
   combination.
 - `R/posterior_conversion.R`: retained-draw conversion and convergence helper
   calculations.
-- `src/gibbs.cpp`: Rcpp coefficient, hyperparameter, sparse, block, and eigen
-  sampling kernels.
+- `src/sampler_types.h`: validated internal prior, Gram-storage, and PVE enums.
+- `src/summary_matrices.h`: dense, sparse, block, and eigen sufficient-statistic
+  matrix backends.
+- `src/parallel_blocks.h`: independent-block workers and per-block random-number
+  streams.
+- `src/gibbs_core.h`: templated coefficient, hyperparameter, PVE, and posterior
+  accumulation kernel.
+- `src/gibbs.cpp`: exported Rcpp entry points and backend dispatch.
 - `src/eigen_preprocessing.cpp`: memory-efficient eigen sufficient-statistic
   preprocessing and scaled-factor construction.
 - `R/fit_result.R`: posterior assembly and scale restoration.
