@@ -1,3 +1,4 @@
 ^src/Makevars$
 ^src/Makevars\.win$
 ^\.github$
+^docs$
