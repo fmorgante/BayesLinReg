@@ -22,6 +22,43 @@ eigenvectors <- decomposition$vectors[, keep, drop = FALSE]
 eigenvalues <- decomposition$values[keep]
 rownames(eigenvectors) <- colnames(X)
 
+# Internal preprocessing matches the original matrix expressions without
+# creating squared, transposed, or swept p-by-q intermediates.
+centered_Xty <- Xty - n * X_means * y_mean
+prepared <- BayesLinReg:::prepare_eigen_statistics_cpp(
+  eigenvectors, eigenvalues, centered_Xty
+)
+expected_projection <- drop(crossprod(eigenvectors, centered_Xty))
+test_order <- as.integer(c(3L, 1L, 2L, seq.int(4L, p)))
+test_scale <- seq(0.8, 1.2, length.out = p)
+prepared_factor <- BayesLinReg:::build_scaled_eigen_factor_cpp(
+  eigenvectors, eigenvalues, test_scale, test_order
+)
+expected_factor <- sweep(
+  sqrt(eigenvalues) * t(eigenvectors[test_order, , drop = FALSE]),
+  2L, test_scale, FUN = "/"
+)
+stopifnot(
+  isTRUE(all.equal(
+    prepared$transformed_response,
+    expected_projection / sqrt(eigenvalues),
+    tolerance = 1e-12
+  )),
+  isTRUE(all.equal(
+    prepared$projected_crossproduct,
+    unname(drop(eigenvectors %*% expected_projection)),
+    tolerance = 1e-12
+  )),
+  isTRUE(all.equal(
+    prepared$diagonal,
+    unname(drop(eigenvectors^2 %*% eigenvalues)),
+    tolerance = 1e-12
+  )),
+  isTRUE(all.equal(
+    prepared_factor, unname(expected_factor), tolerance = 1e-12
+  ))
+)
+
 # Exact eigen sufficient statistics reproduce dense sufficient-statistic draws
 # in a rank-deficient p > n problem for every coefficient prior.
 for (model in c(

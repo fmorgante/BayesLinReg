@@ -212,21 +212,20 @@ blm_ss_eigen <- function(
   eigenvalue_blocks <- if (list_eigen) eigenvalues else list(eigenvalues)
   prop_var_blocks <- if (list_eigen) XtX_prop_var else c(XtX_prop_var)
   source_eigen_indices <- statistics$eigen_indices
-  projected_blocks <- lapply(seq_along(eigenvector_blocks), function(block) {
-    drop(crossprod(
-      eigenvector_blocks[[block]], centered_Xty[source_eigen_indices[[block]]]
-    ))
-  })
-  transformed_y_blocks <- Map(
-    function(projected, values) projected / sqrt(values),
-    projected_blocks, eigenvalue_blocks
-  )
+  transformed_y_blocks <- vector("list", length(eigenvector_blocks))
   projected_centered_Xty <- numeric(length(centered_Xty))
+  approximate_diagonal <- numeric(length(centered_Xty))
   for (block in seq_along(eigenvector_blocks)) {
     indices <- source_eigen_indices[[block]]
-    projected_centered_Xty[indices] <- drop(
-      eigenvector_blocks[[block]] %*% projected_blocks[[block]]
+    prepared <- prepare_eigen_statistics_cpp(
+      eigenvector_blocks[[block]],
+      eigenvalue_blocks[[block]],
+      centered_Xty[indices]
     )
+    transformed_y_blocks[[block]] <- prepared$transformed_response
+    projected_centered_Xty[indices] <-
+      prepared$projected_crossproduct
+    approximate_diagonal[indices] <- prepared$diagonal
     if (prop_var_blocks[block] == 1) {
       projection_error <- centered_Xty[indices] -
         projected_centered_Xty[indices]
@@ -247,6 +246,7 @@ blm_ss_eigen <- function(
       }
     }
   }
+  rm(prepared)
   transformed_y_norm <- sum(vapply(
     transformed_y_blocks, function(value) sum(value^2), numeric(1)
   ))
@@ -268,12 +268,6 @@ blm_ss_eigen <- function(
   }
   residual_sse_offset <- max(0, residual_sse_offset)
 
-  approximate_diagonal <- numeric(length(centered_Xty))
-  for (block in seq_along(eigenvector_blocks)) {
-    approximate_diagonal[source_eigen_indices[[block]]] <- drop(
-      eigenvector_blocks[[block]]^2 %*% eigenvalue_blocks[[block]]
-    )
-  }
   diagonal_tolerance <- 100 * .Machine$double.eps *
     pmax(1, approximate_diagonal)
   constant_predictors <- approximate_diagonal <= diagonal_tolerance
@@ -339,23 +333,22 @@ blm_ss_eigen <- function(
   scale_order <- unlist(predictor_scales, use.names = FALSE)
   inverse_source_order <- match(seq_along(source_order), source_order)
   if (list_eigen) {
-    transformed_X_blocks <- lapply(seq_along(eigenvector_blocks), function(b) {
-      indices <- source_eigen_indices[[b]]
-      design <- sqrt(eigenvalue_blocks[[b]]) * t(eigenvector_blocks[[b]])
-      sweep(
-        design, 2L, scale_order[inverse_source_order[indices]], FUN = "/"
-      )
-    })
     eigen_internal_indices <- lapply(
       source_eigen_indices,
       function(indices) inverse_source_order[indices]
     )
+    transformed_X_blocks <- lapply(seq_along(eigenvector_blocks), function(b) {
+      build_scaled_eigen_factor_cpp(
+        eigenvector_blocks[[b]],
+        eigenvalue_blocks[[b]],
+        scale_order[eigen_internal_indices[[b]]],
+        integer()
+      )
+    })
     transformed_X <- NULL
   } else {
-    transformed_X <- sqrt(eigenvalues) * t(eigenvectors)
-    transformed_X <- sweep(
-      transformed_X[, source_order, drop = FALSE],
-      2L, scale_order, FUN = "/"
+    transformed_X <- build_scaled_eigen_factor_cpp(
+      eigenvectors, eigenvalues, scale_order, source_order
     )
   }
   block_sizes <- lengths(source_indices)

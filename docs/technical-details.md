@@ -569,6 +569,12 @@ Q=\Lambda^{1/2}U',\qquad
 w=\Lambda^{-1/2}U'g_c.
 $$
 
+Initialization computes $U'g_c$, $UU'g_c$, and the diagonal of
+$U\Lambda U'$ in C++. It then writes the scaled factor $Q$ directly in final
+sampler order. This avoids materializing squared eigenvectors, an explicit
+transpose, and additional scaling or reordering copies of the $p$-by-$q$
+representation.
+
 Then
 
 $$
@@ -676,6 +682,8 @@ The main implementations are located in:
 - `R/compute_ss_from_gwas.R`: GWAS/LD reconstruction.
 - `R/misc.R`: prior validation, calibration, and reference R sampler.
 - `src/gibbs.cpp`: Rcpp coefficient, hyperparameter, sparse, block, and eigen
-  kernels.
+  sampling kernels.
+- `src/eigen_preprocessing.cpp`: memory-efficient eigen sufficient-statistic
+  preprocessing and scaled-factor construction.
 - `R/fit_result.R`: posterior assembly and scale restoration.
 - `R/fit_methods.R`: coefficient extraction, prediction, and summaries.
