@@ -270,7 +270,10 @@ triangles, while `"memory"` chooses the smaller exact representation.
 The default `"auto"` uses `XtX_memory_limit` to retain triangular storage when
 expansion would exceed the requested internal-memory budget. The selected
 representation and estimated bytes for every Gram block are returned in
-`fit$XtX_storage`.
+`fit$XtX_storage`. The memory representation stores a lower triangle and
+streams updates to not-yet-visited coefficients, then reconstructs the complete
+right-hand-side state once per Gibbs sweep; it does not allocate a reverse
+adjacency index.
 
 When the working predictor means are zero, separate Gram blocks can be updated
 within one chain using `nthreads`. This requires the Rcpp sampler and one chain:

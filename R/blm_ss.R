@@ -79,10 +79,11 @@
 #'   \eqn{X'y-X'X\beta}; individual-level pseudo-observations are not formed.
 #'   For sparse `XtX`, the Rcpp sampler traverses only stored entries. A single
 #'   symmetric `dsCMatrix` is expanded once to a general `dgCMatrix`. Within
-#'   list input, `XtX_storage` can instead retain one triangle and construct a
-#'   reverse adjacency index whose entries share the original numerical
-#'   values. The dense rank-one centering correction is maintained separately
-#'   rather than materialized.
+#'   list input, `XtX_storage` can instead retain a lower triangle and stream
+#'   each ascending Gibbs sweep without a reverse adjacency index. The full
+#'   right-hand-side state is reconstructed once after each sweep. The dense
+#'   rank-one centering correction is maintained separately rather than
+#'   materialized.
 #'   With list input and zero working predictor means, `nthreads > 1` updates
 #'   separate Gram blocks concurrently through `RcppParallel`. Updates remain
 #'   sequential within each Gram block. Shared prior hyperparameters and the
@@ -699,8 +700,7 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
   diagonal <- sum(matrix@i + 1L == column)
   edges <- nonzeros - diagonal
   general <- 12 * (diagonal + 2 * as.double(edges)) + 4 * (p + 1)
-  symmetric <- 12 * as.double(nonzeros) + 8 * as.double(edges) +
-    8 * (p + 1)
+  symmetric <- 12 * as.double(nonzeros) + 4 * (p + 1)
   c(dense = Inf, general = general, symmetric = symmetric)
 }
 
@@ -716,7 +716,7 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
       symmetric[index] &&
         estimates[[index]]["symmetric"] < estimates[[index]]["general"]
     }, logical(1))
-    representation[use_symmetric] <- "symmetric_indexed"
+    representation[use_symmetric] <- "symmetric_streaming"
   } else if (strategy == "auto") {
     speed_bytes <- vapply(seq_along(blocks), function(index) {
       estimates[[index]]["general"]
@@ -729,7 +729,7 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
     if (total > memory_limit && length(candidates)) {
       savings <- speed_bytes[candidates] - memory_bytes[candidates]
       for (index in candidates[order(savings, decreasing = TRUE)]) {
-        representation[index] <- "symmetric_indexed"
+        representation[index] <- "symmetric_streaming"
         total <- total - (speed_bytes[index] - memory_bytes[index])
         if (total <= memory_limit) break
       }
@@ -737,6 +737,11 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
   }
 
   converted <- Map(function(block, selected) {
+    if (selected == "symmetric_streaming") {
+      # A lower triangle lets the ascending Gibbs scan update only the current
+      # and not-yet-visited coordinates without constructing reverse adjacency.
+      return(Matrix::forceSymmetric(block, uplo = "L"))
+    }
     if (selected != "general_sparse" || !inherits(block, "dsCMatrix")) {
       return(block)
     }
@@ -752,7 +757,7 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
     ifelse(representation == "general_sparse", 1L, 2L)
   )
   estimated_bytes <- vapply(seq_along(blocks), function(index) {
-    if (representation[index] == "symmetric_indexed") {
+    if (representation[index] == "symmetric_streaming") {
       estimates[[index]]["symmetric"]
     } else if (representation[index] == "general_sparse") {
       estimates[[index]]["general"]

@@ -124,8 +124,8 @@ stopifnot(
   identical(list_gram_fit$XtX_storage$representation, c("dense", "dense"))
 )
 
-# Symmetric sparse blocks can retain one triangle with a reverse index or be
-# expanded for speed. Both representations produce the same chain.
+# Symmetric sparse blocks can stream one lower triangle or be expanded for
+# speed. Both representations produce the same chain up to numerical drift.
 set.seed(513)
 symmetric_dense <- lapply(c("left", "right"), function(name) {
   values <- crossprod(matrix(rnorm(24), 6L, 4L)) + diag(4)
@@ -161,7 +161,7 @@ speed_fit <- do.call(
 set.seed(514)
 auto_fit <- do.call(
   blm_ss,
-  c(symmetric_arguments, list(XtX_storage = "auto", XtX_memory_limit = 418))
+  c(symmetric_arguments, list(XtX_storage = "auto", XtX_memory_limit = 280))
 )
 stopifnot(
   isTRUE(all.equal(memory_fit$ETA, speed_fit$ETA, tolerance = 1e-10)),
@@ -169,12 +169,33 @@ stopifnot(
   isTRUE(all.equal(memory_fit$total_pve_mean, speed_fit$total_pve_mean,
                    tolerance = 1e-10)),
   identical(memory_fit$XtX_storage$representation,
-            rep("symmetric_indexed", 2L)),
+            rep("symmetric_streaming", 2L)),
   identical(speed_fit$XtX_storage$representation,
             rep("general_sparse", 2L)),
   identical(auto_fit$XtX_storage$representation,
-            rep("symmetric_indexed", 2L)),
-  sum(auto_fit$XtX_storage$estimated_bytes) <= 418
+            rep("symmetric_streaming", 2L)),
+  sum(auto_fit$XtX_storage$estimated_bytes) <= 280
+)
+
+# The separate dense centering correction remains exact with streaming blocks.
+centered_arguments <- utils::modifyList(symmetric_arguments, list(
+  X_means = stats::setNames(seq(-0.2, 0.2, length.out = 8L),
+                            names(symmetric_Xty)),
+  y_mean = 0.15, yty = 35, iterations = 80, burnin = 30
+))
+set.seed(5141)
+centered_memory <- do.call(
+  blm_ss, c(centered_arguments, list(XtX_storage = "memory"))
+)
+set.seed(5141)
+centered_speed <- do.call(
+  blm_ss, c(centered_arguments, list(XtX_storage = "speed"))
+)
+stopifnot(
+  isTRUE(all.equal(centered_memory$ETA, centered_speed$ETA,
+                   tolerance = 1e-10)),
+  isTRUE(all.equal(centered_memory$total_pve_mean,
+                   centered_speed$total_pve_mean, tolerance = 1e-10))
 )
 
 # With zero working means, Gram blocks are conditionally independent during

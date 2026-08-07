@@ -166,10 +166,11 @@ Coefficients are sampled with a right-hand-side update that maintains
 \eqn{X'y-X'X\beta}; individual-level pseudo-observations are not formed.
 For sparse \code{XtX}, the Rcpp sampler traverses only stored entries. A single
 symmetric \code{dsCMatrix} is expanded once to a general \code{dgCMatrix}. Within
-list input, \code{XtX_storage} can instead retain one triangle and construct a
-reverse adjacency index whose entries share the original numerical
-values. The dense rank-one centering correction is maintained separately
-rather than materialized.
+list input, \code{XtX_storage} can instead retain a lower triangle and stream
+each ascending Gibbs sweep without a reverse adjacency index. The full
+right-hand-side state is reconstructed once after each sweep. The dense
+rank-one centering correction is maintained separately rather than
+materialized.
 With list input and zero working predictor means, \code{nthreads > 1} updates
 separate Gram blocks concurrently through \code{RcppParallel}. Updates remain
 sequential within each Gram block. Shared prior hyperparameters and the

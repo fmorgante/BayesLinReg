@@ -201,8 +201,9 @@ class SparseSummaryMatrix {
 };
 
 // A block-diagonal sufficient-statistics matrix. Each block may be dense,
-// general sparse, or symmetric sparse. Symmetric sparse blocks retain one
-// triangle and build a reverse index that refers back to the original values.
+// general sparse, or lower-triangular symmetric sparse. The triangular
+// representation streams updates only to coordinates that have not yet been
+// visited in the current ascending Gibbs sweep, avoiding a reverse index.
 class BlockSummaryMatrix {
  public:
   BlockSummaryMatrix(
@@ -213,7 +214,7 @@ class BlockSummaryMatrix {
       const int nthreads = 1)
     : center_(center), p_(center.size()),
       global_block_(p_, -1), global_local_(p_, -1), diagonal_(p_, 0.0),
-      nthreads_(nthreads) {
+      nthreads_(nthreads), has_streaming_blocks_(false) {
     if (matrices.size() < 1 || matrices.size() != indices.size() ||
         matrices.size() != types.size()) {
       Rcpp::stop("Invalid block-diagonal `XtX` representation.");
@@ -266,9 +267,7 @@ class BlockSummaryMatrix {
             }
           }
         }
-        if (block.type == 2) {
-          build_reverse_index(block);
-        }
+        if (block.type == 2) has_streaming_blocks_ = true;
       } else {
         Rcpp::stop("Unknown Gram-block storage type.");
       }
@@ -282,6 +281,8 @@ class BlockSummaryMatrix {
   }
 
   int cols() const { return p_; }
+
+  bool has_streaming_blocks() const { return has_streaming_blocks_; }
 
   double diagonal(const int j) const {
     return diagonal_[j] - center_[j] * center_[j];
@@ -312,13 +313,6 @@ class BlockSummaryMatrix {
          position < block.column_pointer[local + 1]; ++position) {
       rhs[block.global[block.row_index[position]]] -=
         block.values[position] * change;
-    }
-    if (block.type == 2) {
-      for (int reverse = block.reverse_pointer[local];
-           reverse < block.reverse_pointer[local + 1]; ++reverse) {
-        rhs[block.global[block.reverse_neighbor[reverse]]] -=
-          block.values[block.reverse_position[reverse]] * change;
-      }
     }
   }
 
@@ -449,38 +443,7 @@ class BlockSummaryMatrix {
     const int* row_index = NULL;
     const double* values = NULL;
     std::vector<int> global;
-    std::vector<int> reverse_pointer;
-    std::vector<int> reverse_neighbor;
-    std::vector<int> reverse_position;
   };
-
-  static void build_reverse_index(Block& block) {
-    block.reverse_pointer.assign(block.size + 1, 0);
-    for (int column = 0; column < block.size; ++column) {
-      for (int position = block.column_pointer[column];
-           position < block.column_pointer[column + 1]; ++position) {
-        const int row = block.row_index[position];
-        if (row != column) ++block.reverse_pointer[row + 1];
-      }
-    }
-    for (int row = 0; row < block.size; ++row) {
-      block.reverse_pointer[row + 1] += block.reverse_pointer[row];
-    }
-    const int off_diagonal = block.reverse_pointer[block.size];
-    block.reverse_neighbor.resize(off_diagonal);
-    block.reverse_position.resize(off_diagonal);
-    std::vector<int> next = block.reverse_pointer;
-    for (int column = 0; column < block.size; ++column) {
-      for (int position = block.column_pointer[column];
-           position < block.column_pointer[column + 1]; ++position) {
-        const int row = block.row_index[position];
-        if (row == column) continue;
-        const int destination = next[row]++;
-        block.reverse_neighbor[destination] = column;
-        block.reverse_position[destination] = position;
-      }
-    }
-  }
 
   const Rcpp::NumericVector& center_;
   int p_;
@@ -489,6 +452,7 @@ class BlockSummaryMatrix {
   std::vector<int> global_local_;
   std::vector<double> diagonal_;
   int nthreads_;
+  bool has_streaming_blocks_;
 };
 
 // A block-diagonal low-rank matrix represented as G_b = Q_b' Q_b. Besides
@@ -1036,6 +1000,12 @@ struct is_parallel_block_matrix<BlockSummaryMatrix> : std::true_type {};
 template <>
 struct is_parallel_block_matrix<EigenBlockSummaryMatrix> : std::true_type {};
 
+template <typename SummaryMatrix>
+struct has_streaming_triangular_blocks : std::false_type {};
+
+template <>
+struct has_streaming_triangular_blocks<BlockSummaryMatrix> : std::true_type {};
+
 }  // namespace
 
 // [[Rcpp::depends(RcppEigen)]]
@@ -1551,15 +1521,34 @@ Rcpp::List blm_gibbs_core(
       }
     }
 
+    // Streaming triangular blocks update only coordinates that remain in the
+    // ascending scan. Reconstruct the full state once after every sweep so it
+    // is ready for retained-draw summaries and the next iteration.
+    bool streaming_state_reconstructed = false;
+    if constexpr (has_streaming_triangular_blocks<SummaryMatrix>::value) {
+      if (summary_XtX.has_streaming_blocks()) {
+        summary_XtX.multiply(coefficient, fitted_crossproduct);
+        center_dot = summary_XtX.center_dot(coefficient);
+        for (int j = 0; j < p; ++j) {
+          corrected_rhs[j] = summary_Xty[j] - fitted_crossproduct[j];
+        }
+        streaming_state_reconstructed = true;
+      }
+    }
+
     // Reconstruct accumulated state periodically to limit floating-point drift.
     if (iteration % residual_refresh_interval == 0) {
       if (use_sufficient_statistics) {
         double quadratic = 0.0;
         double linear = 0.0;
-        summary_XtX.multiply(coefficient, fitted_crossproduct);
-        center_dot = summary_XtX.center_dot(coefficient);
+        if (!streaming_state_reconstructed) {
+          summary_XtX.multiply(coefficient, fitted_crossproduct);
+          center_dot = summary_XtX.center_dot(coefficient);
+          for (int j = 0; j < p; ++j) {
+            corrected_rhs[j] = summary_Xty[j] - fitted_crossproduct[j];
+          }
+        }
         for (int j = 0; j < p; ++j) {
-          corrected_rhs[j] = summary_Xty[j] - fitted_crossproduct[j];
           linear += coefficient[j] * summary_Xty[j];
           quadratic += coefficient[j] * summary_XtX.centered_fitted(
             fitted_crossproduct[j], j, center_dot
