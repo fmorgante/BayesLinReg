@@ -69,7 +69,7 @@ jobs:
           mkdir -p ~/.R
           echo 'CXX17 = g++' >> ~/.R/Makevars
           echo 'CXX17FLAGS = -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer' >> ~/.R/Makevars
-          echo 'SHLIB_LDFLAGS += -fsanitize=address,undefined' >> ~/.R/Makevars
+          echo 'LDFLAGS += -fsanitize=address,undefined' >> ~/.R/Makevars
           echo "LD_PRELOAD=$(g++ -print-file-name=libasan.so)" >> "$GITHUB_ENV"
 
       - uses: r-lib/actions/check-r-package@v2
