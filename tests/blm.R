@@ -1,5 +1,21 @@
 library(BayesLinReg)
 
+# Most historical checks below exercise retained-draw and covariance output.
+# Keep that intent explicit while separately testing the scalable public defaults.
+blm_public <- BayesLinReg::blm
+blm <- function(..., store_samples = TRUE, store_coefficient_cov = TRUE) {
+  blm_public(..., store_samples = store_samples,
+             store_coefficient_cov = store_coefficient_cov)
+}
+stopifnot(
+  identical(formals(blm_public)$store_samples, FALSE),
+  identical(formals(blm_public)$store_coefficient_cov, FALSE),
+  identical(formals(BayesLinReg::blm_ss)$store_samples, FALSE),
+  identical(formals(BayesLinReg::blm_ss)$store_coefficient_cov, FALSE),
+  identical(formals(BayesLinReg::blm_ss_eigen)$store_samples, FALSE),
+  identical(formals(BayesLinReg::blm_ss_eigen)$store_coefficient_cov, FALSE)
+)
+
 x <- cbind(
   first = 1:5,
   second = c(0, 1, 0, 1, 0)
@@ -743,6 +759,36 @@ stopifnot(
   identical(dim(mock_combined$pi_samples), c(4L, 3L)),
   identical(dim(mock_combined$slab_var_samples), c(4L, 3L)),
   identical(dim(mock_combined$tau_sq_samples), c(4L, 3L))
+)
+
+# Online coefficient cross-products combine independently within each block.
+mock_online_chain <- list(
+  number_of_draws = 2L,
+  coefficient_sum = c(1, 2, 3),
+  coefficient_sum_sq = c(1, 4, 9),
+  intercept_sum = 1,
+  intercept_sum_sq = 1,
+  residual_var_sum = 2,
+  residual_var_sum_sq = 2,
+  coefficient_crossprod = list(
+    matrix(4, nrow = 1L),
+    matrix(c(1, 2, 2, 5), nrow = 2L)
+  )
+)
+mock_online_combined <- BayesLinReg:::.combine_blm_chains(
+  list(mock_online_chain, mock_online_chain),
+  block_model = c(4L, 4L),
+  store_samples = FALSE,
+  store_coefficient_cov = TRUE
+)
+stopifnot(
+  identical(mock_online_combined$number_of_draws, 4L),
+  isTRUE(all.equal(
+    mock_online_combined$coefficient_crossprod,
+    lapply(mock_online_chain$coefficient_crossprod, function(values) {
+      2 * values
+    })
+  ))
 )
 
 # Real multisession tests are enabled outside restricted check environments.

@@ -92,6 +92,13 @@
 #'   stream from the serial sampler.
 #'   Set `check_psd = TRUE` when the supplied statistics are not known to come
 #'   from a valid common data matrix and response vector.
+#'   When residual variance is learned, the sampler also checks reconstructed
+#'   residual SSE values during its existing periodic state refresh and whenever
+#'   an incremental value becomes suspiciously negative. Values within a
+#'   scale-aware floating-point tolerance are clamped to zero; materially
+#'   negative values produce an incompatibility error. This runtime guard is
+#'   inexpensive but does not prove that `XtX` is positive semidefinite, so it
+#'   does not replace `check_psd = TRUE`.
 #'
 #' @export
 #'
@@ -117,8 +124,8 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
                    reference_response_var = NULL,
                    iterations = 4000L, burnin = 1000L, thin = 1L,
                    version = c("Rcpp", "R"), verbose = FALSE,
-                   nchains = 1L, nthreads = 1L, store_samples = TRUE,
-                   store_coefficient_cov = TRUE, check_psd = FALSE,
+                   nchains = 1L, nthreads = 1L, store_samples = FALSE,
+                   store_coefficient_cov = FALSE, check_psd = FALSE,
                    XtX_storage = c("auto", "speed", "memory"),
                    XtX_memory_limit = 1024^3,
                    compute_pve = FALSE,

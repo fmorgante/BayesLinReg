@@ -29,14 +29,14 @@
 #'   per chain using [progressr::with_progress()].
 #' @param nchains Number of independent chains. Multiple chains use a temporary
 #'   [future::multisession] plan.
-#' @param store_samples If `TRUE` (the default), retain and return individual
-#'   posterior draws. If `FALSE`, compute posterior summaries online without
+#' @param store_samples If `TRUE`, retain and return individual posterior draws.
+#'   The default, `FALSE`, computes posterior summaries online without
 #'   allocating draw matrices. Fits without stored samples cannot be passed to
 #'   [assess_convergence()].
-#' @param store_coefficient_cov If `TRUE` (the default), return the full
-#'   posterior coefficient covariance matrix for each `ETA` block. If `FALSE`,
-#'   return only the named vector of marginal coefficient variances and avoid
-#'   the quadratic-size covariance accumulator when samples are not stored.
+#' @param store_coefficient_cov If `TRUE`, return the full posterior coefficient
+#'   covariance matrix for each `ETA` block. The default, `FALSE`, returns only
+#'   the named vector of marginal coefficient variances and avoids blockwise
+#'   quadratic-size covariance accumulators when samples are not stored.
 #' @param compute_pve If `TRUE`, calculate block and total proportions of
 #'   variance explained at retained posterior draws. The default, `FALSE`,
 #'   adds no PVE computation to the sampler.
@@ -197,8 +197,8 @@ blm <- function(y, ETA, residual_var = NULL,
                 reference_response_var = NULL,
                 iterations = 4000L, burnin = 1000L, thin = 1L,
                 version = c("Rcpp", "R"),
-                verbose = FALSE, nchains = 1L, store_samples = TRUE,
-                store_coefficient_cov = TRUE, compute_pve = FALSE,
+                verbose = FALSE, nchains = 1L, store_samples = FALSE,
+                store_coefficient_cov = FALSE, compute_pve = FALSE,
                 pve_type = c("standalone", "allocated")) {
   version <- match.arg(version)
   nchains <- .validate_nchains(nchains)

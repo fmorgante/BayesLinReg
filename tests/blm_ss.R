@@ -1,5 +1,16 @@
 library(BayesLinReg)
 
+blm_public <- BayesLinReg::blm
+blm <- function(..., store_samples = TRUE, store_coefficient_cov = TRUE) {
+  blm_public(..., store_samples = store_samples,
+             store_coefficient_cov = store_coefficient_cov)
+}
+blm_ss_public <- BayesLinReg::blm_ss
+blm_ss <- function(..., store_samples = TRUE, store_coefficient_cov = TRUE) {
+  blm_ss_public(..., store_samples = store_samples,
+                store_coefficient_cov = store_coefficient_cov)
+}
+
 set.seed(501)
 n <- 70
 X <- matrix(rnorm(n * 5), nrow = n)
@@ -677,6 +688,51 @@ unchecked_fit <- blm_ss(
   iterations = 50, burnin = 20
 )
 stopifnot(inherits(unchecked_fit, "blm_fit"))
+
+# Learned residual variance tolerates cancellation-sized negative SSE values,
+# but rejects materially incompatible sufficient statistics at runtime even
+# when the full O(p^3) validation is disabled.
+runtime_guard_arguments <- list(
+  n = 10L,
+  XtX = matrix(1e12, 1L, 1L, dimnames = list("x", "x")),
+  Xty = c(x = 1e12),
+  ETA = list(model = "Fixed", standardize = FALSE),
+  residual_shape = 2,
+  residual_scale = 1,
+  iterations = 8L,
+  burnin = 3L,
+  check_psd = FALSE
+)
+for (sampler_version in c("Rcpp", "R")) {
+  set.seed(541)
+  tolerance_fit <- suppressWarnings(do.call(
+    blm_ss,
+    c(runtime_guard_arguments, list(
+      yty = 1e12 - 1,
+      version = sampler_version
+    ))
+  ))
+  set.seed(541)
+  incompatibility_error <- suppressWarnings(try(do.call(
+    blm_ss,
+    c(runtime_guard_arguments, list(
+      yty = 1e12 - 1e8,
+      version = sampler_version
+    ))
+  ), silent = TRUE))
+  stopifnot(
+    inherits(tolerance_fit, "blm_fit"),
+    inherits(incompatibility_error, "try-error"),
+    grepl(
+      "reconstructed residual SSE is materially negative",
+      as.character(incompatibility_error), fixed = TRUE
+    ),
+    grepl(
+      "sufficient statistics are incompatible",
+      as.character(incompatibility_error), fixed = TRUE
+    )
+  )
+}
 
 # Invalid or incomplete sufficient statistics are rejected.
 invalid_calls <- list(

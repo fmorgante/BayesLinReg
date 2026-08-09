@@ -2,7 +2,8 @@
 #'
 #' Returns posterior means of the intercept and regression coefficients.
 #'
-#' @param object A fitted model returned by [blm()] or [blm_ss()].
+#' @param object A fitted model returned by [blm()], [blm_ss()], or
+#'   [blm_ss_eigen()].
 #' @param ... Additional arguments. Currently unused.
 #'
 #' @return A named numeric vector. For multi-block fits, coefficient names use
@@ -31,7 +32,8 @@ coef.blm_fit <- function(object, ...) {
 #'
 #' Computes posterior-mean predictions for new predictor values.
 #'
-#' @param object A fitted model returned by [blm()] or [blm_ss()].
+#' @param object A fitted model returned by [blm()], [blm_ss()], or
+#'   [blm_ss_eigen()].
 #' @param newdata For a single-block fit, a numeric vector, matrix, or data
 #'   frame containing that block's predictors. A vector represents one
 #'   observation unless the fitted block has one predictor, in which case it
@@ -44,6 +46,10 @@ coef.blm_fit <- function(object, ...) {
 #'   predictive interval that also includes residual variation. Intervals
 #'   require a fit created with `store_samples = TRUE`.
 #' @param level Coverage probability for credible or prediction intervals.
+#' @param chunk_size Positive integer giving the maximum number of new
+#'   observations whose retained fitted-value draws are materialized at once.
+#'   Chunking bounds peak memory for interval prediction and does not affect
+#'   point predictions.
 #' @param ... Additional arguments. Currently unused.
 #'
 #' @return With `interval = "none"`, a numeric vector of posterior-mean
@@ -56,7 +62,7 @@ coef.blm_fit <- function(object, ...) {
 #' @export
 predict.blm_fit <- function(object, newdata,
                             interval = c("none", "credible", "prediction"),
-                            level = 0.95, ...) {
+                            level = 0.95, chunk_size = 1000L, ...) {
   if (missing(newdata)) {
     stop("`newdata` is required because fitted predictor data are not stored.",
          call. = FALSE)
@@ -70,6 +76,13 @@ predict.blm_fit <- function(object, newdata,
     stop("`level` must be a number strictly between zero and one.",
          call. = FALSE)
   }
+  if (!is.numeric(chunk_size) || length(chunk_size) != 1L ||
+      is.na(chunk_size) || !is.finite(chunk_size) ||
+      chunk_size != floor(chunk_size) || chunk_size < 1 ||
+      chunk_size > .Machine$integer.max) {
+    stop("`chunk_size` must be a positive integer.", call. = FALSE)
+  }
+  chunk_size <- as.integer(chunk_size)
 
   block_names <- names(object$ETA)
   if (length(object$ETA) == 1L &&
@@ -121,35 +134,47 @@ predict.blm_fit <- function(object, newdata,
   }
 
   number_of_draws <- nrow(object$ETA[[1L]]$coefficient_samples)
-  prediction_draws <- matrix(0, nrow = row_counts[1L],
-                             ncol = number_of_draws)
-  if (!is.null(object$intercept_samples)) {
-    prediction_draws <- sweep(
-      prediction_draws, 2L, object$intercept_samples, FUN = "+"
-    )
-  }
-  for (block_index in seq_along(matrices)) {
-    prediction_draws <- prediction_draws + tcrossprod(
-      matrices[[block_index]],
-      object$ETA[[block_index]]$coefficient_samples
-    )
-  }
   tail_probability <- (1 - level) / 2
   probabilities <- c(tail_probability, 1 - tail_probability)
-  bounds <- if (interval == "credible") {
-    t(apply(prediction_draws, 1L, stats::quantile,
-            probs = probabilities, names = FALSE))
+  number_of_observations <- row_counts[1L]
+  bounds <- matrix(NA_real_, nrow = number_of_observations, ncol = 2L)
+  residual_sd <- if (interval == "prediction") {
+    sqrt(object$residual_var_samples)
   } else {
-    residual_sd <- sqrt(object$residual_var_samples)
-    t(apply(prediction_draws, 1L, function(draws) {
-      vapply(
-        probabilities,
-        .normal_mixture_quantile,
-        numeric(1),
-        means = draws,
-        standard_deviations = residual_sd
+    NULL
+  }
+  for (start in seq.int(1L, number_of_observations, by = chunk_size)) {
+    indices <- seq.int(
+      start, min(number_of_observations, start + chunk_size - 1L)
+    )
+    prediction_draws <- matrix(
+      0, nrow = length(indices), ncol = number_of_draws
+    )
+    if (!is.null(object$intercept_samples)) {
+      prediction_draws <- sweep(
+        prediction_draws, 2L, object$intercept_samples, FUN = "+"
       )
-    }))
+    }
+    for (block_index in seq_along(matrices)) {
+      prediction_draws <- prediction_draws + tcrossprod(
+        matrices[[block_index]][indices, , drop = FALSE],
+        object$ETA[[block_index]]$coefficient_samples
+      )
+    }
+    bounds[indices, ] <- if (interval == "credible") {
+      t(apply(prediction_draws, 1L, stats::quantile,
+              probs = probabilities, names = FALSE))
+    } else {
+      t(apply(prediction_draws, 1L, function(draws) {
+        vapply(
+          probabilities,
+          .normal_mixture_quantile,
+          numeric(1),
+          means = draws,
+          standard_deviations = residual_sd
+        )
+      }))
+    }
   }
   result <- cbind(fit = prediction, lwr = bounds[, 1L], upr = bounds[, 2L])
   rownames(result) <- rownames(matrices[[1L]])

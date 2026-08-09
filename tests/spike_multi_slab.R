@@ -1,5 +1,18 @@
 library(BayesLinReg)
 
+blm_public <- BayesLinReg::blm
+blm <- function(..., store_samples = TRUE, store_coefficient_cov = TRUE) {
+  blm_public(..., store_samples = store_samples,
+             store_coefficient_cov = store_coefficient_cov)
+}
+
+blm_ss_public <- BayesLinReg::blm_ss
+blm_ss <- function(..., store_samples = TRUE,
+                   store_coefficient_cov = TRUE) {
+  blm_ss_public(..., store_samples = store_samples,
+                store_coefficient_cov = store_coefficient_cov)
+}
+
 set.seed(701)
 n <- 80
 X <- matrix(rnorm(n * 6), nrow = n)
@@ -225,6 +238,14 @@ for (sampler in list(
     sampler,
     c(compact_arguments, list(store_samples = FALSE))
   )
+  set.seed(706)
+  compact_covariance <- do.call(
+    sampler,
+    utils::modifyList(
+      compact_arguments,
+      list(store_samples = FALSE, store_coefficient_cov = TRUE)
+    )
+  )
   stopifnot(
     identical(dim(compact_stored$coefficient_samples), c(10L, 6L)),
     identical(dim(compact_stored$inclusion_samples), c(10L, 1L)),
@@ -232,7 +253,11 @@ for (sampler in list(
     identical(dim(compact_stored$multi_component_samples), c(10L, 3L)),
     length(compact_online$inclusion_sum) == 1L,
     length(compact_online$local_var_sum) == 1L,
-    identical(dim(compact_online$multi_component_sum[[4L]]), c(3L, 3L))
+    identical(dim(compact_online$multi_component_sum[[4L]]), c(3L, 3L)),
+    identical(
+      lapply(compact_covariance$coefficient_crossprod, dim),
+      list(c(1L, 1L), c(1L, 1L), c(1L, 1L), c(3L, 3L))
+    )
   )
 }
 

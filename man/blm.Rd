@@ -17,8 +17,8 @@ blm(
   version = c("Rcpp", "R"),
   verbose = FALSE,
   nchains = 1L,
-  store_samples = TRUE,
-  store_coefficient_cov = TRUE,
+  store_samples = FALSE,
+  store_coefficient_cov = FALSE,
   compute_pve = FALSE,
   pve_type = c("standalone", "allocated")
 )
@@ -42,7 +42,7 @@ its value from the response variance not assigned to the blocks.}
 
 \item{reference_response_var}{Optional positive reference response variance
 used to calibrate blocks that specify \code{expected_pve}. When omitted,
-\code{\link[stats:cor]{stats::var()}} of \code{y} is used.}
+\code{\link[stats:var]{stats::var()}} of \code{y} is used.}
 
 \item{iterations}{Total Gibbs iterations when sampling is required.}
 
@@ -58,15 +58,15 @@ per chain using \code{\link[progressr:with_progress]{progressr::with_progress()}
 \item{nchains}{Number of independent chains. Multiple chains use a temporary
 \link[future:multisession]{future::multisession} plan.}
 
-\item{store_samples}{If \code{TRUE} (the default), retain and return individual
-posterior draws. If \code{FALSE}, compute posterior summaries online without
+\item{store_samples}{If \code{TRUE}, retain and return individual posterior draws.
+The default, \code{FALSE}, computes posterior summaries online without
 allocating draw matrices. Fits without stored samples cannot be passed to
 \code{\link[=assess_convergence]{assess_convergence()}}.}
 
-\item{store_coefficient_cov}{If \code{TRUE} (the default), return the full
-posterior coefficient covariance matrix for each \code{ETA} block. If \code{FALSE},
-return only the named vector of marginal coefficient variances and avoid
-the quadratic-size covariance accumulator when samples are not stored.}
+\item{store_coefficient_cov}{If \code{TRUE}, return the full posterior coefficient
+covariance matrix for each \code{ETA} block. The default, \code{FALSE}, returns only
+the named vector of marginal coefficient variances and avoids blockwise
+quadratic-size covariance accumulators when samples are not stored.}
 
 \item{compute_pve}{If \code{TRUE}, calculate block and total proportions of
 variance explained at retained posterior draws. The default, \code{FALSE},
@@ -94,9 +94,9 @@ records \code{expected_pve_total}, \code{reference_response_var}, and
 return per-predictor \code{component_probability} values, an
 \code{inclusion_probability} vector, and summaries of the mixture probabilities
 and shared variance. When \code{compute_pve = TRUE}, every block contains
-\code{pve_mean} and \code{pve_var}, and sampled fits also contain
-\code{pve_samples}. The top-level result similarly contains total and
-cross-block PVE summaries and, when stored, their samples.
+\code{pve_mean} and \code{pve_var}, and sampled fits also contain \code{pve_samples}.
+The top-level result similarly contains total and cross-block PVE
+summaries and, when stored, their samples.
 }
 \description{
 Fits a Bayesian linear regression with one or more predictor blocks using a
@@ -127,7 +127,7 @@ standardization; thus \eqn{D=p} by default.
 If every block supplies \code{expected_pve} and \code{residual_scale} is omitted,
 their sum \eqn{R^2} also calibrates the inverse-gamma residual prior:
 \deqn{\mathrm{residual\_scale} =
-  (\mathrm{residual\_shape}-1)(1-R^2)V_y.}
+    (\mathrm{residual\_shape}-1)(1-R^2)V_y.}
 This makes the prior mean residual variance equal to
 \eqn{(1-R^2)V_y} and therefore requires \code{residual_shape > 1}. It matches
 the ratio of prior mean variance components, rather than the prior mean
@@ -136,13 +136,13 @@ of the random PVE ratio itself. Because a \code{"Fixed"} block cannot supply
 whenever the residual variance is learned.
 
 A \code{"Fixed"} block assigns its coefficients an improper flat prior and
-samples them explicitly. It accepts only \code{X}, \code{model}, and
-\code{standardize}. The intercept remains a separate parameter obtained by
-centering all predictor blocks; do not add a constant column to represent it.
-All \code{"Fixed"} predictors across blocks must be jointly full column rank
-after centering (or on the supplied scale for a no-intercept
-sufficient-statistics fit), otherwise the posterior is improper and fitting
-stops. Standardization changes numerical conditioning but not the flat prior,
+samples them explicitly. It accepts only \code{X}, \code{model}, and \code{standardize}.
+The intercept remains a separate parameter obtained by centering all
+predictor blocks; do not add a constant column to represent it. All
+\code{"Fixed"} predictors across blocks must be jointly full column rank after
+centering (or on the supplied scale for a no-intercept sufficient-
+statistics fit), otherwise the posterior is improper and fitting stops.
+Standardization changes numerical conditioning but not the flat prior,
 and returned coefficients remain on the original predictor scale.
 
 A \code{"Normal"} block optionally accepts \code{var_shape = 2} and
@@ -150,24 +150,25 @@ A \code{"Normal"} block optionally accepts \code{var_shape = 2} and
 inverse-gamma prior with the supplied shape and scale. As an alternative
 to \code{var_scale}, \code{expected_pve} sets
 \deqn{\mathrm{var\_scale} =
-  (\mathrm{var\_shape}-1)V_g/D.}
+    (\mathrm{var\_shape}-1)V_g/D.}
 A \code{"SpikeSlab"} block optionally accepts \code{pi = c(a = 1, b = 1)},
 \code{var_shape = 2}, and \code{var_scale = 1}. Its shared slab variance has an
 inverse-gamma prior with the supplied shape and scale. With
 \eqn{q=\mathrm{E}(\pi)=a/(a+b)}, \code{expected_pve} instead sets
 \deqn{\mathrm{var\_scale} =
-  (\mathrm{var\_shape}-1)V_g/(qD).}
+    (\mathrm{var\_shape}-1)V_g/(qD).}
 In either model, \code{var_shape} must exceed one when \code{expected_pve} is used.
 
 A \code{"GlobalLocal"}
 block optionally accepts
-\code{local_shape = c(a = 1, b = 0.5)} and \code{global_scale = 1}.
-Alternatively, supply \code{expected_nonzero} and
-\code{reference_residual_var} together to calibrate the global scale as
+\code{local_shape = c(a = 1, b = 0.5)} and \code{global_scale = 1}. Alternatively,
+supply \code{expected_nonzero} and \code{reference_residual_var} together to calibrate
+the global scale as
 \deqn{\mathrm{global\_scale} =
-  \frac{p_0}{p-p_0}\frac{\sigma_0}{\sqrt{n}},}
-where \eqn{p_0} is \code{expected_nonzero}, \eqn{\sigma_0} is the square root
-of \code{reference_residual_var}, and \eqn{p} is the number of predictors in that
+    \frac{p_0}{p-p_0}\frac{\sigma_0}{\sqrt{n}},}
+where \eqn{p_0} is \code{expected_nonzero}, \eqn{\sigma_0} is
+the square root of \code{reference_residual_var}, and \eqn{p} is the number of
+predictors in that
 block. The calibrated fields are mutually exclusive with \code{global_scale}.
 \code{expected_pve} may replace \code{reference_residual_var}. In that case every
 penalized block must supply \code{expected_pve}; their sum \eqn{R^2} defines
@@ -176,8 +177,8 @@ formula. Because the supported beta-prime local priors do not generally
 have a finite signal-variance moment, \code{expected_pve} calibrates the
 residual reference for GlobalLocal rather than matching its block signal
 variance directly.
-This expected-sparsity calibration is derived for the horseshoe and is a useful
-scale heuristic for other beta-prime local priors. Its hierarchy is
+This expected-sparsity calibration is derived for the horseshoe and is a
+useful scale heuristic for other beta-prime local priors. Its hierarchy is
 \deqn{\beta_j \mid \tau^2,\psi_j \sim N(0,\tau^2\psi_j),\qquad
   \psi_j \sim \mathrm{BetaPrime}(a,b),}
 with \eqn{\tau \sim C^+(0,\mathrm{global\_scale})}. Thus the default is
@@ -195,23 +196,24 @@ As an alternative to \code{var_scale}, define
 \eqn{\bar\gamma=\sum_c\{\alpha_c/\sum_k\alpha_k\}\gamma_c};
 \code{expected_pve} then sets
 \deqn{\mathrm{var\_scale} =
-  (\mathrm{var\_shape}-1)V_g/(D\bar\gamma).}
+    (\mathrm{var\_shape}-1)V_g/(D\bar\gamma).}
 Here too, \code{var_shape} must exceed one.
 The coefficient priors are independent of the residual variance.
 
-For a retained draw, let \eqn{f_b=X_b\beta_b}, \eqn{f=\sum_b f_b}, and
-\eqn{d=n-1} for a model with an intercept or \eqn{d=n} otherwise. Total PVE is
+For a retained draw, let \eqn{f_b=X_b\beta_b},
+\eqn{f=\sum_b f_b}, and \eqn{d=n-1} for a model with an intercept or
+\eqn{d=n} otherwise. Total PVE is
 \deqn{(\lVert f\rVert^2/d)/(\lVert f\rVert^2/d+\sigma_e^2).}
 Standalone block PVE replaces the numerator with
 \eqn{\lVert f_b\rVert^2/d}; these values need not sum to total PVE when
 blocks are correlated. \code{cross_block_pve} reports the difference between
-total PVE and their sum. Allocated block PVE instead uses \eqn{f_b'f/d} in
-the numerator, assigning cross-block covariance across the participating
-blocks so that their values sum to total PVE. Allocated values can be
-negative. PVE is evaluated only at retained draws, after burn-in and the main
-thinning schedule, but may still add appreciable matrix-vector work,
-approximately \eqn{O(np)} per retained draw for raw predictor data across all
-blocks.
+total PVE and their sum. Allocated block PVE instead uses
+\eqn{f_b'f/d} in the numerator, assigning cross-block covariance across
+the participating blocks so that their values sum to total PVE. Allocated
+values can be negative. PVE is evaluated only at retained draws, after
+burn-in and the main thinning schedule, but may still add appreciable
+matrix-vector work, approximately \eqn{O(np)} per retained draw for raw
+predictor data across all blocks.
 }
 \examples{
 X <- cbind(x1 = 1:20, x2 = rep(c(0, 1), 10))

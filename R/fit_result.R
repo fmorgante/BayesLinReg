@@ -43,7 +43,7 @@
       if (store_coefficient_cov) {
         coefficient_cov <- .covariance_from_sums(
           samples$coefficient_sum[indices],
-          samples$coefficient_crossprod[indices, indices, drop = FALSE],
+          samples$coefficient_crossprod[[block_index]],
           samples$number_of_draws
         ) / outer(block$predictor_scale, block$predictor_scale)
       }

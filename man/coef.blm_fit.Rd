@@ -7,8 +7,8 @@
 \method{coef}{blm_fit}(object, ...)
 }
 \arguments{
-\item{object}{A fitted model returned by \code{\link[=blm]{blm()}} or
-\code{\link[=blm_ss]{blm_ss()}}.}
+\item{object}{A fitted model returned by \code{\link[=blm]{blm()}}, \code{\link[=blm_ss]{blm_ss()}}, or
+\code{\link[=blm_ss_eigen]{blm_ss_eigen()}}.}
 
 \item{...}{Additional arguments. Currently unused.}
 }

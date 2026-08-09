@@ -137,6 +137,19 @@ class BlockRng {
   std::uint64_t increment_;
 };
 
+struct MixtureWorkspace {
+  std::vector<double> weights;
+  std::vector<double> conditional_vars;
+  std::vector<double> conditional_means;
+
+  void ensure_size(const int size) {
+    if (static_cast<int>(weights.size()) >= size) return;
+    weights.resize(size);
+    conditional_vars.resize(size);
+    conditional_means.resize(size);
+  }
+};
+
 template <typename BlockMatrix>
 class BlockCoefficientWorker : public RcppParallel::Worker {
  public:
@@ -161,6 +174,7 @@ class BlockCoefficientWorker : public RcppParallel::Worker {
       std::vector<int>& inclusion,
       std::vector<int>& multi_component,
       std::vector<BlockRng>& rng,
+      std::vector<MixtureWorkspace>& mixture_workspace,
       std::vector<double>& residual_sse_change)
     : matrix_(matrix), block_id_(block_id), block_model_(block_model),
       model_local_index_(model_local_index), x_squared_(x_squared),
@@ -170,6 +184,7 @@ class BlockCoefficientWorker : public RcppParallel::Worker {
       learn_residual_var_(learn_residual_var), coefficient_(coefficient),
       corrected_rhs_(corrected_rhs), inclusion_(inclusion),
       multi_component_(multi_component), rng_(rng),
+      mixture_workspace_(mixture_workspace),
       residual_sse_change_(residual_sse_change) {}
 
   void operator()(const std::size_t begin, const std::size_t end) {
@@ -190,9 +205,11 @@ class BlockCoefficientWorker : public RcppParallel::Worker {
 
         if (model == PriorModel::SpikeMultiSlab) {
           const int component_count = multi_gamma_[prior_block].size();
-          std::vector<double> weights(component_count, 0.0);
-          std::vector<double> conditional_vars(component_count, 0.0);
-          std::vector<double> conditional_means(component_count, 0.0);
+          MixtureWorkspace& workspace = mixture_workspace_[gram_block];
+          workspace.ensure_size(component_count);
+          std::vector<double>& weights = workspace.weights;
+          std::vector<double>& conditional_vars = workspace.conditional_vars;
+          std::vector<double>& conditional_means = workspace.conditional_means;
           double maximum_log_weight = -std::numeric_limits<double>::infinity();
           for (int component = 0; component < component_count; ++component) {
             weights[component] = std::log(std::max(
@@ -309,6 +326,7 @@ class BlockCoefficientWorker : public RcppParallel::Worker {
   std::vector<int>& inclusion_;
   std::vector<int>& multi_component_;
   std::vector<BlockRng>& rng_;
+  std::vector<MixtureWorkspace>& mixture_workspace_;
   std::vector<double>& residual_sse_change_;
 };
 
@@ -334,6 +352,7 @@ void parallel_coefficient_sweep(
     std::vector<int>& inclusion,
     std::vector<int>& multi_component,
     std::vector<BlockRng>& rng,
+    std::vector<MixtureWorkspace>& mixture_workspace,
     double& residual_sse,
     const int nthreads) {
   std::vector<double> residual_sse_change(matrix.block_count(), 0.0);
@@ -341,7 +360,8 @@ void parallel_coefficient_sweep(
     matrix, block_id.begin(), block_model, model_local_index,
     x_squared, residual_var, normal_var, pi, slab_var, tau_sq, local_var,
     multi_gamma, multi_pi, multi_var, learn_residual_var, coefficient,
-    corrected_rhs, inclusion, multi_component, rng, residual_sse_change
+    corrected_rhs, inclusion, multi_component, rng, mixture_workspace,
+    residual_sse_change
   );
   RcppParallel::parallelFor(
     0, matrix.block_count(), worker, 1, nthreads

@@ -8,4 +8,5 @@
 #' @useDynLib BayesLinReg, .registration = TRUE
 #' @importFrom GIGrvg rgig
 #' @importFrom Rcpp evalCpp
+#' @importFrom RcppParallel RcppParallelLibs
 "_PACKAGE"

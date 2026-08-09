@@ -105,8 +105,8 @@ blm_ss_eigen <- function(
     residual_shape = NULL, residual_scale = NULL,
     reference_response_var = NULL,
     iterations = 4000L, burnin = 1000L, thin = 1L,
-    verbose = FALSE, nchains = 1L, nthreads = 1L, store_samples = TRUE,
-    store_coefficient_cov = TRUE, check_eigenvectors = FALSE,
+    verbose = FALSE, nchains = 1L, nthreads = 1L, store_samples = FALSE,
+    store_coefficient_cov = FALSE, check_eigenvectors = FALSE,
     compute_pve = FALSE,
     pve_type = c("standalone", "allocated")) {
   pve_controls <- .validate_pve_controls(compute_pve, pve_type)

@@ -56,8 +56,8 @@ specifies \code{expected_pve}. For \code{output = "eigen"}, \code{XtX} is replac
 \code{XtX_eigenvectors_raw}, \code{XtX_eigenvalues_raw}, and
 \code{XtX_eigenvalue_tolerance}. These are matrices and a scalar for matrix
 \code{LD}, or matching named lists and a named vector for list \code{LD}. Raw
-eigenpairs are returned without filtering or modification and therefore are
-not necessarily valid inputs to \code{\link[=blm_ss_eigen]{blm_ss_eigen()}}, which requires
+eigenpairs are returned without filtering or modification and therefore
+are not necessarily valid inputs to \code{\link[=blm_ss_eigen]{blm_ss_eigen()}}, which requires
 strictly positive eigenvalues.
 }
 \description{
@@ -71,12 +71,12 @@ Let \eqn{z_j=\hat b_j/\hat s_j} and
 where \eqn{\nu} is \code{residual_df}. On the standardized scale, the function
 returns
 \deqn{X'X=(n-1)R,\quad
-      X'y=\sqrt{n-1}\,\sqrt{a}\,z,\quad y'y=n-1.}
+        X'y=\sqrt{n-1}\,\sqrt{a}\,z,\quad y'y=n-1.}
 When \code{response_var} is supplied and the original scale is requested, it
 sets
 \deqn{d_j=response\_var\,a_j/\hat s_j^2,}
 \deqn{X'X=D^{1/2}RD^{1/2},\quad X'y=D\hat b,\quad
-      y'y=(n-1)response\_var.}
+        y'y=(n-1)response\_var.}
 
 These are exact centered cross-products when the marginal statistics are
 ordinary least-squares results from a common sample and \code{LD} is the
@@ -93,12 +93,12 @@ triangular representation for \code{\link[=blm_ss]{blm_ss()}} storage planning.
 The function performs only basic input validation. It does not diagnose
 allele flips or broader incompatibility between the GWAS statistics and
 LD. Eigen output uses a complete dense eigendecomposition. Matrix input
-requires \eqn{O(p^2)} memory and \eqn{O(p^3)} time; list input processes one
-scaled block at a time and requires peak eigendecomposition storage for the
-largest block. Every eigenpair is returned, including zero and negative
-eigenvalues. Block-specific warnings identify negative eigenvalues. Users
-must choose the eigenpairs passed to \code{\link[=blm_ss_eigen]{blm_ss_eigen()}} and calculate the
-corresponding \code{XtX_prop_var} values.
+requires \eqn{O(p^2)} memory and \eqn{O(p^3)} time; list input processes
+one scaled block at a time and requires peak eigendecomposition storage
+for the largest block. Every eigenpair is returned, including zero and
+negative eigenvalues. Block-specific warnings identify negative
+eigenvalues. Users must choose the eigenpairs passed to \code{\link[=blm_ss_eigen]{blm_ss_eigen()}}
+and calculate the corresponding \code{XtX_prop_var} values.
 }
 \examples{
 set.seed(1)

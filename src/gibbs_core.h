@@ -185,12 +185,19 @@ Rcpp::List blm_gibbs_core(
   );
   Rcpp::NumericVector coefficient_sum(p);
   Rcpp::NumericVector coefficient_sum_sq(p);
-  // Stored draws are used to compute their covariance after sampling.
-  const int covariance_dimension =
-    !store_samples && store_coefficient_cov ? p : 0;
-  Rcpp::NumericMatrix coefficient_crossprod(
-    covariance_dimension, covariance_dimension
-  );
+  // Only within-prior-block covariance matrices are returned. Accumulate the
+  // matching block cross-products rather than a global p-by-p matrix.
+  Rcpp::List coefficient_crossprod(number_of_blocks);
+  for (int block = 0; block < number_of_blocks; ++block) {
+    if (!store_samples && store_coefficient_cov) {
+      const int block_size = static_cast<int>(block_predictors[block].size());
+      coefficient_crossprod[block] = Rcpp::NumericMatrix(
+        block_size, block_size
+      );
+    } else {
+      coefficient_crossprod[block] = R_NilValue;
+    }
+  }
   double intercept_sum = 0.0;
   double intercept_sum_sq = 0.0;
   double residual_var_sum = 0.0;
@@ -287,6 +294,9 @@ Rcpp::List blm_gibbs_core(
   std::vector< std::vector<double> > multi_gamma(number_of_blocks);
   std::vector< std::vector<double> > multi_pi_alpha(number_of_blocks);
   std::vector< std::vector<double> > multi_pi(number_of_blocks);
+  std::vector< std::vector<double> > multi_log_weights(number_of_blocks);
+  std::vector< std::vector<double> > multi_conditional_vars(number_of_blocks);
+  std::vector< std::vector<double> > multi_conditional_means(number_of_blocks);
   for (int block = 0; block < number_of_blocks; ++block) {
     if (prior_models[block] == PriorModel::Normal) {
       normal_var[block] =
@@ -307,6 +317,9 @@ Rcpp::List blm_gibbs_core(
       multi_pi_alpha[block] =
         Rcpp::as< std::vector<double> >(alpha_values);
       multi_pi[block].resize(alpha_values.size());
+      multi_log_weights[block].resize(alpha_values.size());
+      multi_conditional_vars[block].resize(alpha_values.size());
+      multi_conditional_means[block].resize(alpha_values.size());
       double alpha_total = 0.0;
       for (int component = 0; component < alpha_values.size(); ++component) {
         alpha_total += alpha_values[component];
@@ -342,7 +355,50 @@ Rcpp::List blm_gibbs_core(
   int next_progress_percent = 10;
   int last_reported_iteration = 0;
   const int residual_refresh_interval = 100;
+  const double residual_sse_relative_tolerance =
+    std::sqrt(std::numeric_limits<double>::epsilon());
+  auto reconstruct_sufficient_state = [&](const bool fitted_is_current,
+                                            const int iteration) {
+    if (!fitted_is_current) {
+      summary_XtX.multiply(coefficient, fitted_crossproduct);
+      center_dot = summary_XtX.center_dot(coefficient);
+      for (int j = 0; j < p; ++j) {
+        corrected_rhs[j] = summary_Xty[j] - fitted_crossproduct[j];
+      }
+    }
+    double linear = 0.0;
+    double quadratic = 0.0;
+    for (int j = 0; j < p; ++j) {
+      linear += coefficient[j] * summary_Xty[j];
+      quadratic += coefficient[j] * summary_XtX.centered_fitted(
+        fitted_crossproduct[j], j, center_dot
+      );
+    }
+    const double reconstructed_sse =
+      summary_yty - 2.0 * linear + quadratic;
+    const double scale = std::max({
+      1.0, std::abs(summary_yty), 2.0 * std::abs(linear),
+      std::abs(quadratic)
+    });
+    const double tolerance = residual_sse_relative_tolerance * scale;
+    if (!std::isfinite(reconstructed_sse)) {
+      Rcpp::stop(
+        "The reconstructed residual SSE is non-finite at Gibbs iteration %d.",
+        iteration
+      );
+    }
+    if (reconstructed_sse < -tolerance) {
+      Rcpp::stop(
+        "The reconstructed residual SSE is materially negative at Gibbs "
+        "iteration %d (SSE %.6g; tolerance %.6g). The supplied sufficient "
+        "statistics are incompatible.",
+        iteration, reconstructed_sse, tolerance
+      );
+    }
+    residual_sse = std::max(0.0, reconstructed_sse);
+  };
   std::vector<BlockRng> block_rng;
+  std::vector<MixtureWorkspace> parallel_mixture_workspace;
   if (nthreads > 1) {
     if constexpr (is_parallel_block_matrix<SummaryMatrix>::value) {
       const std::uint64_t seed_high = static_cast<std::uint64_t>(
@@ -353,6 +409,7 @@ Rcpp::List blm_gibbs_core(
       );
       const std::uint64_t base_seed = (seed_high << 32) | seed_low;
       block_rng.reserve(summary_XtX.block_count());
+      parallel_mixture_workspace.resize(summary_XtX.block_count());
       for (int block = 0; block < summary_XtX.block_count(); ++block) {
         block_rng.emplace_back(
           splitmix64(base_seed + 2 * static_cast<std::uint64_t>(block)),
@@ -371,8 +428,8 @@ Rcpp::List blm_gibbs_core(
           summary_XtX, block_id, prior_models, model_local_index, x_squared,
           residual_var, normal_var, pi, slab_var, tau_sq, local_var,
           multi_gamma, multi_pi, multi_var, learn_residual_var, coefficient,
-          corrected_rhs, inclusion, multi_component, block_rng, residual_sse,
-          nthreads
+          corrected_rhs, inclusion, multi_component, block_rng,
+          parallel_mixture_workspace, residual_sse, nthreads
         );
         parallel_sweep = true;
       }
@@ -405,9 +462,11 @@ Rcpp::List blm_gibbs_core(
       }
       if (model == PriorModel::SpikeMultiSlab) {
         const int component_count = multi_gamma[block].size();
-        std::vector<double> log_weights(component_count, 0.0);
-        std::vector<double> conditional_vars(component_count, 0.0);
-        std::vector<double> conditional_means(component_count, 0.0);
+        std::vector<double>& log_weights = multi_log_weights[block];
+        std::vector<double>& conditional_vars =
+          multi_conditional_vars[block];
+        std::vector<double>& conditional_means =
+          multi_conditional_means[block];
         double maximum_log_weight = -std::numeric_limits<double>::infinity();
         for (int component = 0; component < component_count; ++component) {
           log_weights[component] = std::log(std::max(
@@ -537,23 +596,16 @@ Rcpp::List blm_gibbs_core(
     // Reconstruct accumulated state periodically to limit floating-point drift.
     if (iteration % residual_refresh_interval == 0) {
       if (use_sufficient_statistics) {
-        double quadratic = 0.0;
-        double linear = 0.0;
-        if (!streaming_state_reconstructed) {
+        if (learn_residual_var) {
+          reconstruct_sufficient_state(
+            streaming_state_reconstructed, iteration
+          );
+        } else if (!streaming_state_reconstructed) {
           summary_XtX.multiply(coefficient, fitted_crossproduct);
           center_dot = summary_XtX.center_dot(coefficient);
           for (int j = 0; j < p; ++j) {
             corrected_rhs[j] = summary_Xty[j] - fitted_crossproduct[j];
           }
-        }
-        for (int j = 0; j < p; ++j) {
-          linear += coefficient[j] * summary_Xty[j];
-          quadratic += coefficient[j] * summary_XtX.centered_fitted(
-            fitted_crossproduct[j], j, center_dot
-          );
-        }
-        if (learn_residual_var) {
-          residual_sse = summary_yty - 2.0 * linear + quadratic;
         }
       } else {
         const double* design_begin = center_observations
@@ -703,7 +755,16 @@ Rcpp::List blm_gibbs_core(
 
     if (learn_residual_var) {
       double sum_squared_residuals = residual_sse;
-      if (!use_sufficient_statistics) {
+      if (use_sufficient_statistics) {
+        const double preliminary_tolerance = residual_sse_relative_tolerance *
+          std::max(1.0, std::abs(summary_yty));
+        if (residual_sse < -preliminary_tolerance) {
+          reconstruct_sufficient_state(
+            streaming_state_reconstructed, iteration
+          );
+        }
+        sum_squared_residuals = residual_sse;
+      } else {
         const Eigen::Map<const Eigen::VectorXd> residual(
           residuals.data(), n
         );
@@ -892,14 +953,21 @@ Rcpp::List blm_gibbs_core(
           }
         }
         if (store_coefficient_cov) {
-          Eigen::Map<Eigen::MatrixXd> crossproduct(
-            coefficient_crossprod.begin(), p, p
-          );
-          const Eigen::Map<const Eigen::VectorXd> coefficient_vector(
-            coefficient.data(), p
-          );
-          crossproduct.noalias() +=
-            coefficient_vector * coefficient_vector.transpose();
+          for (int block = 0; block < number_of_blocks; ++block) {
+            const std::vector<int>& predictors = block_predictors[block];
+            Rcpp::NumericMatrix crossproduct = coefficient_crossprod[block];
+            const int block_size = static_cast<int>(predictors.size());
+            for (int column = 0; column < block_size; ++column) {
+              const double column_coefficient =
+                coefficient[predictors[column]];
+              double* destination = crossproduct.begin() +
+                static_cast<std::size_t>(block_size) * column;
+              for (int row = 0; row < block_size; ++row) {
+                destination[row] +=
+                  coefficient[predictors[row]] * column_coefficient;
+              }
+            }
+          }
         }
         intercept_sum += intercept_draw;
         intercept_sum_sq += intercept_draw * intercept_draw;

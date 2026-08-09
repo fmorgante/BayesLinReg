@@ -284,9 +284,6 @@
       "intercept_sum", "intercept_sum_sq", "residual_var_sum",
       "residual_var_sum_sq"
     )
-    if (store_coefficient_cov) {
-      summary_names <- c(summary_names, "coefficient_crossprod")
-    }
     if (compute_pve) {
       summary_names <- c(
         summary_names, "block_pve_sum", "block_pve_sum_sq",
@@ -317,6 +314,16 @@
     combined <- stats::setNames(lapply(summary_names, function(name) {
       Reduce(`+`, lapply(chain_samples, `[[`, name))
     }), summary_names)
+    if (store_coefficient_cov) {
+      combined$coefficient_crossprod <- lapply(
+        seq_along(block_model),
+        function(block) {
+          Reduce(`+`, lapply(chain_samples, function(samples) {
+            samples$coefficient_crossprod[[block]]
+          }))
+        }
+      )
+    }
     if (any(block_model == 3L)) {
       list_names <- c(
         "multi_component_sum", "multi_pi_sum", "multi_pi_sum_sq"

@@ -35,13 +35,11 @@ $$
 N(\bar y-\sum_j\bar x_j\beta_j,\frac{\sigma_e^2}{n}).
 $$
 
-The package currently records the conditional mean
-$\bar y-\sum_j\bar x_j\beta_j$ at each retained coefficient draw; it does not
-add an independent $N(0,\sigma_e^2/n)$ draw. Therefore the reported intercept
-variance reflects coefficient uncertainty but omits this conditional intercept
-variance. The same qualification applies to the prediction intervals in
-Section 1.10. A sufficient-statistic fit omits the intercept entirely when
-`X_means` and `y_mean` are not supplied.
+At each retained coefficient and residual-variance draw, the package also draws
+the intercept from this conditional normal distribution. Reported intercept
+uncertainty and prediction intervals therefore include the conditional
+$\sigma_e^2/n$ contribution. A sufficient-statistic fit omits the intercept
+entirely when `X_means` and `y_mean` are not supplied.
 
 When `standardize = FALSE`, $s_j=1$. Priors described below apply to the
 working-scale coefficients $\theta_j$. Different blocks may use different
@@ -440,14 +438,10 @@ $$
 $$
 
 The mixture quantiles are found deterministically by root-finding; no additional
-posterior-predictive simulation is performed. Because retained intercept values
-are conditional means rather than conditional intercept draws, these intervals
-do not include the additional $\sigma_e^2/n$ uncertainty associated with a
-flat, integrated-out intercept. Including that uncertainty analytically would
-replace each point mass used for the conditional-mean credible distribution by
-$N(\eta_{\ast}^{(s)},\sigma_e^{2(s)}/n)$, and would replace each current
-predictive-mixture component by
-$N\{\eta_{\ast}^{(s)},\sigma_e^{2(s)}(1+1/n)\}$.
+posterior-predictive simulation is performed. Each $\mu^{(s)}$ is a retained
+conditional intercept draw, so the credible distribution includes intercept
+uncertainty. The predictive mixture additionally includes the new observation's
+residual variation through $\sigma_e^{2(s)}$.
 
 ## 2. Implementation details
 
@@ -651,8 +645,9 @@ The package:
 - periodically reconstructs residual or cross-product state;
 - uses log-scale component probabilities and stable logistic calculations;
 - bounds tiny GIG $\chi$ parameters away from zero;
-- guards residual SSE and PVE quadratic forms against small negative values
-  caused by floating-point error; and
+- clamps residual SSE and PVE quadratic forms only when their negative values
+  are within scale-aware floating-point tolerances, and stops when a
+  reconstructed residual SSE is materially negative; and
 - optionally checks positive semidefiniteness and joint compatibility of
   sufficient statistics.
 
@@ -661,19 +656,27 @@ GWAS statistics; that remains an input-modeling responsibility.
 
 ### 2.7 Posterior storage and summaries
 
+The public fitting functions default to `store_samples = FALSE` and
+`store_coefficient_cov = FALSE`, so their default output contains online
+posterior means and marginal variances without individual draws or full
+coefficient covariance matrices.
+
 With `store_samples = TRUE`, retained coefficient, variance, inclusion,
 component, PVE, intercept, and residual-variance draws are stored as applicable.
 With `store_samples = FALSE`, means and variances are accumulated online.
 
-`store_coefficient_cov = TRUE` additionally accumulates a full coefficient
-cross-product for every retained draw, requiring $O(p_b^2)$ storage and work
-for block $b$. Turning it off retains only marginal coefficient variances.
+`store_coefficient_cov = TRUE` additionally accumulates a coefficient
+cross-product for every retained draw within each `ETA` block, requiring
+$O(\sum_b p_b^2)$ storage and work. Turning it off retains only marginal
+coefficient variances.
 The scalable `summary()` method reports block-level summaries by default and
 requires explicit selection before producing large coefficient tables.
 
 All returned coefficients and their covariance summaries are transformed back
 to the original predictor scales. Prediction therefore accepts predictors on
 the same scales and in the same block structure as those supplied at fitting.
+Interval predictions process new observations in reusable chunks, bounding the
+temporary fitted-draw matrix by `chunk_size` times the number of retained draws.
 
 ## 3. Source map
 

@@ -9,12 +9,13 @@
   newdata,
   interval = c("none", "credible", "prediction"),
   level = 0.95,
+  chunk_size = 1000L,
   ...
 )
 }
 \arguments{
-\item{object}{A fitted model returned by \code{\link[=blm]{blm()}} or
-\code{\link[=blm_ss]{blm_ss()}}.}
+\item{object}{A fitted model returned by \code{\link[=blm]{blm()}}, \code{\link[=blm_ss]{blm_ss()}}, or
+\code{\link[=blm_ss_eigen]{blm_ss_eigen()}}.}
 
 \item{newdata}{For a single-block fit, a numeric vector, matrix, or data
 frame containing that block's predictors. A vector represents one
@@ -26,20 +27,28 @@ reordered to match the fitted predictors.}
 \item{interval}{Interval to return. \code{"none"} returns only posterior-mean
 predictions. \code{"credible"} returns an equal-tailed posterior interval for
 the conditional mean. \code{"prediction"} returns an equal-tailed posterior
-predictive interval that also includes residual variation. Intervals require
-a fit created with \code{store_samples = TRUE}.}
+predictive interval that also includes residual variation. Intervals
+require a fit created with \code{store_samples = TRUE}.}
 
 \item{level}{Coverage probability for credible or prediction intervals.}
+
+\item{chunk_size}{Positive integer giving the maximum number of new
+observations whose retained fitted-value draws are materialized at once.
+Chunking bounds peak memory for interval prediction and does not affect
+point predictions.}
 
 \item{...}{Additional arguments. Currently unused.}
 }
 \value{
-With \code{interval = "none"}, a numeric vector of posterior-mean predictions.
-Otherwise, a matrix with columns \code{fit}, \code{lwr}, and \code{upr}.
+With \code{interval = "none"}, a numeric vector of posterior-mean
+predictions. Otherwise, a matrix with columns \code{fit}, \code{lwr}, and \code{upr}.
 }
 \description{
-Computes posterior-mean predictions and optional posterior intervals for new
-predictor values. Prediction intervals use deterministic quantiles of the
-equal-weight normal mixture induced by the retained coefficient and residual-
-variance draws.
+Computes posterior-mean predictions for new predictor values.
+}
+\details{
+Prediction intervals use deterministic quantiles of the
+equal-weight normal mixture induced by the retained coefficient and
+residual-variance draws; they do not add a second layer of Monte Carlo
+simulation.
 }

@@ -23,8 +23,8 @@ blm_ss(
   verbose = FALSE,
   nchains = 1L,
   nthreads = 1L,
-  store_samples = TRUE,
-  store_coefficient_cov = TRUE,
+  store_samples = FALSE,
+  store_coefficient_cov = FALSE,
   check_psd = FALSE,
   XtX_storage = c("auto", "speed", "memory"),
   XtX_memory_limit = 1024^3,
@@ -41,16 +41,6 @@ cross-product. Dense base-R matrices and compressed sparse \code{Matrix}
 objects of class \code{dgCMatrix} or \code{dsCMatrix} are supported. List and sparse
 inputs require \code{version = "Rcpp"}.}
 
-\item{XtX_storage}{Storage policy for symmetric sparse matrices, supplied
-either directly or within list input. \code{"speed"} expands them to general
-sparse matrices, \code{"memory"} chooses the smaller exact representation, and
-\code{"auto"} expands them only while the estimated total representation
-remains within \code{XtX_memory_limit}.}
-
-\item{XtX_memory_limit}{Positive approximate byte limit used by
-\code{XtX_storage = "auto"}. It controls internal Gram storage, not posterior
-draws or other fit allocations.}
-
 \item{Xty}{A finite predictor-response cross-product vector.}
 
 \item{ETA}{A prior specification or named list of prior blocks. Each block
@@ -65,13 +55,6 @@ required when \code{residual_var = NULL}.}
 \item{X_means, y_mean}{Optional predictor means and response mean. They must
 be supplied together. When omitted, the model is fitted without an
 intercept.}
-
-\item{check_psd}{If \code{TRUE}, use a full eigendecomposition to verify that the
-centered \code{XtX} is positive semidefinite and that \code{Xty} and \code{yty} are
-jointly compatible with it. The default, \code{FALSE}, avoids this
-\eqn{O(p^3)} validation cost. Symmetry and basic input checks are always
-performed. Sparse or list \code{XtX} is materialized as one dense matrix for
-this optional validation.}
 
 \item{residual_var}{A positive known residual variance, or \code{NULL} to learn
 it using an inverse-gamma prior.}
@@ -105,15 +88,32 @@ per chain using \code{\link[progressr:with_progress]{progressr::with_progress()}
 Values greater than one require \code{nchains = 1} and zero working predictor
 means. The default preserves the serial sampler and its RNG sequence.}
 
-\item{store_samples}{If \code{TRUE} (the default), retain and return individual
-posterior draws. If \code{FALSE}, compute posterior summaries online without
+\item{store_samples}{If \code{TRUE}, retain and return individual posterior draws.
+The default, \code{FALSE}, computes posterior summaries online without
 allocating draw matrices. Fits without stored samples cannot be passed to
 \code{\link[=assess_convergence]{assess_convergence()}}.}
 
-\item{store_coefficient_cov}{If \code{TRUE} (the default), return the full
-posterior coefficient covariance matrix for each \code{ETA} block. If \code{FALSE},
-return only the named vector of marginal coefficient variances and avoid
-the quadratic-size covariance accumulator when samples are not stored.}
+\item{store_coefficient_cov}{If \code{TRUE}, return the full posterior coefficient
+covariance matrix for each \code{ETA} block. The default, \code{FALSE}, returns only
+the named vector of marginal coefficient variances and avoids blockwise
+quadratic-size covariance accumulators when samples are not stored.}
+
+\item{check_psd}{If \code{TRUE}, use a full eigendecomposition to verify that the
+centered \code{XtX} is positive semidefinite and that \code{Xty} and \code{yty} are
+jointly compatible with it. The default, \code{FALSE}, avoids this
+\eqn{O(p^3)} validation cost. Symmetry and basic input checks are always
+performed. Sparse or list \code{XtX} is materialized as one dense matrix for
+this optional validation.}
+
+\item{XtX_storage}{Storage policy for symmetric sparse matrices, supplied
+either directly or within list input. \code{"speed"} expands them to general
+sparse matrices, \code{"memory"} chooses the smaller exact representation, and
+\code{"auto"} expands them only while the estimated total representation
+remains within \code{XtX_memory_limit}.}
+
+\item{XtX_memory_limit}{Positive approximate byte limit used by
+\code{XtX_storage = "auto"}. It controls internal Gram storage, not posterior
+draws or other fit allocations.}
 
 \item{compute_pve}{If \code{TRUE}, calculate block and total proportions of
 variance explained at retained posterior draws. The default, \code{FALSE},
@@ -158,10 +158,11 @@ A \code{"Fixed"} block uses a flat prior and is jointly rank-checked with every
 other fixed block using the centered and standardized fixed-predictor
 submatrix of \code{XtX}. This check is always performed and is separate from
 the optional full-matrix \code{check_psd} validation.
-Optional posterior PVE calculations use the centered cross-products and the
-definitions in \code{\link[=blm]{blm()}}. Their cost is quadratic in block size for a
+Optional posterior PVE calculations use the centered cross-products and
+the definitions in \code{\link[=blm]{blm()}}. Their cost is quadratic in block size for a
 dense \code{XtX} and proportional to the relevant stored entries for sparse
 input, at each retained draw.
+
 Coefficients are sampled with a right-hand-side update that maintains
 \eqn{X'y-X'X\beta}; individual-level pseudo-observations are not formed.
 For sparse \code{XtX}, the Rcpp sampler traverses only stored entries.
@@ -179,6 +180,13 @@ After \code{\link[=set.seed]{set.seed()}}, threaded runs are reproducible and us
 stream from the serial sampler.
 Set \code{check_psd = TRUE} when the supplied statistics are not known to come
 from a valid common data matrix and response vector.
+When residual variance is learned, the sampler also checks reconstructed
+residual SSE values during its existing periodic state refresh and whenever
+an incremental value becomes suspiciously negative. Values within a
+scale-aware floating-point tolerance are clamped to zero; materially
+negative values produce an incompatibility error. This runtime guard is
+inexpensive but does not prove that \code{XtX} is positive semidefinite, so it
+does not replace \code{check_psd = TRUE}.
 }
 \examples{
 X <- cbind(x1 = 1:20, x2 = rep(c(0, 1), 10))

@@ -15,6 +15,35 @@
   GIGrvg::rgig(n = n, lambda = lambda, chi = chi, psi = psi)
 }
 
+.guard_reconstructed_sse <- function(sse, yty, linear, quadratic,
+                                     iteration) {
+  scale <- max(1, abs(yty), 2 * abs(linear), abs(quadratic))
+  tolerance <- sqrt(.Machine$double.eps) * scale
+  if (!is.finite(sse)) {
+    stop(
+      sprintf(
+        "The reconstructed residual SSE is non-finite at Gibbs iteration %d.",
+        iteration
+      ),
+      call. = FALSE
+    )
+  }
+  if (sse < -tolerance) {
+    stop(
+      sprintf(
+        paste0(
+          "The reconstructed residual SSE is materially negative at Gibbs ",
+          "iteration %d (SSE %.6g; tolerance %.6g). The supplied ",
+          "sufficient statistics are incompatible."
+        ),
+        iteration, sse, tolerance
+      ),
+      call. = FALSE
+    )
+  }
+  max(0, sse)
+}
+
 .blm_gibbs <- function(y, x, residual_shape, residual_scale,
                        iterations, burnin, thin,
                        progress_callback = NULL,
@@ -106,9 +135,9 @@
     coefficient_sum <- numeric(number_of_predictors)
     coefficient_sum_sq <- numeric(number_of_predictors)
     if (store_coefficient_cov) {
-      coefficient_crossprod <- matrix(
-        0, number_of_predictors, number_of_predictors
-      )
+      coefficient_crossprod <- lapply(block_predictors, function(predictors) {
+        matrix(0, length(predictors), length(predictors))
+      })
     }
     intercept_sum <- intercept_sum_sq <- 0
     residual_var_sum <- residual_var_sum_sq <- 0
@@ -340,8 +369,12 @@
         fitted_crossproducts <- drop(XtX %*% coefficient)
         corrected_rhs <- Xty - fitted_crossproducts
         if (learn_residual_var) {
-          residual_sse <- yty - 2 * sum(coefficient * Xty) +
-            sum(coefficient * fitted_crossproducts)
+          linear <- sum(coefficient * Xty)
+          quadratic <- sum(coefficient * fitted_crossproducts)
+          residual_sse <- .guard_reconstructed_sse(
+            yty - 2 * linear + quadratic,
+            yty, linear, quadratic, iteration
+          )
         }
       } else {
         residuals <- y_centered - drop(x_centered %*% coefficient)
@@ -446,6 +479,17 @@
 
     if (learn_residual_var) {
       sum_squared_residuals <- if (use_sufficient_statistics) {
+        preliminary_tolerance <- sqrt(.Machine$double.eps) * max(1, abs(yty))
+        if (residual_sse < -preliminary_tolerance) {
+          fitted_crossproducts <- drop(XtX %*% coefficient)
+          corrected_rhs <- Xty - fitted_crossproducts
+          linear <- sum(coefficient * Xty)
+          quadratic <- sum(coefficient * fitted_crossproducts)
+          residual_sse <- .guard_reconstructed_sse(
+            yty - 2 * linear + quadratic,
+            yty, linear, quadratic, iteration
+          )
+        }
         max(0, residual_sse)
       } else {
         residual_sse_offset + sum(residuals^2)
@@ -556,8 +600,12 @@
         coefficient_sum <- coefficient_sum + coefficient
         coefficient_sum_sq <- coefficient_sum_sq + coefficient^2
         if (store_coefficient_cov) {
-          coefficient_crossprod <- coefficient_crossprod +
-            tcrossprod(coefficient)
+          for (block in seq_len(number_of_blocks)) {
+            predictors <- block_predictors[[block]]
+            coefficient_crossprod[[block]] <-
+              coefficient_crossprod[[block]] +
+                tcrossprod(coefficient[predictors])
+          }
         }
         intercept_sum <- intercept_sum + intercept_draw
         intercept_sum_sq <- intercept_sum_sq + intercept_draw^2

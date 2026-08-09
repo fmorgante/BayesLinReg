@@ -1,5 +1,11 @@
 library(BayesLinReg)
 
+blm_public <- BayesLinReg::blm
+blm <- function(..., store_samples = TRUE, store_coefficient_cov = TRUE) {
+  blm_public(..., store_samples = store_samples,
+             store_coefficient_cov = store_coefficient_cov)
+}
+
 X <- cbind(first = 1:20, second = rep(c(0, 1), 10))
 y <- 1 + 2 * X[, "first"] - X[, "second"]
 
@@ -28,6 +34,12 @@ stopifnot(
 new_X <- X[1:4, , drop = FALSE]
 credible <- predict(single_fit, new_X, interval = "credible", level = 0.8)
 predictive <- predict(single_fit, new_X, interval = "prediction", level = 0.8)
+credible_one_at_a_time <- predict(
+  single_fit, new_X, interval = "credible", level = 0.8, chunk_size = 1L
+)
+predictive_two_at_a_time <- predict(
+  single_fit, new_X, interval = "prediction", level = 0.8, chunk_size = 2L
+)
 prediction_draws <- sweep(
   tcrossprod(new_X, single_fit$ETA$ETA1$coefficient_samples),
   2L, single_fit$intercept_samples, FUN = "+"
@@ -42,6 +54,8 @@ stopifnot(
   isTRUE(all.equal(
     unname(credible[, c("lwr", "upr")]), unname(expected_bounds)
   )),
+  identical(credible_one_at_a_time, credible),
+  identical(predictive_two_at_a_time, predictive),
   all(predictive[, "lwr"] < predictive[, "upr"]),
   identical(
     predictive,
@@ -185,6 +199,11 @@ invalid_predictions <- list(
   function() predict(single_fit, matrix(1, nrow = 2, ncol = 3)),
   function() predict(single_fit, matrix(NA_real_, nrow = 1, ncol = 2)),
   function() predict(single_fit, X[1, , drop = FALSE], level = 1),
+  function() predict(single_fit, X[1, , drop = FALSE], chunk_size = 0),
+  function() predict(
+    single_fit, X[1, , drop = FALSE],
+    chunk_size = .Machine$integer.max + 1
+  ),
   function() predict(single_fit, X[1, , drop = FALSE], interval = "invalid"),
   function() predict(multi_fit, list(first_block = X[, "first"])),
   function() predict(multi_fit, list(

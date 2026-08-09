@@ -24,8 +24,8 @@ blm_ss_eigen(
   verbose = FALSE,
   nchains = 1L,
   nthreads = 1L,
-  store_samples = TRUE,
-  store_coefficient_cov = TRUE,
+  store_samples = FALSE,
+  store_coefficient_cov = FALSE,
   check_eigenvectors = FALSE,
   compute_pve = FALSE,
   pve_type = c("standalone", "allocated")
@@ -43,7 +43,7 @@ matrices representing an exactly block-diagonal centered cross-product.}
 the columns of \code{XtX_eigenvectors}, or a matching list of vectors.}
 
 \item{XtX_prop_var}{A number, or for list input one value per block, in
-\code{(0, 1]} declaring the proportion of the corresponding centered-\code{XtX}
+\verb{(0, 1]} declaring the proportion of the corresponding centered-\code{XtX}
 variance represented by the supplied eigenpairs.
 Use \code{1} only when all positive eigenpairs have been retained.}
 
@@ -51,8 +51,7 @@ Use \code{1} only when all positive eigenpairs have been retained.}
 predictor scale.}
 
 \item{ETA}{A prior specification or named list of prior blocks, with the
-same \code{indices}, prior parameters, and standardization options as
-\code{\link[=blm_ss]{blm_ss()}}.}
+same \code{indices}, prior parameters, and standardization options as \code{\link[=blm_ss]{blm_ss()}}.}
 
 \item{yty}{Optional finite, nonnegative response sum of squares. It is
 required when \code{residual_var = NULL}.}
@@ -71,8 +70,8 @@ when \code{residual_var = NULL}. \code{residual_scale} is also required unless e
 its value from the response variance not assigned to the blocks.}
 
 \item{reference_response_var}{Optional positive response variance used for
-\code{expected_pve} calibration. It is recovered from \code{yty} and
-\code{y_mean} when possible.}
+\code{expected_pve} calibration. It is recovered from \code{yty} and \code{y_mean} when
+possible.}
 
 \item{iterations}{Total Gibbs iterations when sampling is required.}
 
@@ -89,12 +88,15 @@ per chain using \code{\link[progressr:with_progress]{progressr::with_progress()}
 \item{nthreads}{Number of threads used within one Rcpp chain for list eigen
 input. Values above one require \code{nchains = 1}.}
 
-\item{store_samples}{If \code{TRUE} (the default), retain and return individual
-posterior draws. If \code{FALSE}, compute posterior summaries online without
-allocating draw matrices.}
+\item{store_samples}{If \code{TRUE}, retain and return individual posterior draws.
+The default, \code{FALSE}, computes posterior summaries online without
+allocating draw matrices. Fits without stored samples cannot be passed to
+\code{\link[=assess_convergence]{assess_convergence()}}.}
 
-\item{store_coefficient_cov}{If \code{TRUE} (the default), return the full
-posterior coefficient covariance matrix for each \code{ETA} block.}
+\item{store_coefficient_cov}{If \code{TRUE}, return the full posterior coefficient
+covariance matrix for each \code{ETA} block. The default, \code{FALSE}, returns only
+the named vector of marginal coefficient variances and avoids blockwise
+quadratic-size covariance accumulators when samples are not stored.}
 
 \item{check_eigenvectors}{If \code{TRUE}, check that the supplied eigenvectors
 are mutually orthonormal. The default avoids an
@@ -117,21 +119,20 @@ A \code{blm_fit} object. In addition to the usual fields, it records
 ranks and retained fractions, the cross-block assumption, and \code{nthreads}.
 }
 \description{
-Fits the same models as \code{\link[=blm]{blm()}} using eigenpairs of the centered
-predictor cross-product matrix. The supplied representation may be exact or
-truncated.
+Fits the same models as \code{\link[=blm]{blm()}} using eigenpairs of the centered predictor
+cross-product matrix. The supplied representation may be exact or truncated.
 }
 \details{
-Let \eqn{G=X_c'X_c}, \eqn{s=X_c'y_c}, and suppose the supplied eigenpairs
-give \eqn{G_q=U_q\Lambda_qU_q'}. The sampler uses
+Let \eqn{G=X_c'X_c}, \eqn{s=X_c'y_c}, and suppose the supplied
+eigenpairs give \eqn{G_q=U_q\Lambda_qU_q'}. The sampler uses
 \deqn{Q=\Lambda_q^{1/2}U_q',\qquad
-  w=\Lambda_q^{-1/2}U_q's}
+    w=\Lambda_q^{-1/2}U_q's}
 and maintains the transformed residual \eqn{w-Q\beta}. With
 \code{XtX_prop_var = 1}, this is an exact re-expression of the coefficient
 likelihood, subject to numerical precision. When \code{yty} is supplied, the
 response variation orthogonal to the predictor space is retained as a
-beta-independent SSE offset, so learning the residual variance also matches
-\code{\link[=blm_ss]{blm_ss()}}.
+beta-independent SSE offset, so learning the residual variance also
+matches \code{\link[=blm_ss]{blm_ss()}}.
 
 Values of \code{XtX_prop_var} below one explicitly request an approximate
 posterior based on the supplied eigenspace. Components of \code{Xty} outside
@@ -141,23 +142,24 @@ beta-independent SSE offset. Standardization uses the diagonal of
 constant. All \code{"Fixed"} predictors must be full rank within the retained
 eigenspace; this condition is checked before sampling.
 
-This entry point is implemented only with the Rcpp sampler. It does not compute
-an eigendecomposition internally, allowing a precomputed representation to be
-reused without an \eqn{O(p^3)} initialization.
-Optional posterior PVE calculations use the retained representation, at a
-cost of approximately \eqn{O(qp)} per retained draw across all blocks.
+This entry point is implemented only with the Rcpp sampler. It does not
+compute an eigendecomposition internally, allowing a precomputed
+representation to be reused without an \eqn{O(p^3)} initialization.
+Optional posterior PVE calculations use the retained representation, at
+a cost of approximately \eqn{O(qp)} per retained draw across all blocks.
 
-With list input, each matrix and corresponding eigenvalue vector defines one
-block of the centered cross-product matrix; all cross-block products are
-assumed to be exactly zero. Predictor order is obtained by concatenating the
-matrix rows. The implementation stores each block-specific transformed design
-and residual separately, requiring approximately \eqn{\sum_b p_b q_b} values
-instead of a global \eqn{p\sum_b q_b} pseudo-design. ETA prior blocks may cross
-eigen blocks. When \code{nthreads > 1}, coefficient sweeps are sequential within
-each eigen block and concurrent across blocks. Shared prior and residual
-parameters are updated after the workers join. Nonzero \code{X_means} are
-supported because the supplied eigenpairs must already represent centered
-\code{XtX}; independently decomposed uncentered blocks are not valid substitutes.
+With list input, each matrix and corresponding eigenvalue vector defines
+one block of the centered cross-product matrix; all cross-block products
+are assumed to be exactly zero. Predictor order is obtained by
+concatenating the matrix rows. The implementation stores each
+block-specific transformed design and residual separately, requiring
+approximately \eqn{\sum_b p_b q_b} values instead of a global
+\eqn{p\sum_b q_b} pseudo-design. ETA prior blocks may cross eigen blocks.
+When \code{nthreads > 1}, coefficient sweeps are sequential within each eigen
+block and concurrent across blocks. Shared prior and residual parameters
+are updated after the workers join. Nonzero \code{X_means} are supported
+because the supplied eigenpairs must already represent centered \code{XtX};
+independently decomposed uncentered blocks are not valid substitutes.
 }
 \examples{
 X <- cbind(x1 = 1:20, x2 = rep(c(0, 1), 10))

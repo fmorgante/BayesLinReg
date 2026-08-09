@@ -17,8 +17,7 @@
 \method{print}{summary.blm_fit}(x, ...)
 }
 \arguments{
-\item{object}{A fitted model returned by \code{\link[=blm]{blm()}},
-\code{\link[=blm_ss]{blm_ss()}}, or
+\item{object}{A fitted model returned by \code{\link[=blm]{blm()}}, \code{\link[=blm_ss]{blm_ss()}}, or
 \code{\link[=blm_ss_eigen]{blm_ss_eigen()}}.}
 
 \item{probs}{Numeric vector of posterior probabilities used for empirical
@@ -26,9 +25,9 @@ quantiles. Quantiles are unavailable when \code{store_samples = FALSE}.}
 
 \item{coefficients}{Coefficient-table policy. \code{"auto"} reports all
 coefficients only when their number does not exceed \code{max_coefficients};
-otherwise it omits the table. \code{"none"} always omits it, \code{"top"}
-reports at most \code{max_coefficients} ranked predictors, and \code{"all"}
-reports every predictor.}
+otherwise it omits the table. \code{"none"} always omits it, \code{"top"} reports
+at most \code{max_coefficients} ranked predictors, and \code{"all"} reports every
+predictor.}
 
 \item{max_coefficients}{Nonnegative integer controlling the \code{"auto"} and
 \code{"top"} modes.}
@@ -36,13 +35,13 @@ reports every predictor.}
 \item{rank_by}{Ranking used with \code{coefficients = "top"}.
 \code{"absolute_mean"} ranks by absolute posterior coefficient mean.
 \code{"inclusion_probability"} is available when at least one block has a
-discrete spike component; coefficients without inclusion probabilities sort
-after those with probabilities. Absolute-mean ranking uses coefficients
-transformed back to the original predictor scale. It is therefore not
-invariant to predictor rescaling and is most meaningful when predictors use
-comparable units. Internal standardization does not alter this behavior. For
-spike models with differently scaled predictors, inclusion-probability ranking
-is generally preferable.}
+discrete spike component; coefficients without inclusion probabilities
+sort after those with probabilities. Absolute-mean ranking uses
+coefficients transformed back to the original predictor scale. It is
+therefore not invariant to predictor rescaling and is most meaningful
+when predictors use comparable units. Internal standardization does not
+alter this behavior. For spike models with differently scaled predictors,
+inclusion-probability ranking is generally preferable.}
 
 \item{...}{Additional arguments. Currently unused.}
 
@@ -50,13 +49,13 @@ is generally preferable.}
 }
 \value{
 An object of class \code{summary.blm_fit} containing block-level and
-residual-variance summaries, an intercept summary when fitted, the requested
-coefficient table, and, when available, hyperparameter and
-variance-explained tables. The print method returns \code{x} invisibly.
+residual-variance summaries, an intercept summary when fitted, the
+requested coefficient table, and, when available, hyperparameter and
+variance-explained tables. The print method returns its input invisibly.
 }
 \description{
 Organizes scalable block-level, residual-variance, hyperparameter, and
-variance-explained summaries. Coefficient tables are adaptive and opt-in for
-high-dimensional fits. Empirical posterior quantiles are computed only for
-reported coefficients when the fit retained individual draws.
+variance-explained summaries. Coefficient tables are adaptive and opt-in
+for high-dimensional fits. Empirical posterior quantiles are computed only
+for reported coefficients when the fit retained individual draws.
 }

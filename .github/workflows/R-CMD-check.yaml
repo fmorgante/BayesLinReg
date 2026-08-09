@@ -17,6 +17,8 @@ jobs:
         config:
           - {os: ubuntu-latest, eigen_blas: "no"}
           - {os: ubuntu-latest, eigen_blas: "yes"}
+          - {os: macos-latest, eigen_blas: "no"}
+          - {os: macos-latest, eigen_blas: "yes"}
           - {os: windows-latest, eigen_blas: "no"}
           - {os: windows-latest, eigen_blas: "yes"}
     env:
@@ -40,3 +42,34 @@ jobs:
       - uses: r-lib/actions/check-r-package@v2
         with:
           upload-snapshots: true
+
+  sanitizers:
+    name: ubuntu-latest (ASan + UBSan)
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      R_KEEP_PKG_SOURCE: yes
+      ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::rcmdcheck
+          needs: check
+
+      - name: Configure compiler sanitizers
+        run: |
+          mkdir -p ~/.R
+          echo 'CXX17 = g++' >> ~/.R/Makevars
+          echo 'CXX17FLAGS = -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer' >> ~/.R/Makevars
+          echo 'SHLIB_LDFLAGS += -fsanitize=address,undefined' >> ~/.R/Makevars
+          echo "LD_PRELOAD=$(g++ -print-file-name=libasan.so)" >> "$GITHUB_ENV"
+
+      - uses: r-lib/actions/check-r-package@v2

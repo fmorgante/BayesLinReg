@@ -67,7 +67,8 @@ y <- drop(1 + X %*% beta + rnorm(n))
 fit <- blm(
   y,
   ETA = list(X = X, model = "Normal", var_shape = 2, var_scale = 10),
-  residual_var = 1
+  residual_var = 1,
+  store_samples = TRUE
 )
 
 fit$ETA$ETA1$coefficient_mean
@@ -98,7 +99,9 @@ Quantiles are computed only for reported coefficients.
 Credible intervals describe uncertainty in the conditional mean. Prediction
 intervals additionally include residual variation. Both require
 `store_samples = TRUE`; point predictions and mean/SD summaries remain
-available for memory-efficient online fits.
+available for memory-efficient online fits. Interval predictions are processed
+in chunks of at most 1,000 observations by default; use `chunk_size` in
+`predict()` to change that bound.
 
 The available models are `"Normal"`, `"SpikeSlab"`, `"SpikeMultiSlab"`,
 `"GlobalLocal"`, and `"Fixed"`. A `"Fixed"` block gives its coefficients a
@@ -112,7 +115,7 @@ predictors, model, standardization, and prior parameters.
 
 For a high-dimensional global-local block, the half-Cauchy global-scale prior
 can be calibrated from an expected number of nonzero coefficients and a
-reference residual standard deviation:
+reference residual variance:
 
 ```r
 fit_global_local <- blm(
@@ -171,25 +174,25 @@ Fits containing a `"Fixed"` block always require an explicit `residual_scale`
 when residual variance is learned, because fixed effects do not have an
 `expected_pve` prior target.
 
-By default, `blm()` returns the retained posterior draws. For large models,
-use `store_samples = FALSE` to compute posterior summaries online and keep the
-fitted object smaller:
+By default, `blm()` computes posterior summaries online without retaining
+individual draws or full coefficient covariance matrices. Request either form
+of posterior storage explicitly when needed:
 
 ```r
 fit_summary <- blm(
   y,
   ETA = list(X = X, model = "Normal"),
   residual_var = 1,
-  store_samples = FALSE,
-  store_coefficient_cov = FALSE
+  store_samples = TRUE,
+  store_coefficient_cov = TRUE
 )
 ```
 
-Individual draws and convergence diagnostics are unavailable for a
+Individual draws and convergence diagnostics are unavailable for the default
 summary-only fit. Every `ETA` block always returns a named `coefficient_var`
-vector. Set `store_coefficient_cov = FALSE` to omit its full
-`coefficient_cov` matrix; this also avoids the quadratic-size covariance
-accumulator when `store_samples = FALSE`.
+vector. Set `store_coefficient_cov = TRUE` to request its full
+`coefficient_cov` matrix. With online summaries, covariance storage and work
+are quadratic within each `ETA` block.
 
 ### Posterior variance explained
 

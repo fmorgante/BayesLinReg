@@ -7,7 +7,8 @@
 assess_convergence(fit, plot = TRUE)
 }
 \arguments{
-\item{fit}{A fit returned by \code{\link[=blm]{blm()}} with \code{store_samples = TRUE}.}
+\item{fit}{A fit returned by \code{\link[=blm]{blm()}}, \code{\link[=blm_ss]{blm_ss()}}, or \code{\link[=blm_ss_eigen]{blm_ss_eigen()}} with
+\code{store_samples = TRUE}.}
 
 \item{plot}{A logical scalar indicating whether to draw trace plots for the
 assessed parameters.}
@@ -22,7 +23,8 @@ within-chain variance.
 }
 \description{
 Produces trace plots and computes convergence diagnostics for the retained
-non-coefficient draws in a sampled fit returned by \code{\link[=blm]{blm()}}. These include
+non-coefficient draws in a sampled fit returned by \code{\link[=blm]{blm()}}, \code{\link[=blm_ss]{blm_ss()}}, or
+\code{\link[=blm_ss_eigen]{blm_ss_eigen()}}. These include
 the intercept (when fitted) and residual variance; the shared coefficient variance for
 each normal block; the inclusion probability and slab variance for each
 spike-and-slab block; and the global variance for each global-local block.
@@ -44,7 +46,8 @@ fit <- blm(
   residual_shape = 2,
   residual_scale = 1,
   iterations = 100,
-  burnin = 50
+  burnin = 50,
+  store_samples = TRUE
 )
 diagnostics <- assess_convergence(fit, plot = FALSE)
 }

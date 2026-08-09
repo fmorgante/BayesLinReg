@@ -1,5 +1,11 @@
 library(BayesLinReg)
 
+blm_public <- BayesLinReg::blm
+blm <- function(..., store_samples = TRUE, store_coefficient_cov = TRUE) {
+  blm_public(..., store_samples = store_samples,
+             store_coefficient_cov = store_coefficient_cov)
+}
+
 X <- cbind(
   first = 1:20,
   second = rep(c(0, 1), 10),

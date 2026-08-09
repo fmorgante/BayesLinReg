@@ -1,5 +1,16 @@
 library(BayesLinReg)
 
+blm_public <- BayesLinReg::blm
+blm <- function(..., store_samples = TRUE, store_coefficient_cov = TRUE) {
+  blm_public(..., store_samples = store_samples,
+             store_coefficient_cov = store_coefficient_cov)
+}
+blm_ss_public <- BayesLinReg::blm_ss
+blm_ss <- function(..., store_samples = TRUE, store_coefficient_cov = TRUE) {
+  blm_ss_public(..., store_samples = store_samples,
+                store_coefficient_cov = store_coefficient_cov)
+}
+
 set.seed(701)
 n <- 80L
 X <- cbind(
