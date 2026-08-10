@@ -1,15 +1,16 @@
 Package: BayesLinReg
 Title: Bayesian Linear Regression with Flexible Coefficient Priors
-Version: 13.0.2
+Version: 14.0.0
 Authors@R:
     person(
         "Fabio", "Morgante",
         email = "fabiom@clemson.edu",
         role = c("aut", "cre")
     )
-Description: Fits Bayesian linear regression models from raw observations or
-    dense, sparse, or low-rank eigen sufficient statistics with one or more
-    predictor blocks.
+Description: Fits Bayesian linear regression models from raw observations,
+    genome-wide association study summary statistics with block-aware linkage
+    disequilibrium matrices, or dense, sparse, or low-rank eigen sufficient
+    statistics with one or more predictor blocks.
     Coefficients can be assigned unpenalized flat priors, independent normal,
     spike-and-slab, BayesR-style spike-and-multiple-slab, or beta-prime
     global-local priors, including

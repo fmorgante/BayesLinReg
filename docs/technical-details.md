@@ -601,7 +601,72 @@ $$
 Block-level eigen PVE reuses allocated work vectors and clears only blocks
 touched by the requested prior block.
 
-### 2.5 GWAS reconstruction with `compute_ss_from_gwas()`
+### 2.5 LD-native GWAS fitting with `blm_gwas()`
+
+`as_blm_ld(R, variants)` converts one signed correlation matrix, or a named
+list of exactly independent matrices, into a reusable LD object. Every variant
+table contains `CHR`, `ID`, `POS`, `A1`, and `A0`, where `A1` is the dosage
+allele used to calculate the correlations. The constructor stores one strict
+lower triangle and treats the unit diagonal as implicit. Contiguous rows use
+an index-free `data` and `indptr` representation; irregular sparse patterns
+retain row indices.
+
+Within every supplied matrix, exact contiguous block-diagonal structure is
+detected without thresholding. The supplied list element remains a parent
+reporting group, while maximal exact sub-blocks become independent
+computational blocks. Correlations omitted between list elements or detected
+sub-blocks are treated as exactly zero.
+
+`blm_gwas()` accepts an in-memory table with columns `CHR`, `ID`, `POS`, `A1`,
+`A0`, `N`, `BETA`, and `SE`. It matches variants to the LD object, validates
+position and alleles, changes the sign of marginal effects when allele dosage
+orientation is reversed, and restores coefficients to the input GWAS `A1`
+orientation on output. Unresolved ambiguous or incompatible variants are not
+included. Retained variants currently require a common `N`.
+
+Writing $\nu_{\mathrm{GWAS}}$ for `residual_df_gwas`, define
+
+$$
+z_j=\frac{\widehat\beta_j}{s_j},\qquad
+a_j=\frac{n-1}{z_j^2+\nu_{\mathrm{GWAS}}}.
+$$
+
+The default $\nu_{\mathrm{GWAS}}=n-2$ corresponds to an intercept and one
+tested predictor. This input is separate from `residual_var`,
+`residual_shape`, and `residual_scale`, which describe residual variation in
+the fitted joint Bayesian regression.
+
+On the standardized working scale,
+
+$$
+G=(n-1)R,\qquad
+g_j=\sqrt{n-1}\sqrt{a_j}z_j,\qquad
+y_2=n-1.
+$$
+
+On the original scale, `reference_response_var` supplies $V_y$ and
+
+$$
+d_j=\frac{V_ya_j}{s_j^2},\qquad
+G=D^{1/2}RD^{1/2},\qquad
+g_j=d_j\widehat\beta_j,\qquad
+y_2=(n-1)V_y.
+$$
+
+The LD kernel applies $D^{1/2}RD^{1/2}\theta$ directly and never constructs
+the full Gram matrix. During an ascending Gibbs sweep, strict-lower entries
+propagate coefficient changes only to coordinates that have not yet been
+visited. The complete right-hand-side state is reconstructed once after each
+sweep. Independent exact LD sub-blocks may be processed concurrently, while
+updates remain sequential inside a connected block. For $m_b$ stored values
+in block $b$, a sweep costs $O(p+\sum_b m_b)$.
+
+GWAS summary statistics do not identify a phenotype mean, so this interface
+fits no intercept. Reference-panel LD, meta-analysis statistics, mixed-model
+statistics, or covariate-adjusted marginal estimates generally define an
+approximate working likelihood rather than exact sufficient statistics.
+
+### 2.6 GWAS reconstruction with `compute_ss_from_gwas()`
 
 For marginal estimates $\widehat\beta_j$, standard errors $s_j$, common
 sample size $n$, and signed LD correlation matrix $R$, define
@@ -634,12 +699,12 @@ the same individual-level sample. The function performs structural validation
 but intentionally does not perform general summary-statistic/LD mismatch
 diagnostics.
 
-### 2.6 Numerical safeguards
+### 2.7 Numerical safeguards
 
 The package:
 
-- rejects constant predictors in individual, direct sufficient-statistic, and
-  eigen interfaces;
+- rejects constant predictors in individual, direct sufficient-statistic,
+  eigen, and GWAS interfaces;
 - jointly rank-checks all `Fixed` predictors;
 - validates symmetry, finite values, dimensions, names, and block partitions;
 - periodically reconstructs residual or cross-product state;
@@ -654,7 +719,7 @@ The package:
 These safeguards do not make an externally estimated LD matrix compatible with
 GWAS statistics; that remains an input-modeling responsibility.
 
-### 2.7 Posterior storage and summaries
+### 2.8 Posterior storage and summaries
 
 The public fitting functions default to `store_samples = FALSE` and
 `store_coefficient_cov = FALSE`, so their default output contains online
@@ -685,6 +750,9 @@ The main implementations are located in:
 - `R/blm.R`: individual-level interface and user documentation.
 - `R/blm_ss.R`: direct sufficient-statistic validation and storage planning.
 - `R/blm_ss_eigen.R`: low-rank transformation and validation.
+- `R/blm_gwas.R`: GWAS validation, harmonization, scaling, and fitting.
+- `R/ld_matrix.R`: LD construction, exact sub-block detection, and compressed
+  storage.
 - `R/compute_ss_from_gwas.R`: GWAS/LD reconstruction.
 - `R/fit_preparation.R`: shared block layouts, prior arguments, and sampler
   execution used by all fitting interfaces.
@@ -697,8 +765,8 @@ The main implementations are located in:
 - `R/posterior_conversion.R`: retained-draw conversion and convergence helper
   calculations.
 - `src/sampler_types.h`: validated internal prior, Gram-storage, and PVE enums.
-- `src/summary_matrices.h`: dense, sparse, block, and eigen sufficient-statistic
-  matrix backends.
+- `src/summary_matrices.h`: dense, sparse, block, eigen, and LD-native matrix
+  backends.
 - `src/parallel_blocks.h`: independent-block workers and per-block random-number
   streams.
 - `src/gibbs_core.h`: templated coefficient, hyperparameter, PVE, and posterior

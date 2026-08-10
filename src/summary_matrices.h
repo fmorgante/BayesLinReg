@@ -3,6 +3,7 @@
 
 #include <RcppEigen.h>
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <utility>
 #include <vector>
@@ -427,6 +428,201 @@ class BlockSummaryMatrix {
   std::vector<double> diagonal_;
   int nthreads_;
   bool has_streaming_blocks_;
+};
+
+// A block-diagonal LD correlation matrix representing the working Gram matrix
+// as diag(scale) * R * diag(scale). Each block stores only strict-lower
+// correlations; the unit diagonal of R is implicit. Interval blocks omit row
+// indices, while indexed blocks retain them for irregular sparse patterns.
+class LDSummaryMatrix {
+ public:
+  LDSummaryMatrix(
+      const Rcpp::List& input_blocks,
+      const Rcpp::List& indices,
+      const Rcpp::NumericVector& scale,
+      const int nthreads = 1)
+    : scale_(scale), p_(scale.size()), global_block_(p_, -1),
+      global_local_(p_, -1), nthreads_(nthreads) {
+    if (input_blocks.size() < 1 || input_blocks.size() != indices.size()) {
+      Rcpp::stop("Invalid LD block representation.");
+    }
+    blocks_.reserve(input_blocks.size());
+    for (int block_index = 0; block_index < input_blocks.size(); ++block_index) {
+      const Rcpp::List input = input_blocks[block_index];
+      const Rcpp::IntegerVector mapping = indices[block_index];
+      Block block;
+      block.type = Rcpp::as<int>(input["type"]);
+      block.size = Rcpp::as<int>(input["size"]);
+      const Rcpp::NumericVector data = input["data"];
+      const Rcpp::IntegerVector indptr = input["indptr"];
+      const Rcpp::IntegerVector row_index = input["row_index"];
+      if ((block.type != 0 && block.type != 1) || block.size < 1 ||
+          mapping.size() != block.size || indptr.size() != block.size + 1 ||
+          indptr[0] != 0 || indptr[block.size] != data.size() ||
+          (block.type == 1 && row_index.size() != data.size())) {
+        Rcpp::stop("Invalid compressed LD block.");
+      }
+      block.data = data.begin();
+      block.indptr = indptr.begin();
+      block.row_index = row_index.begin();
+      block.global.resize(block.size);
+      for (int local = 0; local < block.size; ++local) {
+        const int global = mapping[local] - 1;
+        if (global < 0 || global >= p_ || global_block_[global] >= 0) {
+          Rcpp::stop("LD block indices must partition predictors.");
+        }
+        block.global[local] = global;
+        global_block_[global] = block_index;
+        global_local_[global] = local;
+        if (!std::isfinite(scale_[global]) || scale_[global] <= 0.0) {
+          Rcpp::stop("LD predictor scales must be positive and finite.");
+        }
+      }
+      for (int column = 0; column < block.size; ++column) {
+        if (block.indptr[column] > block.indptr[column + 1]) {
+          Rcpp::stop("Invalid LD `indptr` array.");
+        }
+        const int count = block.indptr[column + 1] - block.indptr[column];
+        if (block.type == 0 && column + count >= block.size) {
+          Rcpp::stop("LD interval extends beyond its block.");
+        }
+        if (block.type == 1) {
+          for (int position = block.indptr[column];
+               position < block.indptr[column + 1]; ++position) {
+            if (block.row_index[position] <= column ||
+                block.row_index[position] >= block.size) {
+              Rcpp::stop("Indexed LD entries must be strict-lower triangular.");
+            }
+          }
+        }
+      }
+      blocks_.push_back(std::move(block));
+    }
+    for (int global = 0; global < p_; ++global) {
+      if (global_block_[global] < 0) {
+        Rcpp::stop("LD block indices must cover every predictor.");
+      }
+    }
+  }
+
+  int cols() const { return p_; }
+  int block_count() const { return static_cast<int>(blocks_.size()); }
+  bool has_streaming_blocks() const { return true; }
+
+  const std::vector<int>& block_predictors(const int block) const {
+    return blocks_[block].global;
+  }
+
+  double diagonal(const int j) const {
+    return scale_[j] * scale_[j];
+  }
+
+  double corrected_value(
+      const std::vector<double>& rhs,
+      const int j,
+      const double) const {
+    return rhs[j];
+  }
+
+  void update(
+      std::vector<double>& rhs,
+      const int j,
+      const double change) const {
+    rhs[j] -= diagonal(j) * change;
+    const Block& block = blocks_[global_block_[j]];
+    const int column = global_local_[j];
+    const double column_scale = scale_[j];
+    for (int position = block.indptr[column];
+         position < block.indptr[column + 1]; ++position) {
+      const int row = block.type == 0
+        ? column + 1 + position - block.indptr[column]
+        : block.row_index[position];
+      const int global_row = block.global[row];
+      rhs[global_row] -=
+        column_scale * block.data[position] * scale_[global_row] * change;
+    }
+  }
+
+  void multiply(
+      const std::vector<double>& coefficient,
+      std::vector<double>& fitted) const;
+
+  void multiply_block(
+      const int block_index,
+      const std::vector<double>& coefficient,
+      std::vector<double>& fitted) const {
+    const Block& block = blocks_[block_index];
+    for (int column = 0; column < block.size; ++column) {
+      const int global_column = block.global[column];
+      fitted[global_column] +=
+        diagonal(global_column) * coefficient[global_column];
+      for (int position = block.indptr[column];
+           position < block.indptr[column + 1]; ++position) {
+        const int row = block.type == 0
+          ? column + 1 + position - block.indptr[column]
+          : block.row_index[position];
+        const int global_row = block.global[row];
+        const double value = scale_[global_column] * block.data[position] *
+          scale_[global_row];
+        fitted[global_row] += value * coefficient[global_column];
+        fitted[global_column] += value * coefficient[global_row];
+      }
+    }
+  }
+
+  double center_dot(const std::vector<double>&) const { return 0.0; }
+
+  double centered_fitted(
+      const double fitted,
+      const int,
+      const double) const {
+    return fitted;
+  }
+
+  void update_center_dot(double&, const int, const double) const {}
+
+  double block_quadratic(
+      const std::vector<double>& coefficient,
+      const std::vector<int>& predictors,
+      const Rcpp::IntegerVector& block_id,
+      const int prior_block) const {
+    double result = 0.0;
+    for (const int j : predictors) {
+      result += coefficient[j] * diagonal(j) * coefficient[j];
+      const Block& block = blocks_[global_block_[j]];
+      const int column = global_local_[j];
+      for (int position = block.indptr[column];
+           position < block.indptr[column + 1]; ++position) {
+        const int row = block.type == 0
+          ? column + 1 + position - block.indptr[column]
+          : block.row_index[position];
+        const int global_row = block.global[row];
+        if (block_id[global_row] - 1 == prior_block) {
+          result += 2.0 * coefficient[j] * scale_[j] *
+            block.data[position] * scale_[global_row] *
+            coefficient[global_row];
+        }
+      }
+    }
+    return result;
+  }
+
+ private:
+  struct Block {
+    int type = 0;
+    int size = 0;
+    const double* data = NULL;
+    const int* indptr = NULL;
+    const int* row_index = NULL;
+    std::vector<int> global;
+  };
+
+  const Rcpp::NumericVector& scale_;
+  int p_;
+  std::vector<Block> blocks_;
+  std::vector<int> global_block_;
+  std::vector<int> global_local_;
+  int nthreads_;
 };
 
 // A block-diagonal low-rank matrix represented as G_b = Q_b' Q_b. Besides

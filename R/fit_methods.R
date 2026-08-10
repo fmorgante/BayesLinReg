@@ -2,8 +2,8 @@
 #'
 #' Returns posterior means of the intercept and regression coefficients.
 #'
-#' @param object A fitted model returned by [blm()], [blm_ss()], or
-#'   [blm_ss_eigen()].
+#' @param object A fitted model returned by [blm()], [blm_ss()],
+#'   [blm_ss_eigen()], or [blm_gwas()].
 #' @param ... Additional arguments. Currently unused.
 #'
 #' @return A named numeric vector. For multi-block fits, coefficient names use
@@ -32,8 +32,8 @@ coef.blm_fit <- function(object, ...) {
 #'
 #' Computes posterior-mean predictions for new predictor values.
 #'
-#' @param object A fitted model returned by [blm()], [blm_ss()], or
-#'   [blm_ss_eigen()].
+#' @param object A fitted model returned by [blm()], [blm_ss()],
+#'   [blm_ss_eigen()], or [blm_gwas()].
 #' @param newdata For a single-block fit, a numeric vector, matrix, or data
 #'   frame containing that block's predictors. A vector represents one
 #'   observation unless the fitted block has one predictor, in which case it
@@ -206,8 +206,8 @@ predict.blm_fit <- function(object, newdata,
 #' for high-dimensional fits. Empirical posterior quantiles are computed only
 #' for reported coefficients when the fit retained individual draws.
 #'
-#' @param object A fitted model returned by [blm()], [blm_ss()], or
-#'   [blm_ss_eigen()].
+#' @param object A fitted model returned by [blm()], [blm_ss()],
+#'   [blm_ss_eigen()], or [blm_gwas()].
 #' @param probs Numeric vector of posterior probabilities used for empirical
 #'   quantiles. Quantiles are unavailable when `store_samples = FALSE`.
 #' @param coefficients Coefficient-table policy. `"auto"` reports all

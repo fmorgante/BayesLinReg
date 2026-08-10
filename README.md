@@ -303,6 +303,47 @@ the serial sampler draw-for-draw.
 
 ### GWAS summary statistics
 
+`blm_gwas()` fits directly from an R data frame of additive quantitative-trait
+GWAS results and a reusable LD object, without materializing `XtX`. The GWAS
+object must contain `CHR`, `ID`, `POS`, `A1`, `A0`, `N`, `BETA`, and `SE`.
+
+```r
+ld <- as_blm_ld(
+  R = list(chr1 = R_chr1, chr2 = R_chr2),
+  variants = list(chr1 = variants_chr1, chr2 = variants_chr2)
+)
+
+fit_gwas <- blm_gwas(
+  gwas = gwas_results,
+  ld = ld,
+  ETA = list(model = "SpikeMultiSlab"),
+  reference_response_var = phenotype_variance,
+  residual_shape = 2,
+  residual_scale = phenotype_variance
+)
+```
+
+`R` contains signed correlations, not squared correlations. List elements are
+treated as exactly independent. `as_blm_ld()` also detects exact contiguous
+sub-blocks within each element and stores one triangle with an implicit unit
+diagonal. LD blocks control computation and may be chromosomes or smaller
+regions; `ETA` blocks independently control coefficient priors and may cross
+LD-block boundaries.
+
+GWAS variants are matched by `ID`, position, and alleles. Reversed alleles are
+handled by changing effect orientation, while unresolved strand-ambiguous or
+incompatible variants are excluded. Returned coefficients are effects per
+input GWAS `A1` allele. `residual_df_gwas` controls the finite-sample marginal-
+regression conversion and defaults to `N - 2`; it is distinct from the fitted
+model's `residual_var`, `residual_shape`, and `residual_scale` arguments.
+
+With `scale = "original"`, `reference_response_var` is required. Without it,
+the default `scale = "auto"` constructs a standardized working likelihood.
+GWAS statistics do not identify the phenotype mean, so `blm_gwas()` fits no
+intercept and predictions are genetic scores.
+
+For users who need explicit sufficient statistics,
+
 `compute_ss_from_gwas()` converts marginal ordinary least-squares effect
 estimates, their standard errors, a common sample size, and signed LD
 correlations into centered cross-products for `blm_ss()` using the

@@ -19,6 +19,8 @@
                             intercept_y_mean = NULL,
                             XtX = NULL, XtX_center = NULL,
                             XtX_indices = NULL, XtX_types = NULL, Xty = NULL,
+                            ld_blocks = NULL, ld_indices = NULL,
+                            ld_scale = NULL,
                             eigen_X = NULL, eigen_y = NULL,
                             eigen_indices = NULL,
                             nthreads = 1L,
@@ -29,7 +31,8 @@
   compute_pve <- pve_controls$compute_pve
   pve_type <- pve_controls$pve_type
   .validate_mcmc(iterations, burnin, thin)
-  use_sufficient_statistics <- !is.null(XtX) || !is.null(eigen_X)
+  use_sufficient_statistics <- !is.null(XtX) || !is.null(eigen_X) ||
+    !is.null(ld_blocks)
   if (is.null(block_id)) {
     block_id <- rep.int(
       1L, if (use_sufficient_statistics) length(Xty) else ncol(x)
@@ -81,7 +84,32 @@
     compute_pve = compute_pve,
     pve_type_code = match(pve_type, c("standalone", "allocated")) - 1L
   )
-  samples <- if (!is.null(eigen_X)) {
+  samples <- if (!is.null(ld_blocks)) {
+    do.call(
+      blm_gibbs_ld_rcpp_cpp,
+      c(
+        common_arguments[c(
+          "residual_shape", "residual_scale", "iterations", "burnin", "thin",
+          "progress_callback", "block_id", "block_model", "normal_shape",
+          "normal_scale", "pi_alpha", "pi_beta", "spike_var_shape",
+          "spike_var_scale", "global_scale", "local_a", "local_b",
+          "multi_gamma_list", "multi_pi_alpha_list", "multi_var_shape",
+          "multi_var_scale", "learn_residual_var", "fixed_residual_var",
+          "store_samples", "store_coefficient_cov", "effective_n",
+          "fit_intercept", "intercept_x_mean", "intercept_y_mean",
+          "compute_pve", "pve_type_code"
+        )],
+        list(
+          ld_blocks = ld_blocks,
+          ld_indices = ld_indices,
+          ld_scale = ld_scale,
+          summary_Xty = Xty,
+          summary_yty = if (is.null(yty)) 0 else yty,
+          nthreads = nthreads
+        )
+      )
+    )
+  } else if (!is.null(eigen_X)) {
     do.call(
       blm_gibbs_eigen_block_rcpp_cpp,
       c(

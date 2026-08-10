@@ -38,6 +38,7 @@ double draw_gig(const double lambda, const double chi, const double psi) {
 using bayeslinreg::BlockSummaryMatrix;
 using bayeslinreg::DenseSummaryMatrix;
 using bayeslinreg::EigenBlockSummaryMatrix;
+using bayeslinreg::LDSummaryMatrix;
 using bayeslinreg::SparseSummaryMatrix;
 using bayeslinreg::blm_gibbs_core;
 using bayeslinreg::draw_gig;
@@ -238,6 +239,65 @@ Rcpp::List blm_gibbs_block_rcpp_cpp(
   const Rcpp::NumericMatrix empty_X(0, 0);
   const BlockSummaryMatrix summary_matrix(
     summary_XtX, summary_indices, summary_types, summary_center, nthreads
+  );
+  return blm_gibbs_core(
+    empty_y, empty_X, residual_shape, residual_scale, iterations, burnin, thin,
+    progress_callback, block_id, block_model, normal_shape, normal_scale,
+    pi_alpha, pi_beta, spike_var_shape, spike_var_scale, global_scale,
+    local_a, local_b, multi_gamma_list, multi_pi_alpha_list, multi_var_shape,
+    multi_var_scale, learn_residual_var, fixed_residual_var, store_samples,
+    store_coefficient_cov, effective_n, fit_intercept, intercept_x_mean,
+    intercept_y_mean, true, summary_matrix, summary_Xty, summary_yty,
+    true, 0.0, compute_pve, pve_type_code, nthreads
+  );
+}
+
+// [[Rcpp::export]]
+Rcpp::List blm_gibbs_ld_rcpp_cpp(
+    const double residual_shape,
+    const double residual_scale,
+    const int iterations,
+    const int burnin,
+    const int thin,
+    const Rcpp::Function& progress_callback,
+    const Rcpp::IntegerVector& block_id,
+    const Rcpp::IntegerVector& block_model,
+    const Rcpp::NumericVector& normal_shape,
+    const Rcpp::NumericVector& normal_scale,
+    const Rcpp::NumericVector& pi_alpha,
+    const Rcpp::NumericVector& pi_beta,
+    const Rcpp::NumericVector& spike_var_shape,
+    const Rcpp::NumericVector& spike_var_scale,
+    const Rcpp::NumericVector& global_scale,
+    const Rcpp::NumericVector& local_a,
+    const Rcpp::NumericVector& local_b,
+    const Rcpp::List& multi_gamma_list,
+    const Rcpp::List& multi_pi_alpha_list,
+    const Rcpp::NumericVector& multi_var_shape,
+    const Rcpp::NumericVector& multi_var_scale,
+    const bool learn_residual_var,
+    const double fixed_residual_var,
+    const bool store_samples,
+    const bool store_coefficient_cov,
+    const int effective_n,
+    const bool fit_intercept,
+    const Rcpp::NumericVector& intercept_x_mean,
+    const double intercept_y_mean,
+    const Rcpp::List& ld_blocks,
+    const Rcpp::List& ld_indices,
+    const Rcpp::NumericVector& ld_scale,
+    const Rcpp::NumericVector& summary_Xty,
+    const double summary_yty,
+    const bool compute_pve,
+    const int pve_type_code,
+    const int nthreads) {
+  if (nthreads < 1) {
+    Rcpp::stop("`nthreads` must be a positive integer.");
+  }
+  const Rcpp::NumericVector empty_y;
+  const Rcpp::NumericMatrix empty_X(0, 0);
+  const LDSummaryMatrix summary_matrix(
+    ld_blocks, ld_indices, ld_scale, nthreads
   );
   return blm_gibbs_core(
     empty_y, empty_X, residual_shape, residual_scale, iterations, burnin, thin,

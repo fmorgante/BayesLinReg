@@ -54,6 +54,26 @@ class EigenBlockMultiplyWorker : public RcppParallel::Worker {
   std::vector<double>& fitted_;
 };
 
+class LDBlockMultiplyWorker : public RcppParallel::Worker {
+ public:
+  LDBlockMultiplyWorker(
+      const LDSummaryMatrix& matrix,
+      const std::vector<double>& coefficient,
+      std::vector<double>& fitted)
+    : matrix_(matrix), coefficient_(coefficient), fitted_(fitted) {}
+
+  void operator()(const std::size_t begin, const std::size_t end) {
+    for (std::size_t block = begin; block < end; ++block) {
+      matrix_.multiply_block(static_cast<int>(block), coefficient_, fitted_);
+    }
+  }
+
+ private:
+  const LDSummaryMatrix& matrix_;
+  const std::vector<double>& coefficient_;
+  std::vector<double>& fitted_;
+};
+
 inline void BlockSummaryMatrix::multiply(
     const std::vector<double>& coefficient,
     std::vector<double>& fitted) const {
@@ -81,6 +101,20 @@ inline void EigenBlockSummaryMatrix::multiply(
     return;
   }
   EigenBlockMultiplyWorker worker(*this, coefficient, fitted);
+  RcppParallel::parallelFor(0, blocks_.size(), worker, 1, nthreads_);
+}
+
+inline void LDSummaryMatrix::multiply(
+    const std::vector<double>& coefficient,
+    std::vector<double>& fitted) const {
+  std::fill(fitted.begin(), fitted.end(), 0.0);
+  if (nthreads_ <= 1 || blocks_.size() <= 1) {
+    for (int block = 0; block < block_count(); ++block) {
+      multiply_block(block, coefficient, fitted);
+    }
+    return;
+  }
+  LDBlockMultiplyWorker worker(*this, coefficient, fitted);
   RcppParallel::parallelFor(0, blocks_.size(), worker, 1, nthreads_);
 }
 
@@ -380,11 +414,17 @@ struct is_parallel_block_matrix<BlockSummaryMatrix> : std::true_type {};
 template <>
 struct is_parallel_block_matrix<EigenBlockSummaryMatrix> : std::true_type {};
 
+template <>
+struct is_parallel_block_matrix<LDSummaryMatrix> : std::true_type {};
+
 template <typename SummaryMatrix>
 struct has_streaming_triangular_blocks : std::false_type {};
 
 template <>
 struct has_streaming_triangular_blocks<BlockSummaryMatrix> : std::true_type {};
+
+template <>
+struct has_streaming_triangular_blocks<LDSummaryMatrix> : std::true_type {};
 
 }  // namespace bayeslinreg
 

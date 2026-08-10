@@ -152,31 +152,24 @@ compute_ss_from_gwas <- function(
   block_names <- validated_LD$block_names
   beta <- as.numeric(beta)
   se <- as.numeric(se)
-  z <- beta / se
-  if (any(!is.finite(z)) || any(!is.finite(z^2))) {
-    stop("The `beta / se` z-scores are too large to represent safely.",
-         call. = FALSE)
-  }
-  adjustment <- (n - 1) / (z^2 + residual_df)
+  components <- .gwas_working_components(
+    beta, se, n, residual_df, response_var, scale
+  )
   block_ends <- cumsum(block_sizes)
   block_starts <- c(1L, block_ends[-length(block_ends)] + 1L)
   block_indices <- Map(seq.int, block_starts, block_ends)
 
   if (scale == "standardized") {
     scale_block <- function(block, indices) (n - 1) * block
-    Xty <- sqrt(n - 1) * sqrt(adjustment) * z
-    yty <- n - 1
-    reference_response_var <- 1
   } else {
-    XtX_diagonal <- response_var * adjustment / se^2
-    root_diagonal <- sqrt(XtX_diagonal)
+    root_diagonal <- sqrt(components$diagonal)
     scale_block <- function(block, indices) {
       .scale_gram_block(block, root_diagonal[indices])
     }
-    Xty <- XtX_diagonal * beta
-    yty <- (n - 1) * response_var
-    reference_response_var <- response_var
   }
+  Xty <- components$Xty
+  yty <- components$yty
+  reference_response_var <- components$reference_response_var
   if (anyNA(Xty) || any(!is.finite(Xty)) || !is.finite(yty)) {
     stop("The reconstructed sufficient statistics are not finite.",
          call. = FALSE)
@@ -250,6 +243,31 @@ compute_ss_from_gwas <- function(
       XtX_eigenvalue_tolerance = eigenvalue_tolerance
     ),
     common
+  )
+}
+
+.gwas_working_components <- function(beta, se, n, residual_df,
+                                     response_var, scale) {
+  z <- beta / se
+  if (any(!is.finite(z)) || any(!is.finite(z^2))) {
+    stop("The `BETA / SE` z-scores are too large to represent safely.",
+         call. = FALSE)
+  }
+  adjustment <- (n - 1) / (z^2 + residual_df)
+  if (scale == "standardized") {
+    return(list(
+      diagonal = rep(n - 1, length(beta)),
+      Xty = sqrt(n - 1) * sqrt(adjustment) * z,
+      yty = n - 1,
+      reference_response_var = 1
+    ))
+  }
+  diagonal <- response_var * adjustment / se^2
+  list(
+    diagonal = diagonal,
+    Xty = diagonal * beta,
+    yty = (n - 1) * response_var,
+    reference_response_var = response_var
   )
 }
 

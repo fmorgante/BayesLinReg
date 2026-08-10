@@ -1,8 +1,8 @@
 #' Assess Gibbs sampler convergence
 #'
 #' Produces trace plots and computes convergence diagnostics for the retained
-#' non-coefficient draws in a sampled fit returned by [blm()], [blm_ss()], or
-#' [blm_ss_eigen()]. These include
+#' non-coefficient draws in a sampled fit returned by [blm()], [blm_ss()],
+#' [blm_ss_eigen()], or [blm_gwas()]. These include
 #' the intercept (when fitted) and residual variance; the shared coefficient variance for
 #' each normal block; the inclusion probability and slab variance for each
 #' spike-and-slab block; and the global variance for each global-local block.
@@ -14,7 +14,8 @@
 #' variances, and spike-and-slab inclusion indicators, are intentionally
 #' excluded.
 #'
-#' @param fit A fit returned by [blm()], [blm_ss()], or [blm_ss_eigen()] with
+#' @param fit A fit returned by [blm()], [blm_ss()], [blm_ss_eigen()], or
+#'   [blm_gwas()] with
 #'   `store_samples = TRUE`.
 #' @param plot A logical scalar indicating whether to draw trace plots for the
 #'   assessed parameters.

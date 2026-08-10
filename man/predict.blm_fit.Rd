@@ -14,8 +14,8 @@
 )
 }
 \arguments{
-\item{object}{A fitted model returned by \code{\link[=blm]{blm()}}, \code{\link[=blm_ss]{blm_ss()}}, or
-\code{\link[=blm_ss_eigen]{blm_ss_eigen()}}.}
+\item{object}{A fitted model returned by \code{\link[=blm]{blm()}}, \code{\link[=blm_ss]{blm_ss()}},
+\code{\link[=blm_ss_eigen]{blm_ss_eigen()}}, or \code{\link[=blm_gwas]{blm_gwas()}}.}
 
 \item{newdata}{For a single-block fit, a numeric vector, matrix, or data
 frame containing that block's predictors. A vector represents one
