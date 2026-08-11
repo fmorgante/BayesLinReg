@@ -31,6 +31,11 @@ stopifnot(
   inherits(ld, "blm_ld"),
   nrow(ld$block_table) == 2L,
   identical(ld$parents, c("chr1", "chr2")),
+  identical(ld$block_table$variant_start, c(1L, 4L)),
+  identical(ld$block_table$variant_end, c(3L, 6L)),
+  all(vapply(ld$blocks, function(block) {
+    !"variants" %in% names(block)
+  }, logical(1))),
   isTRUE(all.equal(
     BayesLinReg:::.materialize_blm_ld(ld),
     as.matrix(Matrix::bdiag(R1, R2)),
@@ -63,6 +68,29 @@ stopifnot(
   nrow(internal_ld$block_table) == 2L,
   identical(internal_ld$block_table$predictors, c(3L, 2L)),
   identical(internal_ld$block_table$parent, c("LD", "LD"))
+)
+
+# Generated computational names remain unique when parent names overlap them.
+collision_ids <- paste0("c", seq_len(6L))
+collision_first <- internally_blocked
+dimnames(collision_first) <- list(collision_ids[1:5], collision_ids[1:5])
+collision_second <- matrix(
+  1, 1L, 1L, dimnames = list(collision_ids[6L], collision_ids[6L])
+)
+collision_variants <- data.frame(
+  CHR = 1, ID = collision_ids, POS = seq_len(6L), A1 = "A", A0 = "C"
+)
+collision_ld <- as_blm_ld(
+  list(a = collision_first, a.1 = collision_second),
+  list(a = collision_variants[1:5, ], a.1 = collision_variants[6L, ])
+)
+stopifnot(
+  identical(names(collision_ld$blocks), c("a.1", "a.2", "a.1.1")),
+  !anyDuplicated(collision_ld$block_table$block),
+  identical(
+    unname(vapply(collision_ld$blocks, `[[`, character(1), "name")),
+    names(collision_ld$blocks)
+  )
 )
 
 # The LD-native kernel reproduces materialized sufficient-statistics sampling,

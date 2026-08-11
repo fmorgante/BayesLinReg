@@ -303,8 +303,7 @@ blm_gwas <- function(
     )
     sparse <- Matrix::forceSymmetric(sparse, uplo = "L")
     blocks[[block_index]] <- .compress_ld_block(
-      sparse, block$variants[reorder, , drop = FALSE],
-      block$parent, block$name
+      sparse, block$parent, block$name
     )
     indices[[block_index]] <- mapping[reorder]
     offset <- offset + block$size
@@ -510,7 +509,6 @@ blm_gwas <- function(
       giveCsparse = TRUE
     )
     sparse <- Matrix::forceSymmetric(sparse, uplo = "L")
-    table <- block$variants[keep, , drop = FALSE]
     ranges <- .exact_contiguous_ld_blocks(sparse)
     for (range in ranges) {
       parent <- block$parent
@@ -525,24 +523,15 @@ blm_gwas <- function(
         if (!child_name %in% c(reserved_names, names(new_blocks))) break
       }
       child <- .compress_ld_block(
-        sparse[range, range, drop = FALSE], table[range, , drop = FALSE],
-        parent, child_name
+        sparse[range, range, drop = FALSE], parent, child_name
       )
       new_blocks[[child$name]] <- child
     }
   }
   if (!length(new_blocks)) stop("LD subset is empty.", call. = FALSE)
-  variants <- do.call(rbind, lapply(new_blocks, `[[`, "variants"))
+  variants <- ld$variants[selected_flag, , drop = FALSE]
   rownames(variants) <- NULL
-  block_table <- data.frame(
-    block = names(new_blocks),
-    parent = vapply(new_blocks, `[[`, character(1), "parent"),
-    predictors = vapply(new_blocks, `[[`, integer(1), "size"),
-    storage = vapply(new_blocks, `[[`, character(1), "storage"),
-    stored_values = vapply(new_blocks, function(x) length(x$data), integer(1)),
-    stringsAsFactors = FALSE,
-    row.names = NULL
-  )
+  block_table <- .ld_block_table(new_blocks)
   structure(list(
     blocks = new_blocks,
     variants = variants,

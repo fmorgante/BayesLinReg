@@ -69,13 +69,21 @@ as_blm_ld <- function(R, variants) {
         paste0(parent, ".", child_index)
       }
       .compress_ld_block(
-        matrix[indices, indices, drop = FALSE], table[indices, , drop = FALSE],
-        parent, child_name
+        matrix[indices, indices, drop = FALSE], parent, child_name
       )
     })
     names(children) <- vapply(children, `[[`, character(1), "name")
     computational_blocks <- c(computational_blocks, children)
   }
+
+  computational_names <- make.unique(
+    vapply(computational_blocks, `[[`, character(1), "name"), sep = "."
+  )
+  for (block_index in seq_along(computational_blocks)) {
+    computational_blocks[[block_index]]$name <-
+      computational_names[[block_index]]
+  }
+  names(computational_blocks) <- computational_names
 
   all_variants <- do.call(rbind, unname(parent_tables))
   rownames(all_variants) <- NULL
@@ -87,17 +95,7 @@ as_blm_ld <- function(R, variants) {
       call. = FALSE
     )
   }
-  block_table <- data.frame(
-    block = names(computational_blocks),
-    parent = vapply(computational_blocks, `[[`, character(1), "parent"),
-    predictors = vapply(computational_blocks, `[[`, integer(1), "size"),
-    storage = vapply(computational_blocks, `[[`, character(1), "storage"),
-    stored_values = vapply(
-      computational_blocks, function(block) length(block$data), integer(1)
-    ),
-    stringsAsFactors = FALSE,
-    row.names = NULL
-  )
+  block_table <- .ld_block_table(computational_blocks)
   structure(
     list(
       blocks = computational_blocks,
@@ -241,7 +239,7 @@ print.blm_ld <- function(x, ...) {
   Map(seq.int, starts, boundaries)
 }
 
-.compress_ld_block <- function(matrix, variants, parent, name) {
+.compress_ld_block <- function(matrix, parent, name) {
   p <- ncol(matrix)
   entries <- .ld_lower_triplets(matrix)
   counts <- tabulate(entries$column, nbins = p)
@@ -284,8 +282,25 @@ print.blm_ld <- function(x, ...) {
     storage = storage,
     data = as.numeric(data),
     indptr = as.integer(indptr),
-    row_index = as.integer(row_index),
-    variants = variants
+    row_index = as.integer(row_index)
+  )
+}
+
+.ld_block_table <- function(blocks) {
+  sizes <- vapply(blocks, `[[`, integer(1), "size")
+  variant_end <- cumsum(sizes)
+  data.frame(
+    block = names(blocks),
+    parent = vapply(blocks, `[[`, character(1), "parent"),
+    predictors = sizes,
+    variant_start = variant_end - sizes + 1L,
+    variant_end = variant_end,
+    storage = vapply(blocks, `[[`, character(1), "storage"),
+    stored_values = vapply(
+      blocks, function(block) length(block$data), integer(1)
+    ),
+    stringsAsFactors = FALSE,
+    row.names = NULL
   )
 }
 
