@@ -38,7 +38,9 @@
 #' @details Variants are matched by `ID` and checked against chromosome,
 #'   position, and alleles. Reversed alleles are handled by changing effect
 #'   orientation. Unmatched, incompatible, and unresolved strand-ambiguous
-#'   variants are excluded with a warning. The retained LD object is reordered
+#'   variants are excluded with a warning. Excluded IDs are also removed from
+#'   character-indexed `ETA` blocks, with a block-specific warning; a block
+#'   that becomes empty is rejected. The retained LD object is reordered
 #'   internally as needed for streaming Gibbs updates; `ETA` blocks remain
 #'   independent of LD blocks.
 #'
@@ -107,10 +109,15 @@ blm_gwas <- function(
     )
   }
 
-  harmonized <- .harmonize_gwas_ld(.validate_blm_gwas(gwas), ld)
+  gwas <- .validate_blm_gwas(gwas)
+  input_gwas_ids <- gwas$ID
+  harmonized <- .harmonize_gwas_ld(gwas, ld)
   gwas <- harmonized$gwas
-  ld <- harmonized$ld
   orientation <- harmonized$orientation
+  ETA <- .harmonize_gwas_eta(
+    ETA, gwas$ID, input_gwas_ids, ld$variants$ID
+  )
+  ld <- harmonized$ld
   n_values <- unique(gwas$N)
   if (length(n_values) != 1L) {
     stop("Retained GWAS variants must have one common value of `N`.",
@@ -359,6 +366,58 @@ blm_gwas <- function(
   unname(c(A = "T", T = "A", C = "G", G = "C")[allele])
 }
 
+.harmonize_gwas_eta <- function(ETA, retained_ids, gwas_ids, ld_ids) {
+  if (!is.list(ETA)) return(ETA)
+  single_block <- "model" %in% names(ETA)
+  specifications <- if (single_block) list(ETA = ETA) else ETA
+  if (!length(specifications) ||
+      !all(vapply(specifications, is.list, logical(1)))) {
+    return(ETA)
+  }
+  block_names <- names(specifications)
+  if (is.null(block_names)) {
+    block_names <- paste0("ETA", seq_along(specifications))
+  } else {
+    missing_name <- is.na(block_names) | block_names == ""
+    block_names[missing_name] <- paste0("ETA", which(missing_name))
+    block_names <- make.unique(block_names)
+  }
+  removed <- integer(length(specifications))
+  for (block_index in seq_along(specifications)) {
+    indices <- specifications[[block_index]]$indices
+    if (!is.character(indices)) next
+    known <- indices %in% gwas_ids | indices %in% ld_ids
+    unknown <- unique(indices[!known])
+    if (length(unknown)) {
+      stop(sprintf(
+        "Character `indices` in ETA block `%s` contain unknown variant ID(s): %s.",
+        block_names[[block_index]], paste(unknown, collapse = ", ")
+      ), call. = FALSE)
+    }
+    keep <- indices %in% retained_ids
+    removed[[block_index]] <- sum(!keep)
+    if (!any(keep)) {
+      stop(sprintf(
+        "ETA block `%s` has no predictors remaining after GWAS-LD harmonization.",
+        block_names[[block_index]]
+      ), call. = FALSE)
+    }
+    specifications[[block_index]]$indices <- indices[keep]
+  }
+  changed <- which(removed > 0L)
+  if (length(changed)) {
+    detail <- paste0(block_names[changed], " (", removed[changed], ")")
+    warning(sprintf(
+      paste0(
+        "GWAS-LD harmonization removed excluded character-indexed ",
+        "predictors from ETA block(s): %s."
+      ),
+      paste(detail, collapse = ", ")
+    ), call. = FALSE)
+  }
+  if (single_block) specifications[[1L]] else specifications
+}
+
 .harmonize_gwas_ld <- function(gwas, ld) {
   match_index <- match(ld$variants$ID, gwas$ID)
   location_match <- !is.na(match_index)
@@ -392,7 +451,11 @@ blm_gwas <- function(
   orientation <- ifelse(
     direct[compatible] | complement_direct[compatible], 1, -1
   )
-  subset_ld <- .subset_blm_ld(ld, retained_ld)
+  subset_ld <- if (identical(retained_ld, seq_len(nrow(ld$variants)))) {
+    ld
+  } else {
+    .subset_blm_ld(ld, retained_ld)
+  }
   excluded <- nrow(gwas) + nrow(ld$variants) - 2L * length(retained_ld)
   if (excluded > 0L) {
     warning(sprintf(
@@ -416,6 +479,7 @@ blm_gwas <- function(
   selected_flag <- logical(nrow(ld$variants))
   selected_flag[selected] <- TRUE
   new_blocks <- list()
+  reserved_names <- vapply(ld$blocks, `[[`, character(1), "name")
   offset <- 0L
   parent_counts <- integer()
   for (block in ld$blocks) {
@@ -423,6 +487,12 @@ blm_gwas <- function(
     keep <- which(selected_flag[global])
     offset <- offset + block$size
     if (!length(keep)) next
+    if (length(keep) == block$size) {
+      output_index <- length(new_blocks) + 1L
+      new_blocks[[output_index]] <- block
+      names(new_blocks)[output_index] <- block$name
+      next
+    }
     local_map <- integer(block$size)
     local_map[keep] <- seq_along(keep)
     triplets <- .ld_block_triplets(block)
@@ -444,15 +514,19 @@ blm_gwas <- function(
     ranges <- .exact_contiguous_ld_blocks(sparse)
     for (range in ranges) {
       parent <- block$parent
-      count <- if (parent %in% names(parent_counts)) {
-        parent_counts[[parent]] + 1L
-      } else {
-        1L
+      repeat {
+        count <- if (parent %in% names(parent_counts)) {
+          parent_counts[[parent]] + 1L
+        } else {
+          1L
+        }
+        parent_counts[parent] <- count
+        child_name <- paste0(parent, ".", count)
+        if (!child_name %in% c(reserved_names, names(new_blocks))) break
       }
-      parent_counts[parent] <- count
       child <- .compress_ld_block(
         sparse[range, range, drop = FALSE], table[range, , drop = FALSE],
-        parent, paste0(parent, ".", count)
+        parent, child_name
       )
       new_blocks[[child$name]] <- child
     }

@@ -80,7 +80,9 @@ not materialized.
 Variants are matched by \code{ID} and checked against chromosome,
 position, and alleles. Reversed alleles are handled by changing effect
 orientation. Unmatched, incompatible, and unresolved strand-ambiguous
-variants are excluded with a warning. The retained LD object is reordered
+variants are excluded with a warning. Excluded IDs are also removed from
+character-indexed \code{ETA} blocks, with a block-specific warning; a block
+that becomes empty is rejected. The retained LD object is reordered
 internally as needed for streaming Gibbs updates; \code{ETA} blocks remain
 independent of LD blocks.
 

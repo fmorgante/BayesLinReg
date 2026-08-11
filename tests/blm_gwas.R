@@ -38,6 +38,16 @@ stopifnot(
   ))
 )
 
+# Fully compatible inputs reuse the original compressed LD representation.
+unchanged_harmonization <- BayesLinReg:::.harmonize_gwas_ld(
+  BayesLinReg:::.validate_blm_gwas(
+    transform(rbind(variants1, variants2),
+              N = 100L, BETA = 0, SE = 0.1)
+  ),
+  ld
+)
+stopifnot(identical(unchanged_harmonization$ld, ld))
+
 internally_blocked <- matrix(0, 5L, 5L)
 internally_blocked[1:3, 1:3] <- R1
 internally_blocked[4:5, 4:5] <- R2[1:2, 1:2]
@@ -101,6 +111,51 @@ stopifnot(
   )),
   identical(gwas_fit$gwas_scale, "original"),
   identical(gwas_fit$residual_df_gwas, n - 2)
+)
+
+# Harmonization exclusions are removed from character-indexed ETA blocks.
+incompatible_gwas <- gwas
+incompatible_gwas$POS[incompatible_gwas$ID == "rs2"] <- 200L
+partial_harmonization <- suppressWarnings(
+  BayesLinReg:::.harmonize_gwas_ld(
+    BayesLinReg:::.validate_blm_gwas(incompatible_gwas), ld
+  )
+)
+stopifnot(identical(partial_harmonization$ld$blocks$chr2, ld$blocks$chr2))
+harmonization_warnings <- character()
+set.seed(1104)
+excluded_fit <- withCallingHandlers(
+  blm_gwas(
+    incompatible_gwas, ld, ETA,
+    residual_var = 1, iterations = 30L, burnin = 10L
+  ),
+  warning = function(condition) {
+    harmonization_warnings <<- c(
+      harmonization_warnings, conditionMessage(condition)
+    )
+    invokeRestart("muffleWarning")
+  }
+)
+stopifnot(
+  identical(excluded_fit$gwas_variants$ID, ids[c(1L, 3L:6L)]),
+  any(grepl("mixture \\(1\\)", harmonization_warnings)),
+  !"rs2" %in% names(coef(excluded_fit))
+)
+
+empty_eta <- list(
+  removed = list(indices = "rs2", model = "Normal"),
+  retained = list(indices = ids[c(1L, 3L:6L)], model = "Normal")
+)
+empty_eta_error <- try(
+  suppressWarnings(blm_gwas(
+    incompatible_gwas, ld, empty_eta,
+    residual_var = 1, iterations = 10L, burnin = 5L
+  )),
+  silent = TRUE
+)
+stopifnot(
+  inherits(empty_eta_error, "try-error"),
+  grepl("block `removed` has no predictors remaining", empty_eta_error)
 )
 
 # Allele reversal changes the returned coefficient orientation but not the
