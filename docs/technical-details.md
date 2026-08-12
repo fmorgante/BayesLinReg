@@ -623,6 +623,9 @@ position and alleles, changes the sign of marginal effects when allele dosage
 orientation is reversed, and restores coefficients to the input GWAS `A1`
 orientation on output. Unresolved ambiguous or incompatible variants are not
 included. Retained variants currently require a common `N`.
+Character-indexed `ETA` blocks are filtered by variant ID. Numeric indices are
+rejected when an LD variant is excluded because positions before and after
+harmonization do not have an unambiguous common meaning.
 
 Writing $\nu_{\mathrm{GWAS}}$ for `residual_df_gwas`, define
 
@@ -660,6 +663,15 @@ visited. The complete right-hand-side state is reconstructed once after each
 sweep. Independent exact LD sub-blocks may be processed concurrently, while
 updates remain sequential inside a connected block. For $m_b$ stored values
 in block $b$, a sweep costs $O(p+\sum_b m_b)$.
+
+Sampler coordinates always retain LD order. Prior-block membership, predictor
+scaling, and posterior extraction are stored as separate mappings, so `ETA`
+blocks can cross LD blocks or request a different output order without
+rebuilding the compressed correlations. Partial harmonization filters the
+compressed triangle directly and recomputes exact contiguous sub-blocks from
+the retained triplets, avoiding an intermediate `sparseMatrix`. Reusable LD
+objects carry a validated internal format version so incompatible serialized
+objects fail before entering compiled code.
 
 GWAS summary statistics do not identify a phenotype mean, so this interface
 fits no intercept. Reference-panel LD, meta-analysis statistics, mixed-model
@@ -776,3 +788,5 @@ The main implementations are located in:
   preprocessing and scaled-factor construction.
 - `R/fit_result.R`: posterior assembly and scale restoration.
 - `R/fit_methods.R`: coefficient extraction, prediction, and summaries.
+- `inst/benchmarks/benchmark_ld_preprocessing.R`: configurable LD construction,
+  compressed-filtering, and `ETA`-ordering benchmarks.

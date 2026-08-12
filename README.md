@@ -336,6 +336,16 @@ incompatible variants are excluded. Returned coefficients are effects per
 input GWAS `A1` allele. `residual_df_gwas` controls the finite-sample marginal-
 regression conversion and defaults to `N - 2`; it is distinct from the fitted
 model's `residual_var`, `residual_shape`, and `residual_scale` arguments.
+Character variant IDs should be used for multi-block `ETA` definitions when
+harmonization may exclude variants. Numeric indices are rejected after an LD
+variant is excluded because their original positional meaning is ambiguous.
+
+The Gibbs sampler retains the LD object's predictor order even when `ETA`
+blocks cross LD blocks or list predictors in a different order. Consequently,
+arbitrary prior layouts do not require reconstructing or recompressing LD.
+Saved `blm_ld` objects carry an internal format version; recreate an object
+with the current `as_blm_ld()` if a later package version reports that its
+format is unsupported.
 
 With `scale = "original"`, `reference_response_var` is required. Without it,
 the default `scale = "auto"` constructs a standardized working likelihood.

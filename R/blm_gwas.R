@@ -8,7 +8,7 @@
 #' @param gwas A data frame with columns `CHR`, `ID`, `POS`, `A1`, `A0`, `N`,
 #'   `BETA`, and `SE`. `BETA` is the additive marginal effect per `A1` allele.
 #'   All retained variants must have a common sample size `N`.
-#' @param ld A `blm_ld` object returned by [as_blm_ld()].
+#' @param ld A `blm_ld` object returned by the current [as_blm_ld()].
 #' @param ETA Prior specifications in the same format as [blm_ss()]. Character
 #'   `indices` refer to variant IDs.
 #' @param residual_var,residual_shape,residual_scale Residual-variance controls
@@ -40,9 +40,10 @@
 #'   orientation. Unmatched, incompatible, and unresolved strand-ambiguous
 #'   variants are excluded with a warning. Excluded IDs are also removed from
 #'   character-indexed `ETA` blocks, with a block-specific warning; a block
-#'   that becomes empty is rejected. The retained LD object is reordered
-#'   internally as needed for streaming Gibbs updates; `ETA` blocks remain
-#'   independent of LD blocks.
+#'   that becomes empty is rejected. If harmonization excludes an LD variant,
+#'   numeric `ETA` indices are rejected because their intended position is
+#'   ambiguous; use character variant IDs instead. Gibbs coordinates retain
+#'   LD order, while `ETA` blocks remain independent of LD blocks.
 #'
 #'   With `scale = "standardized"`, the working statistics use
 #'   `XtX = (N - 1) R` and response variance one. With `scale = "original"`,
@@ -66,9 +67,7 @@ blm_gwas <- function(
   pve_controls <- .validate_pve_controls(compute_pve, pve_type)
   compute_pve <- pve_controls$compute_pve
   pve_type <- pve_controls$pve_type
-  if (!inherits(ld, "blm_ld")) {
-    stop("`ld` must be an object returned by `as_blm_ld()`.", call. = FALSE)
-  }
+  .validate_blm_ld_object(ld)
   controls <- list(
     verbose = verbose,
     store_samples = store_samples,
@@ -180,34 +179,43 @@ blm_gwas <- function(
   residual_scale <- residual_prior$residual_scale
 
   layout <- .prepare_block_layout(blocks, source_indices, predictor_scales)
-  source_order <- layout$source_order
-  scale_order <- layout$scale_order
-  block_indices <- layout$block_indices
   block_model <- layout$block_model
-  sampler_position <- integer(length(source_order))
-  sampler_position[source_order] <- seq_along(source_order)
+  p <- length(predictor_names)
+  sampler_block_id <- integer(p)
+  sampler_predictor_scale <- numeric(p)
+  sampler_internal_names <- character(p)
+  for (block_index in seq_along(blocks)) {
+    indices <- source_indices[[block_index]]
+    sampler_block_id[indices] <- block_index
+    sampler_predictor_scale[indices] <- predictor_scales[[block_index]]
+    sampler_internal_names[indices] <- paste0(
+      names(blocks)[[block_index]], "::", blocks[[block_index]]$predictor_names
+    )
+  }
+  sampler_layout <- layout
+  sampler_layout$block_id <- sampler_block_id
+  sampler_layout$internal_names <- sampler_internal_names
   source_scale <- sqrt(components$diagonal)
-  sampler_scale <- source_scale[source_order] / scale_order
-  working_Xty <- components$Xty[source_order] / scale_order
-  names(working_Xty) <- layout$internal_names
+  sampler_scale <- source_scale / sampler_predictor_scale
+  working_Xty <- components$Xty / sampler_predictor_scale
+  names(working_Xty) <- sampler_internal_names
 
-  sampler_ld <- .prepare_ld_sampler_blocks(ld, sampler_position)
-
-  fixed_indices <- .fixed_predictor_indices(blocks, block_indices)
-  if (length(fixed_indices)) {
-    fixed_source <- source_order[fixed_indices]
+  fixed_blocks <- vapply(
+    blocks, function(block) block$model == "Fixed", logical(1)
+  )
+  fixed_source <- unlist(source_indices[fixed_blocks], use.names = FALSE)
+  if (length(fixed_source)) {
     fixed_R <- .materialize_blm_ld(ld, fixed_source)
-    fixed_scale <- sampler_scale[fixed_indices]
+    fixed_scale <- sampler_scale[fixed_source]
     fixed_gram <- fixed_R * tcrossprod(fixed_scale)
     .validate_fixed_gram(
-      fixed_gram, seq_along(fixed_indices),
-      layout$internal_names[fixed_indices]
+      fixed_gram, seq_along(fixed_source),
+      sampler_internal_names[fixed_source]
     )
   }
   if (check_psd) {
     source_R <- .materialize_blm_ld(ld)
-    validation_XtX <- source_R[source_order, source_order, drop = FALSE] *
-      tcrossprod(sampler_scale)
+    validation_XtX <- source_R * tcrossprod(sampler_scale)
     .validate_working_crossproducts(
       validation_XtX, working_Xty, components$yty
     )
@@ -215,7 +223,7 @@ blm_gwas <- function(
 
   sampler_arguments <- .prepare_sampler_arguments(
     blocks = blocks,
-    layout = layout,
+    layout = sampler_layout,
     y = numeric(),
     x = matrix(numeric(), nrow = 0L, ncol = length(working_Xty)),
     residual_shape = residual_shape,
@@ -233,10 +241,12 @@ blm_gwas <- function(
     intercept_x_mean = numeric(length(working_Xty)),
     intercept_y_mean = 0
   )
-  sampler_arguments$ld_blocks <- lapply(sampler_ld$blocks, function(block) {
+  sampler_arguments$ld_blocks <- lapply(ld$blocks, function(block) {
     block[c("type", "size", "data", "indptr", "row_index")]
   })
-  sampler_arguments$ld_indices <- sampler_ld$indices
+  block_ends <- cumsum(vapply(ld$blocks, `[[`, integer(1), "size"))
+  block_starts <- block_ends - vapply(ld$blocks, `[[`, integer(1), "size") + 1L
+  sampler_arguments$ld_indices <- Map(seq.int, block_starts, block_ends)
   sampler_arguments$ld_scale <- sampler_scale
   sampler_arguments$Xty <- working_Xty
   sampler_arguments$yty <- components$yty
@@ -246,7 +256,7 @@ blm_gwas <- function(
   )
 
   result <- .assemble_blm_result(
-    blocks, block_indices, samples, nchains, store_samples,
+    blocks, source_indices, samples, nchains, store_samples,
     store_coefficient_cov, FALSE,
     compute_pve = compute_pve, pve_type = pve_type,
     residual_shape = residual_shape,
@@ -254,7 +264,8 @@ blm_gwas <- function(
     residual_scale_calibrated = residual_prior$residual_scale_calibrated,
     expected_pve_total = residual_prior$expected_pve_total,
     reference_response_var = components$reference_response_var,
-    reference_residual_var = residual_prior$reference_residual_var
+    reference_residual_var = residual_prior$reference_residual_var,
+    sampler_block_id = sampler_block_id
   )
   result <- .orient_gwas_coefficients(
     result, orientation, source_indices, store_samples,
@@ -269,48 +280,6 @@ blm_gwas <- function(
   result$ld_harmonization <- harmonized$counts
   result$nthreads <- nthreads
   result
-}
-
-.prepare_ld_sampler_blocks <- function(ld, sampler_position) {
-  blocks <- vector("list", length(ld$blocks))
-  indices <- vector("list", length(ld$blocks))
-  offset <- 0L
-  for (block_index in seq_along(ld$blocks)) {
-    block <- ld$blocks[[block_index]]
-    global <- seq.int(offset + 1L, offset + block$size)
-    mapping <- sampler_position[global]
-    reorder <- order(mapping)
-    if (identical(reorder, seq_len(block$size))) {
-      blocks[[block_index]] <- block
-      indices[[block_index]] <- mapping
-      offset <- offset + block$size
-      next
-    }
-    old_to_new <- integer(block$size)
-    old_to_new[reorder] <- seq_along(reorder)
-    triplets <- .ld_block_triplets(block)
-    new_columns <- old_to_new[triplets$column]
-    new_rows <- old_to_new[triplets$row]
-    rows <- pmax(new_columns, new_rows)
-    columns <- pmin(new_columns, new_rows)
-    size <- block$size
-    sparse <- Matrix::sparseMatrix(
-      i = c(seq_len(size), rows),
-      j = c(seq_len(size), columns),
-      x = c(rep(1, size), triplets$value),
-      dims = c(size, size),
-      giveCsparse = TRUE
-    )
-    sparse <- Matrix::forceSymmetric(sparse, uplo = "L")
-    blocks[[block_index]] <- .compress_ld_block(
-      sparse, block$parent, block$name
-    )
-    indices[[block_index]] <- mapping[reorder]
-    offset <- offset + block$size
-  }
-  names(blocks) <- names(ld$blocks)
-  names(indices) <- names(ld$blocks)
-  list(blocks = blocks, indices = indices)
 }
 
 .validate_blm_gwas <- function(gwas) {
@@ -382,8 +351,19 @@ blm_gwas <- function(
     block_names <- make.unique(block_names)
   }
   removed <- integer(length(specifications))
+  ld_variants_excluded <- length(retained_ids) < length(ld_ids)
   for (block_index in seq_along(specifications)) {
     indices <- specifications[[block_index]]$indices
+    if (ld_variants_excluded && is.numeric(indices)) {
+      stop(sprintf(
+        paste0(
+          "ETA block `%s` uses numeric `indices`, which cannot be safely ",
+          "remapped after GWAS-LD harmonization excludes LD variants; use ",
+          "character variant IDs."
+        ),
+        block_names[[block_index]]
+      ), call. = FALSE)
+    }
     if (!is.character(indices)) next
     known <- indices %in% gwas_ids | indices %in% ld_ids
     unknown <- unique(indices[!known])
@@ -501,15 +481,9 @@ blm_gwas <- function(
     columns <- local_map[triplets$column[edge_keep]]
     values <- triplets$value[edge_keep]
     size <- length(keep)
-    sparse <- Matrix::sparseMatrix(
-      i = c(seq_len(size), rows),
-      j = c(seq_len(size), columns),
-      x = c(rep(1, size), values),
-      dims = c(size, size),
-      giveCsparse = TRUE
+    ranges <- .exact_contiguous_ld_triplet_blocks(
+      size, rows, columns, values
     )
-    sparse <- Matrix::forceSymmetric(sparse, uplo = "L")
-    ranges <- .exact_contiguous_ld_blocks(sparse)
     for (range in ranges) {
       parent <- block$parent
       repeat {
@@ -522,8 +496,13 @@ blm_gwas <- function(
         child_name <- paste0(parent, ".", count)
         if (!child_name %in% c(reserved_names, names(new_blocks))) break
       }
-      child <- .compress_ld_block(
-        sparse[range, range, drop = FALSE], parent, child_name
+      first <- range[[1L]]
+      last <- range[[length(range)]]
+      in_range <- rows >= first & rows <= last &
+        columns >= first & columns <= last
+      child <- .compress_ld_triplets(
+        length(range), rows[in_range] - first + 1L,
+        columns[in_range] - first + 1L, values[in_range], parent, child_name
       )
       new_blocks[[child$name]] <- child
     }
@@ -537,6 +516,7 @@ blm_gwas <- function(
     variants = variants,
     parents = unique(block_table$parent),
     block_table = block_table,
+    format_version = .blm_ld_format_version,
     cross_block_assumption = if (length(new_blocks) > 1L) "zero" else NULL
   ), class = "blm_ld")
 }

@@ -32,7 +32,7 @@ blm_gwas(
 \code{BETA}, and \code{SE}. \code{BETA} is the additive marginal effect per \code{A1} allele.
 All retained variants must have a common sample size \code{N}.}
 
-\item{ld}{A \code{blm_ld} object returned by \code{\link[=as_blm_ld]{as_blm_ld()}}.}
+\item{ld}{A \code{blm_ld} object returned by the current \code{\link[=as_blm_ld]{as_blm_ld()}}.}
 
 \item{ETA}{Prior specifications in the same format as \code{\link[=blm_ss]{blm_ss()}}. Character
 \code{indices} refer to variant IDs.}
@@ -82,9 +82,10 @@ position, and alleles. Reversed alleles are handled by changing effect
 orientation. Unmatched, incompatible, and unresolved strand-ambiguous
 variants are excluded with a warning. Excluded IDs are also removed from
 character-indexed \code{ETA} blocks, with a block-specific warning; a block
-that becomes empty is rejected. The retained LD object is reordered
-internally as needed for streaming Gibbs updates; \code{ETA} blocks remain
-independent of LD blocks.
+that becomes empty is rejected. If harmonization excludes an LD variant,
+numeric \code{ETA} indices are rejected because their intended position is
+ambiguous; use character variant IDs instead. Gibbs coordinates retain
+LD order, while \code{ETA} blocks remain independent of LD blocks.
 
 With \code{scale = "standardized"}, the working statistics use
 \verb{XtX = (N - 1) R} and response variance one. With \code{scale = "original"},

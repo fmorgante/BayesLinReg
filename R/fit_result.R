@@ -8,17 +8,25 @@
                                  residual_scale_calibrated = FALSE,
                                  expected_pve_total = NULL,
                                  reference_response_var = NULL,
-                                 reference_residual_var = NULL) {
+                                 reference_residual_var = NULL,
+                                 sampler_block_id = NULL) {
   block_models <- vapply(blocks, `[[`, character(1), "model")
-  family_indices <- lapply(
-    c("Normal", "SpikeSlab", "GlobalLocal", "SpikeMultiSlab", "Fixed"),
-    function(model) {
-      unlist(block_indices[block_models == model], use.names = FALSE)
-    }
+  model_names <- c(
+    "Normal", "SpikeSlab", "GlobalLocal", "SpikeMultiSlab", "Fixed"
   )
+  family_indices <- if (is.null(sampler_block_id)) {
+    lapply(model_names, function(model) {
+      unlist(block_indices[block_models == model], use.names = FALSE)
+    })
+  } else {
+    lapply(model_names, function(model) {
+      which(block_models[sampler_block_id] == model)
+    })
+  }
   eta_result <- lapply(seq_along(blocks), function(block_index) {
     block <- blocks[[block_index]]
     indices <- block_indices[[block_index]]
+    block_local_order <- match(indices, sort(indices))
     if (store_samples) {
       coefficient_samples <- sweep(
         samples$coefficient_samples[, indices, drop = FALSE],
@@ -43,7 +51,9 @@
       if (store_coefficient_cov) {
         coefficient_cov <- .covariance_from_sums(
           samples$coefficient_sum[indices],
-          samples$coefficient_crossprod[[block_index]],
+          samples$coefficient_crossprod[[block_index]][
+            block_local_order, block_local_order, drop = FALSE
+          ],
           samples$number_of_draws
         ) / outer(block$predictor_scale, block$predictor_scale)
       }
@@ -220,7 +230,9 @@
         result$var_var <- stats::var(multi_var_samples)
       } else {
         component_probability <-
-          samples$multi_component_sum[[block_index]] /
+          samples$multi_component_sum[[block_index]][
+            block_local_order, , drop = FALSE
+          ] /
             samples$number_of_draws
         dimnames(component_probability) <- list(
           block$predictor_names, component_names

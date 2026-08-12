@@ -102,6 +102,7 @@ as_blm_ld <- function(R, variants) {
       variants = all_variants,
       parents = block_names,
       block_table = block_table,
+      format_version = .blm_ld_format_version,
       cross_block_assumption = if (length(computational_blocks) > 1L) {
         "zero"
       } else {
@@ -139,6 +140,11 @@ print.blm_ld <- function(x, ...) {
     stop(sprintf("LD block `%s` must have a unit diagonal.", label),
          call. = FALSE)
   }
+  if (inherits(matrix, "sparseMatrix")) {
+    Matrix::diag(matrix) <- 1
+  } else {
+    diag(matrix) <- 1
+  }
   maximum <- if (inherits(matrix, "sparseMatrix")) {
     if (length(matrix@x)) max(abs(matrix@x)) else 0
   } else {
@@ -147,11 +153,6 @@ print.blm_ld <- function(x, ...) {
   if (maximum > 1 + sqrt(.Machine$double.eps)) {
     stop(sprintf("LD block `%s` contains a correlation outside [-1, 1].",
                  label), call. = FALSE)
-  }
-  if (inherits(matrix, "sparseMatrix")) {
-    Matrix::diag(matrix) <- 1
-  } else {
-    diag(matrix) <- 1
   }
   matrix
 }
@@ -223,13 +224,19 @@ print.blm_ld <- function(x, ...) {
 }
 
 .exact_contiguous_ld_blocks <- function(matrix) {
-  p <- ncol(matrix)
-  if (p == 1L) return(list(1L))
   entries <- .ld_lower_triplets(matrix)
+  .exact_contiguous_ld_triplet_blocks(
+    ncol(matrix), entries$row, entries$column, entries$value
+  )
+}
+
+.exact_contiguous_ld_triplet_blocks <- function(p, row, column, value) {
+  if (p == 1L) return(list(1L))
   crossing_delta <- integer(p)
-  if (length(entries$value)) {
-    starts <- pmin(entries$row, entries$column)
-    ends <- pmax(entries$row, entries$column)
+  nonzero <- value != 0
+  if (any(nonzero)) {
+    starts <- pmin(row[nonzero], column[nonzero])
+    ends <- pmax(row[nonzero], column[nonzero])
     crossing_delta <- tabulate(starts, nbins = p) -
       tabulate(ends, nbins = p)
   }
@@ -240,13 +247,22 @@ print.blm_ld <- function(x, ...) {
 }
 
 .compress_ld_block <- function(matrix, parent, name) {
-  p <- ncol(matrix)
   entries <- .ld_lower_triplets(matrix)
-  counts <- tabulate(entries$column, nbins = p)
-  indexed_bytes <- 12 * length(entries$value) + 4 * (p + 1)
+  .compress_ld_triplets(
+    ncol(matrix), entries$row, entries$column, entries$value, parent, name
+  )
+}
+
+.compress_ld_triplets <- function(p, row, column, value, parent, name) {
+  nonzero <- value != 0
+  row <- as.integer(row[nonzero])
+  column <- as.integer(column[nonzero])
+  value <- as.numeric(value[nonzero])
+  counts <- tabulate(column, nbins = p)
+  indexed_bytes <- 12 * length(value) + 4 * (p + 1)
   last_row <- seq_len(p)
-  if (length(entries$value)) {
-    split_rows <- split(entries$row, entries$column)
+  if (length(value)) {
+    split_rows <- split(row, column)
     columns <- as.integer(names(split_rows))
     last_row[columns] <- vapply(split_rows, max, integer(1))
   }
@@ -257,19 +273,18 @@ print.blm_ld <- function(x, ...) {
   if (interval_bytes <= indexed_bytes) {
     indptr <- c(0, cumsum(spans))
     data <- numeric(indptr[p + 1L])
-    if (length(entries$value)) {
-      positions <- indptr[entries$column] +
-        (entries$row - entries$column)
-      data[positions] <- entries$value
+    if (length(value)) {
+      positions <- indptr[column] + (row - column)
+      data[positions] <- value
     }
     row_index <- integer()
     type <- 0L
     storage <- "interval_triangular"
   } else {
-    order <- order(entries$column, entries$row)
-    data <- entries$value[order]
-    row_index <- entries$row[order] - 1L
-    counts <- tabulate(entries$column[order], nbins = p)
+    order <- order(column, row)
+    data <- value[order]
+    row_index <- row[order] - 1L
+    counts <- tabulate(column[order], nbins = p)
     indptr <- c(0L, cumsum(counts))
     type <- 1L
     storage <- "indexed_triangular"
@@ -284,6 +299,86 @@ print.blm_ld <- function(x, ...) {
     indptr = as.integer(indptr),
     row_index = as.integer(row_index)
   )
+}
+
+.blm_ld_format_version <- 1L
+
+.validate_blm_ld_object <- function(ld) {
+  if (!inherits(ld, "blm_ld") || !is.list(ld)) {
+    stop("`ld` must be an object returned by `as_blm_ld()`.", call. = FALSE)
+  }
+  if (!identical(ld$format_version, .blm_ld_format_version)) {
+    stop(
+      paste0(
+        "`ld` uses an unsupported internal format; recreate it with the ",
+        "current `as_blm_ld()`."
+      ),
+      call. = FALSE
+    )
+  }
+  if (!is.data.frame(ld$variants) || !is.list(ld$blocks) ||
+      !length(ld$blocks) || !is.character(ld$parents) ||
+      !length(ld$parents) || anyNA(ld$parents) || any(ld$parents == "") ||
+      anyDuplicated(ld$parents)) {
+    stop("`ld` has an invalid internal structure.", call. = FALSE)
+  }
+  required_variants <- c("CHR", "ID", "POS", "A1", "A0")
+  if (!all(required_variants %in% names(ld$variants)) ||
+      anyNA(ld$variants$ID) || any(ld$variants$ID == "") ||
+      anyDuplicated(ld$variants$ID)) {
+    stop("`ld` has invalid variant metadata.", call. = FALSE)
+  }
+  block_names <- names(ld$blocks)
+  if (is.null(block_names) || anyNA(block_names) || any(block_names == "") ||
+      anyDuplicated(block_names)) {
+    stop("`ld` has invalid computational block names.", call. = FALSE)
+  }
+  for (block_index in seq_along(ld$blocks)) {
+    block <- ld$blocks[[block_index]]
+    required <- c(
+      "name", "parent", "size", "type", "storage", "data", "indptr",
+      "row_index"
+    )
+    if (!is.list(block) || !all(required %in% names(block)) ||
+        !identical(block$name, block_names[[block_index]]) ||
+        !is.character(block$parent) || length(block$parent) != 1L ||
+        is.na(block$parent) || !block$parent %in% ld$parents ||
+        !is.character(block$storage) || length(block$storage) != 1L ||
+        is.na(block$storage) ||
+        !is.integer(block$size) || length(block$size) != 1L ||
+        is.na(block$size) || block$size < 1L ||
+        !is.integer(block$type) || length(block$type) != 1L ||
+        !block$type %in% 0:1 || !is.numeric(block$data) ||
+        anyNA(block$data) || any(!is.finite(block$data)) ||
+        any(abs(block$data) > 1 + sqrt(.Machine$double.eps)) ||
+        !is.integer(block$indptr) ||
+        length(block$indptr) != block$size + 1L ||
+        block$indptr[[1L]] != 0L ||
+        block$indptr[[block$size + 1L]] != length(block$data) ||
+        any(diff(block$indptr) < 0L) || !is.integer(block$row_index)) {
+      stop("`ld` contains an invalid compressed block.", call. = FALSE)
+    }
+    counts <- diff(block$indptr)
+    if (block$type == 0L) {
+      if (!identical(block$storage, "interval_triangular") ||
+          length(block$row_index) ||
+          any(seq_len(block$size) + counts > block$size)) {
+        stop("`ld` contains an invalid interval block.", call. = FALSE)
+      }
+    } else {
+      if (!identical(block$storage, "indexed_triangular") ||
+          length(block$row_index) != length(block$data) ||
+          any(block$row_index < 0L | block$row_index >= block$size)) {
+        stop("`ld` contains an invalid indexed block.", call. = FALSE)
+      }
+    }
+  }
+  block_sizes <- vapply(ld$blocks, `[[`, integer(1), "size")
+  if (sum(block_sizes) != nrow(ld$variants) ||
+      !identical(ld$block_table, .ld_block_table(ld$blocks))) {
+    stop("`ld` block metadata are inconsistent.", call. = FALSE)
+  }
+  invisible(ld)
 }
 
 .ld_block_table <- function(blocks) {

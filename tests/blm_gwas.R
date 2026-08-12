@@ -29,6 +29,7 @@ ld <- as_blm_ld(
 )
 stopifnot(
   inherits(ld, "blm_ld"),
+  identical(ld$format_version, 1L),
   nrow(ld$block_table) == 2L,
   identical(ld$parents, c("chr1", "chr2")),
   identical(ld$block_table$variant_start, c(1L, 4L)),
@@ -41,6 +42,41 @@ stopifnot(
     as.matrix(Matrix::bdiag(R1, R2)),
     check.attributes = FALSE
   ))
+)
+
+# Small diagonal deviations are normalized before correlation bounds are
+# checked, and stale or corrupted serialized LD objects fail in R.
+rounded_R1 <- R1
+diag(rounded_R1) <- c(1 + 5e-7, 1 - 5e-7, 1)
+rounded_ld <- as_blm_ld(rounded_R1, variants1)
+stopifnot(all(diag(BayesLinReg:::.materialize_blm_ld(rounded_ld)) == 1))
+stale_ld <- ld
+stale_ld$format_version <- NULL
+corrupt_ld <- ld
+corrupt_ld$blocks[[1L]]$indptr[1L] <- 1L
+validation_gwas <- transform(
+  rbind(variants1, variants2), N = 100L, BETA = 0, SE = 0.1
+)
+validation_eta <- list(model = "Normal")
+stale_error <- try(
+  blm_gwas(
+    validation_gwas, stale_ld, validation_eta, residual_var = 1,
+    iterations = 10L, burnin = 5L
+  ),
+  silent = TRUE
+)
+corrupt_error <- try(
+  blm_gwas(
+    validation_gwas, corrupt_ld, validation_eta, residual_var = 1,
+    iterations = 10L, burnin = 5L
+  ),
+  silent = TRUE
+)
+stopifnot(
+  inherits(stale_error, "try-error"),
+  grepl("unsupported internal format", stale_error),
+  inherits(corrupt_error, "try-error"),
+  grepl("invalid compressed block", corrupt_error)
 )
 
 # Fully compatible inputs reuse the original compressed LD representation.
@@ -93,18 +129,17 @@ stopifnot(
   )
 )
 
-# The LD-native kernel reproduces materialized sufficient-statistics sampling,
-# including prior blocks that cross LD blocks.
+# The LD-native kernel reproduces materialized sufficient-statistics sampling.
 n <- 100L
 beta <- stats::setNames(c(0.1, -0.2, 0.05, 0.3, 0, -0.1), ids)
 se <- stats::setNames(rep(0.08, 6L), ids)
 gwas <- transform(rbind(variants1, variants2), N = n, BETA = beta, SE = se)
 ETA <- list(
   normal = list(
-    indices = c("rs5", "rs1", "rs4"), model = "Normal"
+    indices = ids[1:3], model = "Normal"
   ),
   mixture = list(
-    indices = c("rs6", "rs3", "rs2"), model = "SpikeMultiSlab"
+    indices = ids[4:6], model = "SpikeMultiSlab"
   )
 )
 ss <- compute_ss_from_gwas(
@@ -141,9 +176,113 @@ stopifnot(
   identical(gwas_fit$residual_df_gwas, n - 2)
 )
 
+# Predictor order inside ETA blocks affects only output order. The sampler
+# retains LD order, so the underlying draws and hyperparameter updates match.
+reordered_ETA <- ETA
+reordered_ETA$normal$indices <- rev(reordered_ETA$normal$indices)
+reordered_ETA$mixture$indices <- rev(reordered_ETA$mixture$indices)
+set.seed(1101)
+reordered_fit <- do.call(
+  blm_gwas,
+  c(list(
+    gwas = gwas, ld = ld, ETA = reordered_ETA,
+    reference_response_var = 2
+  ), common[names(common) != "ETA"])
+)
+for (block_name in names(gwas_fit$ETA)) {
+  reference_block <- gwas_fit$ETA[[block_name]]
+  reordered_block <- reordered_fit$ETA[[block_name]]
+  requested <- names(reordered_block$coefficient_mean)
+  stopifnot(
+    identical(
+      reference_block$coefficient_samples[, requested, drop = FALSE],
+      reordered_block$coefficient_samples
+    ),
+    identical(
+      reference_block$coefficient_cov[requested, requested, drop = FALSE],
+      reordered_block$coefficient_cov
+    )
+  )
+}
+stopifnot(
+  identical(gwas_fit$residual_var_samples, reordered_fit$residual_var_samples),
+  identical(gwas_fit$total_pve_samples, reordered_fit$total_pve_samples),
+  identical(
+    gwas_fit$ETA$mixture$component_samples[
+      , names(reordered_fit$ETA$mixture$coefficient_mean), drop = FALSE
+    ],
+    reordered_fit$ETA$mixture$component_samples
+  )
+)
+
+# Prior blocks may cross LD blocks without changing the LD scan order. Verify
+# the retained-draw PVE values directly from the materialized Gram matrix.
+crossed_eta <- list(
+  normal = list(
+    indices = c("rs5", "rs1", "rs4"), model = "Normal"
+  ),
+  mixture = list(
+    indices = c("rs6", "rs3", "rs2"), model = "SpikeMultiSlab"
+  )
+)
+set.seed(1109)
+crossed_fit <- blm_gwas(
+  gwas, ld, crossed_eta,
+  residual_var = 1, reference_response_var = 2,
+  iterations = 70L, burnin = 20L,
+  store_samples = TRUE, compute_pve = TRUE
+)
+crossed_samples <- do.call(
+  cbind, lapply(crossed_fit$ETA, `[[`, "coefficient_samples")
+)
+crossed_samples <- crossed_samples[, ids, drop = FALSE]
+materialized_XtX <- as.matrix(Matrix::bdiag(ss$XtX))
+signal_variance <- rowSums(
+  (crossed_samples %*% materialized_XtX) * crossed_samples
+) / n
+expected_total_pve <- signal_variance / (signal_variance + 1)
+expected_standalone <- vapply(names(crossed_eta), function(block_name) {
+  block_ids <- crossed_eta[[block_name]]$indices
+  block_samples <- crossed_samples[, block_ids, drop = FALSE]
+  block_indices <- match(block_ids, ids)
+  block_signal <- rowSums(
+    (block_samples %*%
+       materialized_XtX[block_indices, block_indices, drop = FALSE]) *
+      block_samples
+  ) / n
+  block_signal / (signal_variance + 1)
+}, numeric(nrow(crossed_samples)))
+stopifnot(
+  isTRUE(all.equal(
+    crossed_fit$total_pve_samples, expected_total_pve, tolerance = 1e-10
+  )),
+  isTRUE(all.equal(
+    vapply(crossed_fit$ETA, `[[`, numeric(length(expected_total_pve)),
+           "pve_samples"),
+    expected_standalone,
+    tolerance = 1e-10,
+    check.attributes = FALSE
+  ))
+)
+
 # Harmonization exclusions are removed from character-indexed ETA blocks.
 incompatible_gwas <- gwas
 incompatible_gwas$POS[incompatible_gwas$ID == "rs2"] <- 200L
+numeric_eta_error <- try(
+  suppressWarnings(blm_gwas(
+    incompatible_gwas, ld,
+    list(
+      first = list(indices = 1:3, model = "Normal"),
+      second = list(indices = 4:6, model = "Normal")
+    ),
+    residual_var = 1, iterations = 10L, burnin = 5L
+  )),
+  silent = TRUE
+)
+stopifnot(
+  inherits(numeric_eta_error, "try-error"),
+  grepl("use character variant IDs", numeric_eta_error)
+)
 partial_harmonization <- suppressWarnings(
   BayesLinReg:::.harmonize_gwas_ld(
     BayesLinReg:::.validate_blm_gwas(incompatible_gwas), ld
@@ -166,7 +305,7 @@ excluded_fit <- withCallingHandlers(
 )
 stopifnot(
   identical(excluded_fit$gwas_variants$ID, ids[c(1L, 3L:6L)]),
-  any(grepl("mixture \\(1\\)", harmonization_warnings)),
+  any(grepl("normal \\(1\\)", harmonization_warnings)),
   !"rs2" %in% names(coef(excluded_fit))
 )
 
@@ -313,6 +452,165 @@ stopifnot(
   identical(parallel_fit$nthreads, 2L),
   identical(parallel_three$nthreads, 3L),
   parallel_fit$residual_var_mean > 0
+)
+
+# Every prior family, expected-PVE calibration, fixed effects, both PVE
+# definitions, and multiple chains agree with materialized sufficient
+# statistics when both backends use the same Gibbs scan order.
+all_ids <- paste0("all", seq_len(10L))
+all_R <- outer(seq_len(10L), seq_len(10L), function(i, j) 0.25^abs(i - j))
+dimnames(all_R) <- list(all_ids, all_ids)
+all_variants <- data.frame(
+  CHR = 4, ID = all_ids, POS = seq_len(10L),
+  A1 = rep(c("A", "C"), 5L), A0 = rep(c("C", "A"), 5L)
+)
+all_ld <- as_blm_ld(all_R, all_variants)
+all_beta <- stats::setNames(seq(-0.12, 0.15, length.out = 10L), all_ids)
+all_se <- stats::setNames(rep(0.07, 10L), all_ids)
+all_gwas <- transform(
+  all_variants, N = n, BETA = all_beta, SE = all_se
+)
+all_eta <- list(
+  fixed = list(indices = all_ids[1:2], model = "Fixed"),
+  normal = list(
+    indices = all_ids[3:4], model = "Normal", expected_pve = 0.08
+  ),
+  spike = list(
+    indices = all_ids[5:6], model = "SpikeSlab", expected_pve = 0.08
+  ),
+  global = list(
+    indices = all_ids[7:8], model = "GlobalLocal",
+    expected_nonzero = 1, expected_pve = 0.08
+  ),
+  multi = list(
+    indices = all_ids[9:10], model = "SpikeMultiSlab",
+    expected_pve = 0.08
+  )
+)
+all_ss <- compute_ss_from_gwas(
+  all_beta, all_se, all_R, n, response_var = 2
+)
+for (pve_definition in c("standalone", "allocated")) {
+  all_common <- list(
+    ETA = all_eta, residual_shape = 2, residual_scale = 1,
+    iterations = 70L, burnin = 20L,
+    store_samples = TRUE, store_coefficient_cov = TRUE,
+    compute_pve = TRUE, pve_type = pve_definition
+  )
+  set.seed(1106)
+  all_gwas_fit <- do.call(
+    blm_gwas,
+    c(list(
+      gwas = all_gwas, ld = all_ld, reference_response_var = 2
+    ), all_common)
+  )
+  set.seed(1106)
+  all_ss_fit <- suppressWarnings(do.call(
+    blm_ss,
+    c(list(
+      n = n, XtX = all_ss$XtX, Xty = all_ss$Xty, yty = all_ss$yty,
+      reference_response_var = 2
+    ), all_common)
+  ))
+  stopifnot(
+    isTRUE(all.equal(all_gwas_fit$ETA, all_ss_fit$ETA, tolerance = 1e-10)),
+    isTRUE(all.equal(
+      all_gwas_fit$residual_var_samples, all_ss_fit$residual_var_samples,
+      tolerance = 1e-10
+    )),
+    isTRUE(all.equal(
+      all_gwas_fit$total_pve_samples, all_ss_fit$total_pve_samples,
+      tolerance = 1e-10
+    )),
+    isTRUE(all.equal(
+      all_gwas_fit$cross_block_pve_samples,
+      all_ss_fit$cross_block_pve_samples, tolerance = 1e-10
+    ))
+  )
+}
+
+all_eta_reordered <- lapply(all_eta, function(specification) {
+  specification$indices <- rev(specification$indices)
+  specification
+})
+set.seed(1108)
+all_online_fit <- blm_gwas(
+  all_gwas, all_ld, all_eta,
+  residual_var = 1, reference_response_var = 2,
+  iterations = 60L, burnin = 20L,
+  store_coefficient_cov = TRUE, compute_pve = TRUE
+)
+set.seed(1108)
+all_online_reordered <- blm_gwas(
+  all_gwas, all_ld, all_eta_reordered,
+  residual_var = 1, reference_response_var = 2,
+  iterations = 60L, burnin = 20L,
+  store_coefficient_cov = TRUE, compute_pve = TRUE
+)
+for (block_name in names(all_online_fit$ETA)) {
+  reference_block <- all_online_fit$ETA[[block_name]]
+  reordered_block <- all_online_reordered$ETA[[block_name]]
+  requested <- names(reordered_block$coefficient_mean)
+  stopifnot(
+    identical(reference_block$coefficient_mean[requested],
+              reordered_block$coefficient_mean),
+    identical(
+      reference_block$coefficient_cov[requested, requested, drop = FALSE],
+      reordered_block$coefficient_cov
+    )
+  )
+}
+stopifnot(
+  identical(
+    all_online_fit$ETA$spike$inclusion_probability[
+      names(all_online_reordered$ETA$spike$inclusion_probability)
+    ],
+    all_online_reordered$ETA$spike$inclusion_probability
+  ),
+  identical(
+    all_online_fit$ETA$global$local_var_mean[
+      names(all_online_reordered$ETA$global$local_var_mean)
+    ],
+    all_online_reordered$ETA$global$local_var_mean
+  ),
+  identical(
+    all_online_fit$ETA$multi$component_probability[
+      rownames(all_online_reordered$ETA$multi$component_probability),
+      , drop = FALSE
+    ],
+    all_online_reordered$ETA$multi$component_probability
+  )
+)
+
+chain_common <- list(
+  ETA = all_eta, residual_var = 1,
+  iterations = 40L, burnin = 10L,
+  store_samples = TRUE, nchains = 2L
+)
+set.seed(1107)
+chain_gwas_fit <- do.call(
+  blm_gwas,
+  c(list(
+    gwas = all_gwas, ld = all_ld, reference_response_var = 2
+  ), chain_common)
+)
+set.seed(1107)
+chain_ss_fit <- suppressWarnings(do.call(
+  blm_ss,
+  c(list(
+    n = n, XtX = all_ss$XtX, Xty = all_ss$Xty, yty = all_ss$yty,
+    reference_response_var = 2
+  ),
+    chain_common)
+))
+stopifnot(
+  isTRUE(all.equal(chain_gwas_fit$ETA, chain_ss_fit$ETA,
+                   tolerance = 1e-10)),
+  isTRUE(all.equal(
+    chain_gwas_fit$residual_var_samples,
+    chain_ss_fit$residual_var_samples, tolerance = 1e-10
+  )),
+  identical(chain_gwas_fit$chain_id, chain_ss_fit$chain_id)
 )
 
 # Irregular sparse lower triangles use indexed storage and match materialized
