@@ -145,23 +145,27 @@ statistics fit), otherwise the posterior is improper and fitting stops.
 Standardization changes numerical conditioning but not the flat prior,
 and returned coefficients remain on the original predictor scale.
 
-A \code{"Normal"} block optionally accepts \code{var_shape = 2} and
-\code{var_scale = 1}. Its coefficients share a variance sampled from an
-inverse-gamma prior with the supplied shape and scale. As an alternative
-to \code{var_scale}, \code{expected_pve} sets
+A \code{"Normal"} block may fix its shared coefficient variance with \code{var}, or
+optionally accepts \code{var_shape = 2} and \code{var_scale = 1} to sample it from
+an inverse-gamma prior. As an alternative to \code{var_scale}, \code{expected_pve}
+sets
 \deqn{\mathrm{var\_scale} =
     (\mathrm{var\_shape}-1)V_g/D.}
-A \code{"SpikeSlab"} block optionally accepts \code{pi = c(a = 1, b = 1)},
-\code{var_shape = 2}, and \code{var_scale = 1}. Its shared slab variance has an
-inverse-gamma prior with the supplied shape and scale. With
+A \code{"SpikeSlab"} block optionally accepts \code{pi = c(a = 1, b = 1)}. Its
+shared slab variance may be fixed with \code{var}, or sampled using
+\code{var_shape = 2} and \code{var_scale = 1} for its inverse-gamma prior. With
 \eqn{q=\mathrm{E}(\pi)=a/(a+b)}, \code{expected_pve} instead sets
 \deqn{\mathrm{var\_scale} =
     (\mathrm{var\_shape}-1)V_g/(qD).}
-In either model, \code{var_shape} must exceed one when \code{expected_pve} is used.
+In either model, \code{var} must be positive and is mutually exclusive with
+\code{var_shape}, \code{var_scale}, and \code{expected_pve}. \code{var_shape} must exceed one
+when \code{expected_pve} is used.
 
 A \code{"GlobalLocal"}
 block optionally accepts
-\code{local_shape = c(a = 1, b = 0.5)} and \code{global_scale = 1}. Alternatively,
+\code{local_shape = c(a = 1, b = 0.5)}. Its global variance may be
+fixed with positive \code{global_var}. Otherwise, \code{global_scale = 1} controls
+the half-Cauchy prior on the global scale parameter. Alternatively,
 supply \code{expected_nonzero} and \code{reference_residual_var} together to calibrate
 the global scale as
 \deqn{\mathrm{global\_scale} =
@@ -169,7 +173,8 @@ the global scale as
 where \eqn{p_0} is \code{expected_nonzero}, \eqn{\sigma_0} is
 the square root of \code{reference_residual_var}, and \eqn{p} is the number of
 predictors in that
-block. The calibrated fields are mutually exclusive with \code{global_scale}.
+block. \code{global_var} is mutually exclusive with \code{global_scale} and all
+expected-sparsity calibration fields.
 \code{expected_pve} may replace \code{reference_residual_var}. In that case every
 penalized block must supply \code{expected_pve}; their sum \eqn{R^2} defines
 \eqn{\sigma_0^2=(1-R^2)V_y}, which is then used in the same global-scale
@@ -188,8 +193,9 @@ A \code{"SpikeMultiSlab"} block uses a BayesR-style mixture containing a point
 mass at zero followed by normal slabs. It optionally accepts
 \code{gamma = c(0, 0.01, 0.1, 1)}, a strictly increasing vector whose first
 element is zero; \code{alpha = rep(1, length(gamma))}, the Dirichlet prior
-concentrations for the component probabilities; and \code{var_shape = 2} and
-\code{var_scale = 1} for the inverse-gamma prior on the shared variance. Given
+concentrations for the component probabilities. The shared variance may
+be fixed with positive \code{var}, or sampled using \code{var_shape = 2} and
+\code{var_scale = 1} for its inverse-gamma prior. Given
 component \eqn{c > 1}, the coefficient variance is
 \eqn{\gamma_c \sigma_\beta^2}.
 As an alternative to \code{var_scale}, define
@@ -197,7 +203,8 @@ As an alternative to \code{var_scale}, define
 \code{expected_pve} then sets
 \deqn{\mathrm{var\_scale} =
     (\mathrm{var\_shape}-1)V_g/(D\bar\gamma).}
-Here too, \code{var_shape} must exceed one.
+Here too, fixed \code{var} is mutually exclusive with \code{var_shape}, \code{var_scale},
+and \code{expected_pve}, and \code{var_shape} must exceed one with \code{expected_pve}.
 The coefficient priors are independent of the residual variance.
 
 For a retained draw, let \eqn{f_b=X_b\beta_b},

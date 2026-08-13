@@ -51,11 +51,13 @@
                        normal_shape = 2, normal_scale = 1,
                        pi_alpha = 1, pi_beta = 1,
                        spike_var_shape = 2, spike_var_scale = 1,
-                       global_scale = 1, residual_var = NULL,
+                       global_scale = 1, fixed_global_var = NULL,
+                       residual_var = NULL,
                        local_a = 1, local_b = 0.5,
                        multi_gamma = list(c(0, 0.01, 0.1, 1)),
                        multi_pi_alpha = list(rep(1, 4)),
                        multi_var_shape = 2, multi_var_scale = 1,
+                       fixed_var = NULL,
                        store_samples = TRUE,
                        store_coefficient_cov = TRUE,
                        effective_n = NULL, fit_intercept = TRUE,
@@ -83,6 +85,10 @@
     block_id <- rep.int(1L, number_of_predictors)
   }
   number_of_blocks <- length(block_model)
+  if (is.null(fixed_var)) fixed_var <- rep(NA_real_, number_of_blocks)
+  if (is.null(fixed_global_var)) {
+    fixed_global_var <- rep(NA_real_, number_of_blocks)
+  }
   block_predictors <- lapply(seq_len(number_of_blocks), function(block) {
     which(block_id == block)
   })
@@ -165,7 +171,9 @@
     } else {
       normal_var_sum <- normal_var_sum_sq <- numeric(number_of_blocks)
     }
-    normal_var <- normal_scale / (normal_shape + 1)
+    normal_var <- ifelse(
+      is.na(fixed_var), normal_scale / (normal_shape + 1), fixed_var
+    )
   }
   if (has_spike_slab) {
     if (store_samples) {
@@ -184,7 +192,9 @@
     }
     inclusion <- rep.int(1L, length(model_predictors[[2L]]))
     pi <- pi_alpha / (pi_alpha + pi_beta)
-    slab_var <- spike_var_scale / (spike_var_shape + 1)
+    slab_var <- ifelse(
+      is.na(fixed_var), spike_var_scale / (spike_var_shape + 1), fixed_var
+    )
   }
   if (has_global_local) {
     if (store_samples) {
@@ -202,7 +212,9 @@
     }
     local_var <- rep(1, length(model_predictors[[3L]]))
     local_aux <- rep(1, length(model_predictors[[3L]]))
-    tau_sq <- global_scale^2
+    tau_sq <- ifelse(
+      is.na(fixed_global_var), global_scale^2, fixed_global_var
+    )
     global_aux <- rep(1, number_of_blocks)
   }
   if (has_spike_multi_slab) {
@@ -210,7 +222,9 @@
     multi_pi <- lapply(seq_len(number_of_blocks), function(block) {
       multi_pi_alpha[[block]] / sum(multi_pi_alpha[[block]])
     })
-    multi_var <- multi_var_scale / (multi_var_shape + 1)
+    multi_var <- ifelse(
+      is.na(fixed_var), multi_var_scale / (multi_var_shape + 1), fixed_var
+    )
     if (store_samples) {
       multi_component_samples <- matrix(
         NA_integer_, number_of_draws, length(model_predictors[[4L]]),
@@ -383,6 +397,7 @@
 
     if (has_normal) {
       for (block in which(block_model == 0L)) {
+        if (!is.na(fixed_var[block])) next
         predictors <- block_predictors[[block]]
         normal_var[block] <- 1 / stats::rgamma(
           1L,
@@ -402,13 +417,15 @@
           shape1 = pi_alpha[block] + number_included,
           shape2 = pi_beta[block] + length(predictors) - number_included
         )
-        included_predictors <- predictors[inclusion[local_indices] == 1L]
-        slab_var[block] <- 1 / stats::rgamma(
-          1L,
-          shape = spike_var_shape[block] + length(included_predictors) / 2,
-          rate = spike_var_scale[block] +
-            sum(coefficient[included_predictors]^2) / 2
-        )
+        if (is.na(fixed_var[block])) {
+          included_predictors <- predictors[inclusion[local_indices] == 1L]
+          slab_var[block] <- 1 / stats::rgamma(
+            1L,
+            shape = spike_var_shape[block] + length(included_predictors) / 2,
+            rate = spike_var_scale[block] +
+              sum(coefficient[included_predictors]^2) / 2
+          )
+        }
       }
     }
 
@@ -421,20 +438,22 @@
           length(counts), shape = multi_pi_alpha[[block]] + counts
         )
         multi_pi[[block]] <- gamma_draws / sum(gamma_draws)
-        nonzero <- components > 1L
-        scaled_sum_of_squares <- if (any(nonzero)) {
-          sum(
-            coefficient[predictors[nonzero]]^2 /
-              multi_gamma[[block]][components[nonzero]]
+        if (is.na(fixed_var[block])) {
+          nonzero <- components > 1L
+          scaled_sum_of_squares <- if (any(nonzero)) {
+            sum(
+              coefficient[predictors[nonzero]]^2 /
+                multi_gamma[[block]][components[nonzero]]
+            )
+          } else {
+            0
+          }
+          multi_var[block] <- 1 / stats::rgamma(
+            1L,
+            shape = multi_var_shape[block] + sum(nonzero) / 2,
+            rate = multi_var_scale[block] + scaled_sum_of_squares / 2
           )
-        } else {
-          0
         }
-        multi_var[block] <- 1 / stats::rgamma(
-          1L,
-          shape = multi_var_shape[block] + sum(nonzero) / 2,
-          rate = multi_var_scale[block] + scaled_sum_of_squares / 2
-        )
       }
     }
 
@@ -463,17 +482,19 @@
           shape = local_a[block] + local_b[block],
           rate = 1 + local_var[local_indices]
         )
-        tau_sq[block] <- 1 / stats::rgamma(
-          1L,
-          shape = (length(predictors) + 1) / 2,
-          rate = 1 / global_aux[block] +
-            sum(coefficient[predictors]^2 / local_var[local_indices]) / 2
-        )
-        global_aux[block] <- 1 / stats::rgamma(
-          1L,
-          shape = 1,
-          rate = 1 / global_scale[block]^2 + 1 / tau_sq[block]
-        )
+        if (is.na(fixed_global_var[block])) {
+          tau_sq[block] <- 1 / stats::rgamma(
+            1L,
+            shape = (length(predictors) + 1) / 2,
+            rate = 1 / global_aux[block] +
+              sum(coefficient[predictors]^2 / local_var[local_indices]) / 2
+          )
+          global_aux[block] <- 1 / stats::rgamma(
+            1L,
+            shape = 1,
+            rate = 1 / global_scale[block]^2 + 1 / tau_sq[block]
+          )
+        }
       }
     }
 

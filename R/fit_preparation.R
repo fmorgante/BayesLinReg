@@ -46,6 +46,9 @@
     spike_var_shape = vapply(blocks, `[[`, numeric(1), "spike_var_shape"),
     spike_var_scale = vapply(blocks, `[[`, numeric(1), "spike_var_scale"),
     global_scale = vapply(blocks, `[[`, numeric(1), "global_scale"),
+    fixed_global_var = vapply(
+      blocks, `[[`, numeric(1), "fixed_global_var"
+    ),
     local_a = vapply(
       blocks, function(block) block$local_shape[1L], numeric(1)
     ),
@@ -55,7 +58,8 @@
     multi_gamma = lapply(blocks, `[[`, "multi_gamma"),
     multi_pi_alpha = lapply(blocks, `[[`, "multi_pi_alpha"),
     multi_var_shape = vapply(blocks, `[[`, numeric(1), "multi_var_shape"),
-    multi_var_scale = vapply(blocks, `[[`, numeric(1), "multi_var_scale")
+    multi_var_scale = vapply(blocks, `[[`, numeric(1), "multi_var_scale"),
+    fixed_var = vapply(blocks, `[[`, numeric(1), "fixed_var")
   )
 }
 

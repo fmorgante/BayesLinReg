@@ -32,12 +32,14 @@ Rcpp::List blm_gibbs_core(
     const Rcpp::NumericVector& spike_var_shape,
     const Rcpp::NumericVector& spike_var_scale,
     const Rcpp::NumericVector& global_scale,
+    const Rcpp::NumericVector& fixed_global_var,
     const Rcpp::NumericVector& local_a,
     const Rcpp::NumericVector& local_b,
     const Rcpp::List& multi_gamma_list,
     const Rcpp::List& multi_pi_alpha_list,
     const Rcpp::NumericVector& multi_var_shape,
     const Rcpp::NumericVector& multi_var_scale,
+    const Rcpp::NumericVector& fixed_var,
     const bool learn_residual_var,
     const double fixed_residual_var,
     const bool store_samples,
@@ -299,16 +301,20 @@ Rcpp::List blm_gibbs_core(
   std::vector< std::vector<double> > multi_conditional_means(number_of_blocks);
   for (int block = 0; block < number_of_blocks; ++block) {
     if (prior_models[block] == PriorModel::Normal) {
-      normal_var[block] =
-        normal_scale[block] / (normal_shape[block] + 1.0);
+      normal_var[block] = Rcpp::NumericVector::is_na(fixed_var[block])
+        ? normal_scale[block] / (normal_shape[block] + 1.0)
+        : fixed_var[block];
     }
     if (prior_models[block] == PriorModel::SpikeSlab) {
       pi[block] = pi_alpha[block] / (pi_alpha[block] + pi_beta[block]);
-      slab_var[block] =
-        spike_var_scale[block] / (spike_var_shape[block] + 1.0);
+      slab_var[block] = Rcpp::NumericVector::is_na(fixed_var[block])
+        ? spike_var_scale[block] / (spike_var_shape[block] + 1.0)
+        : fixed_var[block];
     }
     if (prior_models[block] == PriorModel::GlobalLocal) {
-      tau_sq[block] = global_scale[block] * global_scale[block];
+      tau_sq[block] = Rcpp::NumericVector::is_na(fixed_global_var[block])
+        ? global_scale[block] * global_scale[block]
+        : fixed_global_var[block];
     }
     if (prior_models[block] == PriorModel::SpikeMultiSlab) {
       const Rcpp::NumericVector gamma_values = multi_gamma_list[block];
@@ -327,8 +333,9 @@ Rcpp::List blm_gibbs_core(
       for (int component = 0; component < alpha_values.size(); ++component) {
         multi_pi[block][component] = alpha_values[component] / alpha_total;
       }
-      multi_var[block] =
-        multi_var_scale[block] / (multi_var_shape[block] + 1.0);
+      multi_var[block] = Rcpp::NumericVector::is_na(fixed_var[block])
+        ? multi_var_scale[block] / (multi_var_shape[block] + 1.0)
+        : fixed_var[block];
       if (store_samples) {
         multi_pi_samples[block] = Rcpp::NumericMatrix(
           stored_rows, alpha_values.size()
@@ -626,6 +633,9 @@ Rcpp::List blm_gibbs_core(
         if (prior_models[block] != PriorModel::Normal) {
           continue;
         }
+        if (!Rcpp::NumericVector::is_na(fixed_var[block])) {
+          continue;
+        }
         const std::vector<int>& predictors = block_predictors[block];
         double coefficient_sum_of_squares = 0.0;
         for (std::size_t index = 0; index < predictors.size(); ++index) {
@@ -647,13 +657,15 @@ Rcpp::List blm_gibbs_core(
           continue;
         }
         const std::vector<int>& predictors = block_predictors[block];
+        const bool learn_slab_var =
+          Rcpp::NumericVector::is_na(fixed_var[block]);
         int number_included = 0;
         double included_sum_of_squares = 0.0;
         for (std::size_t index = 0; index < predictors.size(); ++index) {
           const int j = predictors[index];
           const int local_index = model_local_index[j];
           number_included += inclusion[local_index];
-          if (inclusion[local_index] == 1) {
+          if (learn_slab_var && inclusion[local_index] == 1) {
             included_sum_of_squares += coefficient[j] * coefficient[j];
           }
         }
@@ -661,12 +673,14 @@ Rcpp::List blm_gibbs_core(
           pi_alpha[block] + number_included,
           pi_beta[block] + predictors.size() - number_included
         );
-        const double slab_posterior_scale =
-          spike_var_scale[block] + 0.5 * included_sum_of_squares;
-        slab_var[block] = 1.0 / R::rgamma(
-          spike_var_shape[block] + 0.5 * number_included,
-          1.0 / slab_posterior_scale
-        );
+        if (learn_slab_var) {
+          const double slab_posterior_scale =
+            spike_var_scale[block] + 0.5 * included_sum_of_squares;
+          slab_var[block] = 1.0 / R::rgamma(
+            spike_var_shape[block] + 0.5 * number_included,
+            1.0 / slab_posterior_scale
+          );
+        }
       }
     }
 
@@ -677,6 +691,8 @@ Rcpp::List blm_gibbs_core(
         }
         const int component_count = multi_gamma[block].size();
         const std::vector<int>& predictors = block_predictors[block];
+        const bool learn_multi_var =
+          Rcpp::NumericVector::is_na(fixed_var[block]);
         std::vector<int> counts(component_count, 0);
         int number_nonzero = 0;
         double scaled_sum_of_squares = 0.0;
@@ -686,8 +702,10 @@ Rcpp::List blm_gibbs_core(
           ++counts[component];
           if (component > 0) {
             ++number_nonzero;
-            scaled_sum_of_squares += coefficient[j] * coefficient[j] /
-              multi_gamma[block][component];
+            if (learn_multi_var) {
+              scaled_sum_of_squares += coefficient[j] * coefficient[j] /
+                multi_gamma[block][component];
+            }
           }
         }
         double pi_total = 0.0;
@@ -700,12 +718,14 @@ Rcpp::List blm_gibbs_core(
         for (int component = 0; component < component_count; ++component) {
           multi_pi[block][component] /= pi_total;
         }
-        const double posterior_scale = multi_var_scale[block] +
-          0.5 * scaled_sum_of_squares;
-        multi_var[block] = 1.0 / R::rgamma(
-          multi_var_shape[block] + 0.5 * number_nonzero,
-          1.0 / posterior_scale
-        );
+        if (learn_multi_var) {
+          const double posterior_scale = multi_var_scale[block] +
+            0.5 * scaled_sum_of_squares;
+          multi_var[block] = 1.0 / R::rgamma(
+            multi_var_shape[block] + 0.5 * number_nonzero,
+            1.0 / posterior_scale
+          );
+        }
       }
     }
 
@@ -735,21 +755,23 @@ Rcpp::List blm_gibbs_core(
           );
         }
 
-        double tau_rate = 1.0 / global_aux[block];
-        for (std::size_t index = 0; index < predictors.size(); ++index) {
-          const int j = predictors[index];
-          tau_rate += coefficient[j] * coefficient[j] /
-            (2.0 * local_var[model_local_index[j]]);
+        if (Rcpp::NumericVector::is_na(fixed_global_var[block])) {
+          double tau_rate = 1.0 / global_aux[block];
+          for (std::size_t index = 0; index < predictors.size(); ++index) {
+            const int j = predictors[index];
+            tau_rate += coefficient[j] * coefficient[j] /
+              (2.0 * local_var[model_local_index[j]]);
+          }
+          tau_sq[block] = 1.0 / R::rgamma(
+            (static_cast<double>(predictors.size()) + 1.0) / 2.0,
+            1.0 / tau_rate
+          );
+          const double global_aux_rate =
+            1.0 / (global_scale[block] * global_scale[block]) +
+            1.0 / tau_sq[block];
+          global_aux[block] =
+            1.0 / R::rgamma(1.0, 1.0 / global_aux_rate);
         }
-        tau_sq[block] = 1.0 / R::rgamma(
-          (static_cast<double>(predictors.size()) + 1.0) / 2.0,
-          1.0 / tau_rate
-        );
-        const double global_aux_rate =
-          1.0 / (global_scale[block] * global_scale[block]) +
-          1.0 / tau_sq[block];
-        global_aux[block] =
-          1.0 / R::rgamma(1.0, 1.0 / global_aux_rate);
       }
     }
 

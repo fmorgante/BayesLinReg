@@ -111,6 +111,9 @@ $$
 ).
 $$
 
+Alternatively, positive `var` fixes $\sigma_{\beta,b}^2$ and skips this
+inverse-gamma update.
+
 ### 1.4 SpikeSlab
 
 For a `SpikeSlab` block,
@@ -132,7 +135,8 @@ $$
 $$
 
 The defaults are `pi = c(a = 1, b = 1)`, `var_shape = 2`, and
-`var_scale = 1`. Let $V_j,m_j$ be the slab conditional parameters from the
+`var_scale = 1`. Alternatively, positive `var` fixes
+$\sigma_{\beta,b}^2$ and skips its inverse-gamma update. Let $V_j,m_j$ be the slab conditional parameters from the
 common normal update with $v_j=\sigma_{\beta,b}^2$. The posterior log odds
 used by the implementation are
 
@@ -196,6 +200,11 @@ var_shape = 2
 var_scale = 1
 ```
 
+Alternatively, positive `var` fixes $\sigma_{\beta,b}^2$; the component
+variances are then `gamma * var`, and the inverse-gamma update is skipped.
+For all three variance-mixture models, `var` is mutually exclusive with
+`var_shape`, `var_scale`, and `expected_pve`.
+
 For component $c>0$, define
 
 $$
@@ -247,6 +256,12 @@ $$
 Here `local_shape = c(a, b)` and `global_scale` $=s_b$. The default
 `local_shape = c(1, 0.5)` gives the Strawderman--Berger local prior;
 `c(0.5, 0.5)` gives the horseshoe local prior.
+
+Alternatively, positive `global_var` fixes $\tau_b^2$ while the local
+variances $\psi_j$ remain sampled. In that case the $\tau_b^2$ and $\zeta_b$
+updates below are skipped. `global_var` is mutually exclusive with
+`global_scale`, `expected_nonzero`, `reference_residual_var`, and
+`expected_pve`.
 
 The beta-prime distribution is represented through
 

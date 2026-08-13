@@ -145,19 +145,20 @@
     allowed <- switch(
       model,
       Normal = c(
-        "X", "model", "standardize", "var_shape", "var_scale",
+        "X", "model", "standardize", "var", "var_shape", "var_scale",
         "expected_pve"
       ),
       SpikeSlab = c(
-        "X", "model", "standardize", "var_shape", "var_scale", "pi",
+        "X", "model", "standardize", "var", "var_shape", "var_scale", "pi",
         "expected_pve"
       ),
       GlobalLocal = c(
-        "X", "model", "standardize", "local_shape", "global_scale",
-        "expected_nonzero", "reference_residual_var", "expected_pve"
+        "X", "model", "standardize", "local_shape", "global_var",
+        "global_scale", "expected_nonzero", "reference_residual_var",
+        "expected_pve"
       ),
       SpikeMultiSlab = c(
-        "X", "model", "standardize", "gamma", "alpha", "var_shape",
+        "X", "model", "standardize", "gamma", "alpha", "var", "var_shape",
         "var_scale", "expected_pve"
       ),
       Fixed = c("X", "model", "standardize")
@@ -234,17 +235,32 @@
     reference_residual_var <- NULL
     global_scale_calibrated <- FALSE
     global_scale_calibration <- "none"
+    fixed_global_var <- NA_real_
     multi_gamma <- c(0, 0.01, 0.1, 1)
     multi_pi_alpha <- rep(1, length(multi_gamma))
     multi_var_shape <- 2
     multi_var_scale <- 1
     multi_var_scale_calibrated <- FALSE
+    fixed_var <- NA_real_
     expected_pve <- if (is.null(specification$expected_pve)) {
       NULL
     } else {
       .validate_expected_pve(specification$expected_pve, block_name)
     }
     if (model == "Normal") {
+      if (!is.null(specification[["var"]])) {
+        conflicting <- intersect(
+          c("var_shape", "var_scale", "expected_pve"), names(specification)
+        )
+        if (length(conflicting)) {
+          stop(sprintf(
+            "ETA block `%s`: `var` cannot be combined with %s.",
+            block_name, paste(sprintf("`%s`", conflicting), collapse = ", ")
+          ), call. = FALSE)
+        }
+        .validate_variance(specification[["var"]], "var")
+        fixed_var <- as.numeric(specification[["var"]])
+      }
       if (!is.null(expected_pve) && !is.null(specification$var_scale)) {
         stop(
           sprintf(
@@ -277,6 +293,19 @@
       if (is.null(expected_pve)) .validate_variance(normal_scale, "var_scale")
     }
     if (model == "SpikeSlab") {
+      if (!is.null(specification[["var"]])) {
+        conflicting <- intersect(
+          c("var_shape", "var_scale", "expected_pve"), names(specification)
+        )
+        if (length(conflicting)) {
+          stop(sprintf(
+            "ETA block `%s`: `var` cannot be combined with %s.",
+            block_name, paste(sprintf("`%s`", conflicting), collapse = ", ")
+          ), call. = FALSE)
+        }
+        .validate_variance(specification[["var"]], "var")
+        fixed_var <- as.numeric(specification[["var"]])
+      }
       if (!is.null(expected_pve) && !is.null(specification$var_scale)) {
         stop(
           sprintf(
@@ -327,6 +356,23 @@
       has_expected_nonzero <- !is.null(specification$expected_nonzero)
       has_reference_residual_var <-
         !is.null(specification$reference_residual_var)
+      if (!is.null(specification[["global_var"]])) {
+        conflicting <- intersect(
+          c(
+            "global_scale", "expected_nonzero", "reference_residual_var",
+            "expected_pve"
+          ),
+          names(specification)
+        )
+        if (length(conflicting)) {
+          stop(sprintf(
+            "ETA block `%s`: `global_var` cannot be combined with %s.",
+            block_name, paste(sprintf("`%s`", conflicting), collapse = ", ")
+          ), call. = FALSE)
+        }
+        .validate_variance(specification[["global_var"]], "global_var")
+        fixed_global_var <- as.numeric(specification[["global_var"]])
+      }
       if (has_global_scale &&
           (has_expected_nonzero || has_reference_residual_var ||
            !is.null(expected_pve))) {
@@ -402,6 +448,19 @@
       }
     }
     if (model == "SpikeMultiSlab") {
+      if (!is.null(specification[["var"]])) {
+        conflicting <- intersect(
+          c("var_shape", "var_scale", "expected_pve"), names(specification)
+        )
+        if (length(conflicting)) {
+          stop(sprintf(
+            "ETA block `%s`: `var` cannot be combined with %s.",
+            block_name, paste(sprintf("`%s`", conflicting), collapse = ", ")
+          ), call. = FALSE)
+        }
+        .validate_variance(specification[["var"]], "var")
+        fixed_var <- as.numeric(specification[["var"]])
+      }
       if (!is.null(expected_pve) && !is.null(specification$var_scale)) {
         stop(
           sprintf(
@@ -472,11 +531,13 @@
       reference_residual_var = reference_residual_var,
       global_scale_calibrated = global_scale_calibrated,
       global_scale_calibration = global_scale_calibration,
+      fixed_global_var = fixed_global_var,
       multi_gamma = multi_gamma,
       multi_pi_alpha = multi_pi_alpha,
       multi_var_shape = multi_var_shape,
       multi_var_scale = multi_var_scale,
       multi_var_scale_calibrated = multi_var_scale_calibrated,
+      fixed_var = fixed_var,
       expected_pve = expected_pve,
       reference_response_var = NULL
     )

@@ -113,6 +113,34 @@ from `residual_shape` and `residual_scale`.
 For mixed priors, use a named `ETA` list whose blocks specify their own
 predictors, model, standardization, and prior parameters.
 
+The `Normal`, `SpikeSlab`, and `SpikeMultiSlab` models can hold their shared
+coefficient or slab variance fixed with `var`. For example:
+
+```r
+fixed_slab_fit <- blm(
+  y,
+  ETA = list(X = X, model = "SpikeSlab", var = 0.5),
+  residual_var = 1
+)
+```
+
+For `SpikeMultiSlab`, component variances are `gamma * var`. A fixed `var` is
+mutually exclusive with `var_shape`, `var_scale`, and `expected_pve`.
+
+For `GlobalLocal`, use `global_var` to fix the global variance while retaining
+sampled local variances:
+
+```r
+fixed_global_fit <- blm(
+  y,
+  ETA = list(X = X, model = "GlobalLocal", global_var = 0.01),
+  residual_var = 1
+)
+```
+
+`global_var` is mutually exclusive with `global_scale`, `expected_nonzero`,
+`reference_residual_var`, and `expected_pve`.
+
 For a high-dimensional global-local block, the half-Cauchy global-scale prior
 can be calibrated from an expected number of nonzero coefficients and a
 reference residual variance:

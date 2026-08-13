@@ -104,23 +104,27 @@
 #'   Standardization changes numerical conditioning but not the flat prior,
 #'   and returned coefficients remain on the original predictor scale.
 #'
-#'   A `"Normal"` block optionally accepts `var_shape = 2` and
-#'   `var_scale = 1`. Its coefficients share a variance sampled from an
-#'   inverse-gamma prior with the supplied shape and scale. As an alternative
-#'   to `var_scale`, `expected_pve` sets
+#'   A `"Normal"` block may fix its shared coefficient variance with `var`, or
+#'   optionally accepts `var_shape = 2` and `var_scale = 1` to sample it from
+#'   an inverse-gamma prior. As an alternative to `var_scale`, `expected_pve`
+#'   sets
 #'   \deqn{\mathrm{var\_scale} =
 #'     (\mathrm{var\_shape}-1)V_g/D.}
-#'   A `"SpikeSlab"` block optionally accepts `pi = c(a = 1, b = 1)`,
-#'   `var_shape = 2`, and `var_scale = 1`. Its shared slab variance has an
-#'   inverse-gamma prior with the supplied shape and scale. With
+#'   A `"SpikeSlab"` block optionally accepts `pi = c(a = 1, b = 1)`. Its
+#'   shared slab variance may be fixed with `var`, or sampled using
+#'   `var_shape = 2` and `var_scale = 1` for its inverse-gamma prior. With
 #'   \eqn{q=\mathrm{E}(\pi)=a/(a+b)}, `expected_pve` instead sets
 #'   \deqn{\mathrm{var\_scale} =
 #'     (\mathrm{var\_shape}-1)V_g/(qD).}
-#'   In either model, `var_shape` must exceed one when `expected_pve` is used.
+#'   In either model, `var` must be positive and is mutually exclusive with
+#'   `var_shape`, `var_scale`, and `expected_pve`. `var_shape` must exceed one
+#'   when `expected_pve` is used.
 #'
 #'   A `"GlobalLocal"`
 #'   block optionally accepts
-#'   `local_shape = c(a = 1, b = 0.5)` and `global_scale = 1`. Alternatively,
+#'   `local_shape = c(a = 1, b = 0.5)`. Its global variance may be
+#'   fixed with positive `global_var`. Otherwise, `global_scale = 1` controls
+#'   the half-Cauchy prior on the global scale parameter. Alternatively,
 #'   supply `expected_nonzero` and `reference_residual_var` together to calibrate
 #'   the global scale as
 #'   \deqn{\mathrm{global\_scale} =
@@ -128,7 +132,8 @@
 #'   where \eqn{p_0} is `expected_nonzero`, \eqn{\sigma_0} is
 #'   the square root of `reference_residual_var`, and \eqn{p} is the number of
 #'   predictors in that
-#'   block. The calibrated fields are mutually exclusive with `global_scale`.
+#'   block. `global_var` is mutually exclusive with `global_scale` and all
+#'   expected-sparsity calibration fields.
 #'   `expected_pve` may replace `reference_residual_var`. In that case every
 #'   penalized block must supply `expected_pve`; their sum \eqn{R^2} defines
 #'   \eqn{\sigma_0^2=(1-R^2)V_y}, which is then used in the same global-scale
@@ -147,8 +152,9 @@
 #'   mass at zero followed by normal slabs. It optionally accepts
 #'   `gamma = c(0, 0.01, 0.1, 1)`, a strictly increasing vector whose first
 #'   element is zero; `alpha = rep(1, length(gamma))`, the Dirichlet prior
-#'   concentrations for the component probabilities; and `var_shape = 2` and
-#'   `var_scale = 1` for the inverse-gamma prior on the shared variance. Given
+#'   concentrations for the component probabilities. The shared variance may
+#'   be fixed with positive `var`, or sampled using `var_shape = 2` and
+#'   `var_scale = 1` for its inverse-gamma prior. Given
 #'   component \eqn{c > 1}, the coefficient variance is
 #'   \eqn{\gamma_c \sigma_\beta^2}.
 #'   As an alternative to `var_scale`, define
@@ -156,7 +162,8 @@
 #'   `expected_pve` then sets
 #'   \deqn{\mathrm{var\_scale} =
 #'     (\mathrm{var\_shape}-1)V_g/(D\bar\gamma).}
-#'   Here too, `var_shape` must exceed one.
+#'   Here too, fixed `var` is mutually exclusive with `var_shape`, `var_scale`,
+#'   and `expected_pve`, and `var_shape` must exceed one with `expected_pve`.
 #'   The coefficient priors are independent of the residual variance.
 #'
 #'   For a retained draw, let \eqn{f_b=X_b\beta_b},

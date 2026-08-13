@@ -7,11 +7,13 @@
                             normal_shape = 2, normal_scale = 1,
                             pi_alpha = 1, pi_beta = 1,
                             spike_var_shape = 2, spike_var_scale = 1,
-                            global_scale = 1, residual_var = NULL,
+                            global_scale = 1, fixed_global_var = NULL,
+                            residual_var = NULL,
                             local_a = 1, local_b = 0.5,
                             multi_gamma = list(c(0, 0.01, 0.1, 1)),
                             multi_pi_alpha = list(rep(1, 4)),
                             multi_var_shape = 2, multi_var_scale = 1,
+                            fixed_var = NULL,
                             store_samples = TRUE,
                             store_coefficient_cov = TRUE,
                             effective_n = NULL, fit_intercept = TRUE,
@@ -38,6 +40,10 @@
       1L, if (use_sufficient_statistics) length(Xty) else ncol(x)
     )
   }
+  if (is.null(fixed_var)) fixed_var <- rep(NA_real_, length(block_model))
+  if (is.null(fixed_global_var)) {
+    fixed_global_var <- rep(NA_real_, length(block_model))
+  }
   if (is.null(progress_callback)) {
     progress_callback <- function(amount, iteration) invisible(NULL)
   }
@@ -62,12 +68,14 @@
     spike_var_shape = spike_var_shape,
     spike_var_scale = spike_var_scale,
     global_scale = global_scale,
+    fixed_global_var = fixed_global_var,
     local_a = local_a,
     local_b = local_b,
     multi_gamma_list = multi_gamma,
     multi_pi_alpha_list = multi_pi_alpha,
     multi_var_shape = multi_var_shape,
     multi_var_scale = multi_var_scale,
+    fixed_var = fixed_var,
     learn_residual_var = is.null(residual_var),
     fixed_residual_var = if (is.null(residual_var)) 1 else residual_var,
     store_samples = store_samples,
@@ -92,9 +100,10 @@
           "residual_shape", "residual_scale", "iterations", "burnin", "thin",
           "progress_callback", "block_id", "block_model", "normal_shape",
           "normal_scale", "pi_alpha", "pi_beta", "spike_var_shape",
-          "spike_var_scale", "global_scale", "local_a", "local_b",
+          "spike_var_scale", "global_scale", "fixed_global_var", "local_a",
+          "local_b",
           "multi_gamma_list", "multi_pi_alpha_list", "multi_var_shape",
-          "multi_var_scale", "learn_residual_var", "fixed_residual_var",
+          "multi_var_scale", "fixed_var", "learn_residual_var", "fixed_residual_var",
           "store_samples", "store_coefficient_cov", "effective_n",
           "fit_intercept", "intercept_x_mean", "intercept_y_mean",
           "compute_pve", "pve_type_code"
@@ -117,9 +126,10 @@
           "residual_shape", "residual_scale", "iterations", "burnin", "thin",
           "progress_callback", "block_id", "block_model", "normal_shape",
           "normal_scale", "pi_alpha", "pi_beta", "spike_var_shape",
-          "spike_var_scale", "global_scale", "local_a", "local_b",
+          "spike_var_scale", "global_scale", "fixed_global_var", "local_a",
+          "local_b",
           "multi_gamma_list", "multi_pi_alpha_list", "multi_var_shape",
-          "multi_var_scale", "learn_residual_var", "fixed_residual_var",
+          "multi_var_scale", "fixed_var", "learn_residual_var", "fixed_residual_var",
           "store_samples", "store_coefficient_cov", "effective_n",
           "fit_intercept", "intercept_x_mean", "intercept_y_mean",
           "compute_pve", "pve_type_code"
@@ -142,9 +152,10 @@
           "residual_shape", "residual_scale", "iterations", "burnin", "thin",
           "progress_callback", "block_id", "block_model", "normal_shape",
           "normal_scale", "pi_alpha", "pi_beta", "spike_var_shape",
-          "spike_var_scale", "global_scale", "local_a", "local_b",
+          "spike_var_scale", "global_scale", "fixed_global_var", "local_a",
+          "local_b",
           "multi_gamma_list", "multi_pi_alpha_list", "multi_var_shape",
-          "multi_var_scale", "learn_residual_var", "fixed_residual_var",
+          "multi_var_scale", "fixed_var", "learn_residual_var", "fixed_residual_var",
           "store_samples", "store_coefficient_cov", "effective_n",
           "fit_intercept", "intercept_x_mean", "intercept_y_mean",
           "compute_pve", "pve_type_code"
@@ -168,9 +179,10 @@
           "residual_shape", "residual_scale", "iterations", "burnin", "thin",
           "progress_callback", "block_id", "block_model", "normal_shape",
           "normal_scale", "pi_alpha", "pi_beta", "spike_var_shape",
-          "spike_var_scale", "global_scale", "local_a", "local_b",
+          "spike_var_scale", "global_scale", "fixed_global_var", "local_a",
+          "local_b",
           "multi_gamma_list", "multi_pi_alpha_list", "multi_var_shape",
-          "multi_var_scale", "learn_residual_var", "fixed_residual_var",
+          "multi_var_scale", "fixed_var", "learn_residual_var", "fixed_residual_var",
           "store_samples", "store_coefficient_cov", "effective_n",
           "fit_intercept", "intercept_x_mean", "intercept_y_mean",
           "compute_pve", "pve_type_code"

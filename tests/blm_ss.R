@@ -58,6 +58,81 @@ for (sampler_version in c("Rcpp", "R")) {
   }
 }
 
+# Every hierarchical coefficient prior can hold its shared/global variance fixed.
+fixed_variance_specs <- list(
+  Normal = list(model = "Normal", var = 0.4),
+  SpikeSlab = list(model = "SpikeSlab", var = 0.3),
+  GlobalLocal = list(model = "GlobalLocal", global_var = 0.25),
+  SpikeMultiSlab = list(
+    model = "SpikeMultiSlab", var = 0.2, gamma = c(0, 0.1, 1)
+  )
+)
+for (sampler_version in c("Rcpp", "R")) {
+  for (model in names(fixed_variance_specs)) {
+    specification <- fixed_variance_specs[[model]]
+    set.seed(520)
+    stored_fit <- blm_ss(
+      n, XtX, Xty, ETA = specification, residual_var = 1,
+      iterations = 80, burnin = 30, version = sampler_version
+    )
+    set.seed(520)
+    online_fit <- blm_ss(
+      n, XtX, Xty, ETA = specification, residual_var = 1,
+      iterations = 80, burnin = 30, version = sampler_version,
+      store_samples = FALSE
+    )
+    stored_block <- stored_fit$ETA$ETA1
+    online_block <- online_fit$ETA$ETA1
+    variance_samples <- switch(
+      model,
+      Normal = stored_block$normal_var_samples,
+      SpikeSlab = stored_block$slab_var_samples,
+      GlobalLocal = stored_block$tau_sq_samples,
+      SpikeMultiSlab = stored_block$var_samples
+    )
+    variance_mean <- switch(
+      model,
+      Normal = online_block$normal_var_mean,
+      SpikeSlab = online_block$slab_var_mean,
+      GlobalLocal = online_block$tau_sq_mean,
+      SpikeMultiSlab = online_block$var_mean
+    )
+    variance_var <- switch(
+      model,
+      Normal = online_block$normal_var_var,
+      SpikeSlab = online_block$slab_var_var,
+      GlobalLocal = online_block$tau_sq_var,
+      SpikeMultiSlab = online_block$var_var
+    )
+    fixed_value <- if (model == "GlobalLocal") {
+      specification$global_var
+    } else {
+      specification$var
+    }
+    stopifnot(
+      all(variance_samples == fixed_value),
+      isTRUE(all.equal(variance_mean, fixed_value)),
+      identical(variance_var, 0),
+      identical(
+        if (model == "GlobalLocal") {
+          stored_block$global_var
+        } else {
+          stored_block$var
+        },
+        fixed_value
+      ),
+      if (model == "GlobalLocal") {
+        is.null(stored_block$global_scale)
+      } else {
+        is.null(stored_block$var_shape) && is.null(stored_block$var_scale)
+      },
+      isTRUE(all.equal(
+        stored_block$coefficient_mean, online_block$coefficient_mean
+      ))
+    )
+  }
+}
+
 # Multiple blocks select and reorder columns using integer or character indices.
 raw_eta <- list(
   fixed = list(X = X[, c("x1", "x3")], model = "Normal"),

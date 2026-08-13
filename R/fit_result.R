@@ -104,12 +104,20 @@
           samples$number_of_draws
         )
       }
-      result$var_shape <- block$normal_shape
-      result$var_scale <- block$normal_scale
-      result$var_scale_calibrated <- block$normal_scale_calibrated
-      if (block$normal_scale_calibrated) {
-        result$expected_pve <- block$expected_pve
-        result$reference_response_var <- block$reference_response_var
+      if (!is.na(block$fixed_var)) {
+        result$normal_var_mean <- block$fixed_var
+        result$normal_var_var <- 0
+      }
+      if (is.na(block$fixed_var)) {
+        result$var_shape <- block$normal_shape
+        result$var_scale <- block$normal_scale
+        result$var_scale_calibrated <- block$normal_scale_calibrated
+        if (block$normal_scale_calibrated) {
+          result$expected_pve <- block$expected_pve
+          result$reference_response_var <- block$reference_response_var
+        }
+      } else {
+        result$var <- block$fixed_var
       }
     }
     if (block$model == "SpikeSlab") {
@@ -144,13 +152,21 @@
           samples$slab_var_sum_sq[block_index], samples$number_of_draws
         )
       }
+      if (!is.na(block$fixed_var)) {
+        result$slab_var_mean <- block$fixed_var
+        result$slab_var_var <- 0
+      }
       result$pi <- c(a = block$pi_alpha, b = block$pi_beta)
-      result$var_shape <- block$spike_var_shape
-      result$var_scale <- block$spike_var_scale
-      result$var_scale_calibrated <- block$spike_var_scale_calibrated
-      if (block$spike_var_scale_calibrated) {
-        result$expected_pve <- block$expected_pve
-        result$reference_response_var <- block$reference_response_var
+      if (is.na(block$fixed_var)) {
+        result$var_shape <- block$spike_var_shape
+        result$var_scale <- block$spike_var_scale
+        result$var_scale_calibrated <- block$spike_var_scale_calibrated
+        if (block$spike_var_scale_calibrated) {
+          result$expected_pve <- block$expected_pve
+          result$reference_response_var <- block$reference_response_var
+        }
+      } else {
+        result$var <- block$fixed_var
       }
     }
     if (block$model == "GlobalLocal") {
@@ -184,17 +200,25 @@
           samples$tau_sq_sum_sq[block_index], samples$number_of_draws
         )
       }
-      result$local_shape <- block$local_shape
-      result$global_scale <- block$global_scale
-      result$global_scale_calibrated <- block$global_scale_calibrated
-      result$global_scale_calibration <- block$global_scale_calibration
-      if (block$global_scale_calibrated) {
-        result$expected_nonzero <- block$expected_nonzero
-        result$reference_residual_var <- block$reference_residual_var
+      if (!is.na(block$fixed_global_var)) {
+        result$tau_sq_mean <- block$fixed_global_var
+        result$tau_sq_var <- 0
       }
-      if (identical(block$global_scale_calibration, "expected_pve")) {
-        result$expected_pve <- block$expected_pve
-        result$reference_response_var <- block$reference_response_var
+      result$local_shape <- block$local_shape
+      if (is.na(block$fixed_global_var)) {
+        result$global_scale <- block$global_scale
+        result$global_scale_calibrated <- block$global_scale_calibrated
+        result$global_scale_calibration <- block$global_scale_calibration
+        if (block$global_scale_calibrated) {
+          result$expected_nonzero <- block$expected_nonzero
+          result$reference_residual_var <- block$reference_residual_var
+        }
+        if (identical(block$global_scale_calibration, "expected_pve")) {
+          result$expected_pve <- block$expected_pve
+          result$reference_response_var <- block$reference_response_var
+        }
+      } else {
+        result$global_var <- block$fixed_global_var
       }
     }
     if (block$model == "SpikeMultiSlab") {
@@ -254,16 +278,24 @@
           samples$multi_var_sum_sq[block_index], samples$number_of_draws
         )
       }
+      if (!is.na(block$fixed_var)) {
+        result$var_mean <- block$fixed_var
+        result$var_var <- 0
+      }
       result$component_probability <- component_probability
       result$inclusion_probability <- 1 - component_probability[, "spike"]
       result$gamma <- stats::setNames(block$multi_gamma, component_names)
       result$alpha <- stats::setNames(block$multi_pi_alpha, component_names)
-      result$var_shape <- block$multi_var_shape
-      result$var_scale <- block$multi_var_scale
-      result$var_scale_calibrated <- block$multi_var_scale_calibrated
-      if (block$multi_var_scale_calibrated) {
-        result$expected_pve <- block$expected_pve
-        result$reference_response_var <- block$reference_response_var
+      if (is.na(block$fixed_var)) {
+        result$var_shape <- block$multi_var_shape
+        result$var_scale <- block$multi_var_scale
+        result$var_scale_calibrated <- block$multi_var_scale_calibrated
+        if (block$multi_var_scale_calibrated) {
+          result$expected_pve <- block$expected_pve
+          result$reference_response_var <- block$reference_response_var
+        }
+      } else {
+        result$var <- block$fixed_var
       }
     }
     result

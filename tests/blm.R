@@ -858,7 +858,24 @@ invalid_calls <- list(
   ),
   function() blm(
     y,
-    ETA = list(X = x, model = "SpikeSlab", var = 10),
+    ETA = list(X = x, model = "SpikeSlab", var = 0),
+    residual_var = 1
+  ),
+  function() blm(
+    y,
+    ETA = list(X = x, model = "Normal", var = 1, var_shape = 2),
+    residual_var = 1
+  ),
+  function() blm(
+    y,
+    ETA = list(X = x, model = "SpikeSlab", var = 1, var_scale = 2),
+    residual_var = 1
+  ),
+  function() blm(
+    y,
+    ETA = list(
+      X = x, model = "SpikeMultiSlab", var = 1, expected_pve = 0.2
+    ),
     residual_var = 1
   ),
   function() blm(
@@ -914,6 +931,26 @@ invalid_calls <- list(
     y,
     ETA = list(
       X = x, model = "GlobalLocal", global_scale = 1,
+      expected_nonzero = 1, reference_residual_var = 1
+    ),
+    residual_var = 1
+  ),
+  function() blm(
+    y,
+    ETA = list(X = x, model = "GlobalLocal", global_var = 0),
+    residual_var = 1
+  ),
+  function() blm(
+    y,
+    ETA = list(
+      X = x, model = "GlobalLocal", global_var = 1, global_scale = 0.5
+    ),
+    residual_var = 1
+  ),
+  function() blm(
+    y,
+    ETA = list(
+      X = x, model = "GlobalLocal", global_var = 1,
       expected_nonzero = 1, reference_residual_var = 1
     ),
     residual_var = 1
