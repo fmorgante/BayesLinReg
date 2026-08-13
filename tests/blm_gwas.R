@@ -44,6 +44,16 @@ stopifnot(
   ))
 )
 
+# Dimnames with array attributes compare by their character values.
+array_named_R1 <- R1
+dimnames(array_named_R1) <- list(ids[1:3], array(ids[1:3]))
+array_named_ld <- as_blm_ld(array_named_R1, variants1)
+stopifnot(isTRUE(all.equal(
+  BayesLinReg:::.materialize_blm_ld(array_named_ld),
+  R1,
+  check.attributes = FALSE
+)))
+
 # Small diagonal deviations are normalized before correlation bounds are
 # checked, and stale or corrupted serialized LD objects fail in R.
 rounded_R1 <- R1
@@ -582,36 +592,43 @@ stopifnot(
   )
 )
 
-chain_common <- list(
-  ETA = all_eta, residual_var = 1,
-  iterations = 40L, burnin = 10L,
-  store_samples = TRUE, nchains = 2L
-)
-set.seed(1107)
-chain_gwas_fit <- do.call(
-  blm_gwas,
-  c(list(
-    gwas = all_gwas, ld = all_ld, reference_response_var = 2
-  ), chain_common)
-)
-set.seed(1107)
-chain_ss_fit <- suppressWarnings(do.call(
-  blm_ss,
-  c(list(
-    n = n, XtX = all_ss$XtX, Xty = all_ss$Xty, yty = all_ss$yty,
-    reference_response_var = 2
-  ),
-    chain_common)
+# Real multisession tests are opt-in outside environments that permit workers.
+parallel_test_flags <- Sys.getenv(c(
+  "BAYESLINREG_TEST_FUTURE",
+  "BLM_TEST_FUTURE"
 ))
-stopifnot(
-  isTRUE(all.equal(chain_gwas_fit$ETA, chain_ss_fit$ETA,
-                   tolerance = 1e-10)),
-  isTRUE(all.equal(
-    chain_gwas_fit$residual_var_samples,
-    chain_ss_fit$residual_var_samples, tolerance = 1e-10
-  )),
-  identical(chain_gwas_fit$chain_id, chain_ss_fit$chain_id)
-)
+if (any(parallel_test_flags == "true")) {
+  chain_common <- list(
+    ETA = all_eta, residual_var = 1,
+    iterations = 40L, burnin = 10L,
+    store_samples = TRUE, nchains = 2L
+  )
+  set.seed(1107)
+  chain_gwas_fit <- do.call(
+    blm_gwas,
+    c(list(
+      gwas = all_gwas, ld = all_ld, reference_response_var = 2
+    ), chain_common)
+  )
+  set.seed(1107)
+  chain_ss_fit <- suppressWarnings(do.call(
+    blm_ss,
+    c(list(
+      n = n, XtX = all_ss$XtX, Xty = all_ss$Xty, yty = all_ss$yty,
+      reference_response_var = 2
+    ),
+      chain_common)
+  ))
+  stopifnot(
+    isTRUE(all.equal(chain_gwas_fit$ETA, chain_ss_fit$ETA,
+                     tolerance = 1e-10)),
+    isTRUE(all.equal(
+      chain_gwas_fit$residual_var_samples,
+      chain_ss_fit$residual_var_samples, tolerance = 1e-10
+    )),
+    identical(chain_gwas_fit$chain_id, chain_ss_fit$chain_id)
+  )
+}
 
 # Irregular sparse lower triangles use indexed storage and match materialized
 # sufficient-statistics sampling, including posterior PVE summaries.

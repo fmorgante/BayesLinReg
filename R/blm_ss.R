@@ -620,6 +620,8 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
   }
   row_names <- rownames(matrix)
   column_names <- colnames(matrix)
+  if (!is.null(row_names)) row_names <- as.character(row_names)
+  if (!is.null(column_names)) column_names <- as.character(column_names)
   if ((strict_names && xor(is.null(row_names), is.null(column_names))) ||
       (!is.null(row_names) && !is.null(column_names) &&
        !identical(row_names, column_names))) {

@@ -51,6 +51,7 @@ as_blm_ld <- function(R, variants) {
       variants[[parent_index]], ncol(matrix), parent
     )
     matrix_names <- colnames(matrix)
+    if (!is.null(matrix_names)) matrix_names <- as.character(matrix_names)
     if (!is.null(matrix_names) && !identical(matrix_names, table$ID)) {
       stop(
         sprintf("Column names of `R[[\"%s\"]]` must match `variants$ID`.",
