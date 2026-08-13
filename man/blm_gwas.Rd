@@ -14,6 +14,7 @@ blm_gwas(
   reference_response_var = NULL,
   scale = c("auto", "standardized", "original"),
   residual_df_gwas = NULL,
+  ld_shrink = 0,
   iterations = 4000L,
   burnin = 1000L,
   thin = 1L,
@@ -51,6 +52,11 @@ response and predictors. \code{"original"} requires
 
 \item{residual_df_gwas}{Positive residual degrees of freedom used by the
 marginal GWAS regressions. The default is \code{N - 2}.}
+
+\item{ld_shrink}{Numeric scalar in \verb{[0, 1)}. Off-diagonal LD correlations
+are multiplied by \code{1 - ld_shrink} while the unit diagonal is retained.
+This is applied by the native LD operator without copying or modifying
+\code{ld}. Positive values can stabilize analyses using external LD.}
 
 \item{iterations, burnin, thin}{MCMC controls; see \code{\link[=blm_ss]{blm_ss()}}.}
 
@@ -93,4 +99,11 @@ predictor cross-product diagonals are reconstructed from \code{BETA}, \code{SE},
 \code{residual_df_gwas}, and \code{reference_response_var}. Reference-panel LD and
 GWAS results not obtained by common-sample ordinary least squares define
 approximate working sufficient statistics.
+
+When LD was estimated outside the GWAS sample, fixing \code{residual_var} is
+recommended. Learning it requires the reconstructed \code{XtX}, \code{Xty}, and
+\code{yty} to be mutually compatible; reference-panel mismatch can violate
+that requirement. For standardized quantitative traits,
+\code{residual_var = 1} is a conservative robust choice. \code{ld_shrink} addresses
+LD regularization but does not make approximate statistics exact.
 }

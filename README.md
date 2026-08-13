@@ -345,9 +345,9 @@ fit_gwas <- blm_gwas(
   gwas = gwas_results,
   ld = ld,
   ETA = list(model = "SpikeMultiSlab"),
-  reference_response_var = phenotype_variance,
-  residual_shape = 2,
-  residual_scale = phenotype_variance
+  scale = "standardized",
+  residual_var = 1,
+  ld_shrink = 0.01
 )
 ```
 
@@ -374,6 +374,16 @@ arbitrary prior layouts do not require reconstructing or recompressing LD.
 Saved `blm_ld` objects carry an internal format version; recreate an object
 with the current `as_blm_ld()` if a later package version reports that its
 format is unsupported.
+
+When LD comes from an external reference panel, fixing `residual_var` is
+recommended because the reconstructed `XtX`, `Xty`, and `yty` need not be
+mutually compatible. For a standardized quantitative trait,
+`residual_var = 1` is a conservative choice. `ld_shrink` applies
+`(1 - ld_shrink) * R + ld_shrink * I` inside the native LD operator without
+copying or modifying the stored LD object. Use `diagnose_blm_ld()` to inspect
+block definiteness and `regularize_blm_ld()` to create a reusable regularized
+LD object when structural repair is needed. Shrinkage of a block that is too
+large for eigendiagnostics regularizes it but does not certify that it is PSD.
 
 With `scale = "original"`, `reference_response_var` is required. Without it,
 the default `scale = "auto"` constructs a standardized working likelihood.

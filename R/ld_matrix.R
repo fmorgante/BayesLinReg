@@ -127,6 +127,255 @@ print.blm_ld <- function(x, ...) {
   invisible(x)
 }
 
+#' Diagnose numerical definiteness of LD blocks
+#'
+#' Examines the computational blocks in an object from [as_blm_ld()] without
+#' changing it. Blocks are materialized and eigendecomposed only when they satisfy both
+#' the dimension and estimated-memory limits.
+#'
+#' @param ld A `blm_ld` object returned by [as_blm_ld()].
+#' @param max_block_size Largest block dimension eligible for a dense
+#'   eigendecomposition.
+#' @param memory_limit_mb Approximate per-block memory limit in MiB. The
+#'   estimate allows workspace for materialization, eigendecomposition, and
+#'   reconstruction.
+#' @param tolerance Nonnegative relative eigenvalue tolerance used to classify
+#'   positive-semidefinite and positive-definite blocks.
+#'
+#' @return A data frame with one row per computational LD block. Unassessed
+#'   blocks have missing eigenvalue and definiteness fields.
+#' @export
+diagnose_blm_ld <- function(
+    ld, max_block_size = 2000L, memory_limit_mb = 512,
+    tolerance = sqrt(.Machine$double.eps)) {
+  .validate_blm_ld_object(ld)
+  controls <- .validate_ld_regularization_controls(
+    max_block_size, memory_limit_mb, tolerance
+  )
+  max_block_size <- controls$max_block_size
+  memory_limit_mb <- controls$memory_limit_mb
+  tolerance <- controls$tolerance
+
+  rows <- lapply(seq_along(ld$blocks), function(block_index) {
+    block <- ld$blocks[[block_index]]
+    estimated_memory_mb <- .ld_eigen_memory_mb(block$size)
+    assessed <- block$size <= max_block_size &&
+      estimated_memory_mb <= memory_limit_mb
+    minimum <- maximum <- threshold <- required_shrink <- NA_real_
+    status <- "not_assessed"
+    if (assessed) {
+      values <- eigen(
+        .materialize_ld_block(block), symmetric = TRUE, only.values = TRUE
+      )$values
+      minimum <- min(values)
+      maximum <- max(values)
+      threshold <- tolerance * max(1, max(abs(values)))
+      status <- if (minimum > threshold) {
+        "positive_definite"
+      } else if (minimum >= -threshold) {
+        "positive_semidefinite"
+      } else {
+        "indefinite"
+      }
+      if (minimum < threshold) {
+        required_shrink <- (threshold - minimum) / (1 - minimum)
+        required_shrink <- min(1, max(0, required_shrink))
+      } else {
+        required_shrink <- 0
+      }
+    }
+    data.frame(
+      block = block$name,
+      parent = block$parent,
+      predictors = block$size,
+      storage = block$storage,
+      stored_values = length(block$data),
+      estimated_memory_mb = estimated_memory_mb,
+      assessed = assessed,
+      minimum_eigenvalue = minimum,
+      maximum_eigenvalue = maximum,
+      tolerance = threshold,
+      status = status,
+      minimum_ld_shrink = required_shrink,
+      stringsAsFactors = FALSE
+    )
+  })
+  do.call(rbind, rows)
+}
+
+#' Regularize LD blocks
+#'
+#' Creates a new object from [as_blm_ld()] with blockwise numerical regularization.
+#' `method = "eigen"` clips the eigenvalues of eligible dense blocks and
+#' restores their unit diagonal. `method = "shrink"` applies
+#' `(1 - shrink) R + shrink I` directly to the compressed representation.
+#' `method = "auto"` leaves eligible positive-definite blocks unchanged,
+#' eigen-repairs other eligible blocks, and uses shrinkage for blocks that are
+#' too large for dense repair. Large-block shrinkage is not a PSD certificate;
+#' its report fields remain missing when no eigendecomposition was performed.
+#'
+#' @param ld A `blm_ld` object returned by [as_blm_ld()].
+#' @param method Regularization policy: `"auto"`, `"eigen"`, or `"shrink"`.
+#' @param shrink Numeric scalar in `[0, 1)` used by `method = "shrink"` and as
+#'   the large-block fallback for `method = "auto"`.
+#' @param max_block_size,memory_limit_mb Dense-repair dimension and approximate
+#'   memory limits, with the same meaning as in `diagnose_blm_ld()`.
+#' @param eigen_floor Positive absolute floor for repaired eigenvalues.
+#'
+#' @return A new `blm_ld` object. Its `regularization_report` component records
+#'   the action and numerical adjustment applied to every block.
+#' @export
+regularize_blm_ld <- function(
+    ld, method = c("auto", "eigen", "shrink"), shrink = 0.01,
+    max_block_size = 2000L, memory_limit_mb = 512,
+    eigen_floor = 1e-8) {
+  .validate_blm_ld_object(ld)
+  method <- match.arg(method)
+  if (!is.numeric(shrink) || length(shrink) != 1L || is.na(shrink) ||
+      !is.finite(shrink) || shrink < 0 || shrink >= 1) {
+    stop("`shrink` must be a finite numeric scalar in [0, 1).",
+         call. = FALSE)
+  }
+  if (!is.numeric(eigen_floor) || length(eigen_floor) != 1L ||
+      is.na(eigen_floor) || !is.finite(eigen_floor) || eigen_floor <= 0 ||
+      eigen_floor >= 1) {
+    stop("`eigen_floor` must be a finite numeric scalar in (0, 1).",
+         call. = FALSE)
+  }
+  controls <- .validate_ld_regularization_controls(
+    max_block_size, memory_limit_mb, 0
+  )
+  eligible <- vapply(ld$blocks, function(block) {
+    block$size <= controls$max_block_size &&
+      .ld_eigen_memory_mb(block$size) <= controls$memory_limit_mb
+  }, logical(1))
+  if (method == "eigen" && any(!eligible)) {
+    omitted <- names(ld$blocks)[!eligible]
+    stop(sprintf(
+      paste0(
+        "Dense eigen repair exceeds `max_block_size` or ",
+        "`memory_limit_mb` for block(s): %s."
+      ),
+      paste(utils::head(omitted, 10L), collapse = ", ")
+    ), call. = FALSE)
+  }
+
+  new_blocks <- vector("list", length(ld$blocks))
+  report <- vector("list", length(ld$blocks))
+  for (block_index in seq_along(ld$blocks)) {
+    block <- ld$blocks[[block_index]]
+    assessed <- method != "shrink" && eligible[[block_index]]
+    decomposition <- NULL
+    minimum_before <- NA_real_
+    if (assessed) {
+      decomposition <- eigen(
+        .materialize_ld_block(block), symmetric = TRUE
+      )
+      minimum_before <- min(decomposition$values)
+    }
+    action <- method
+    if (method == "auto") {
+      action <- if (!assessed) {
+        "shrink"
+      } else if (minimum_before >= eigen_floor) {
+        "none"
+      } else {
+        "eigen"
+      }
+    }
+    applied_shrink <- 0
+    minimum_after <- minimum_before
+    if (action == "eigen") {
+      repaired_values <- pmax(decomposition$values, eigen_floor)
+      repaired <- tcrossprod(
+        sweep(decomposition$vectors, 2L, sqrt(repaired_values), `*`)
+      )
+      diagonal_scale <- sqrt(diag(repaired))
+      repaired <- repaired / tcrossprod(diagonal_scale)
+      repaired <- (repaired + t(repaired)) / 2
+      diag(repaired) <- 1
+      new_block <- .compress_ld_block(
+        repaired, block$parent, block$name
+      )
+      minimum_after <- min(eigen(
+        repaired, symmetric = TRUE, only.values = TRUE
+      )$values)
+    } else if (action == "shrink") {
+      new_block <- block
+      applied_shrink <- as.numeric(shrink)
+      if (applied_shrink > 0) {
+        new_block$data <- (1 - applied_shrink) * block$data
+      }
+      if (!is.na(minimum_before)) {
+        minimum_after <-
+          (1 - applied_shrink) * minimum_before + applied_shrink
+      }
+    } else {
+      new_block <- block
+    }
+    new_blocks[[block_index]] <- new_block
+    report[[block_index]] <- data.frame(
+      block = block$name,
+      parent = block$parent,
+      predictors = block$size,
+      method = action,
+      shrink = applied_shrink,
+      minimum_eigenvalue_before = minimum_before,
+      minimum_eigenvalue_after = minimum_after,
+      positive_definite_after = if (is.na(minimum_after)) {
+        NA
+      } else {
+        minimum_after > 0
+      },
+      stringsAsFactors = FALSE
+    )
+  }
+  names(new_blocks) <- names(ld$blocks)
+  result <- ld
+  result$blocks <- new_blocks
+  result$block_table <- .ld_block_table(new_blocks)
+  result$regularization_report <- do.call(rbind, report)
+  .validate_blm_ld_object(result)
+  result
+}
+
+.validate_ld_regularization_controls <- function(
+    max_block_size, memory_limit_mb, tolerance) {
+  if (!is.numeric(max_block_size) || length(max_block_size) != 1L ||
+      is.na(max_block_size) || !is.finite(max_block_size) ||
+      max_block_size != floor(max_block_size) || max_block_size < 1) {
+    stop("`max_block_size` must be a positive integer.", call. = FALSE)
+  }
+  if (!is.numeric(memory_limit_mb) || length(memory_limit_mb) != 1L ||
+      is.na(memory_limit_mb) || !is.finite(memory_limit_mb) ||
+      memory_limit_mb <= 0) {
+    stop("`memory_limit_mb` must be positive and finite.", call. = FALSE)
+  }
+  if (!is.numeric(tolerance) || length(tolerance) != 1L ||
+      is.na(tolerance) || !is.finite(tolerance) || tolerance < 0) {
+    stop("`tolerance` must be nonnegative and finite.", call. = FALSE)
+  }
+  list(
+    max_block_size = as.integer(max_block_size),
+    memory_limit_mb = as.numeric(memory_limit_mb),
+    tolerance = as.numeric(tolerance)
+  )
+}
+
+.ld_eigen_memory_mb <- function(size) {
+  40 * as.double(size)^2 / 1024^2
+}
+
+.materialize_ld_block <- function(block) {
+  result <- diag(1, block$size)
+  triplets <- .ld_block_triplets(block)
+  if (length(triplets$value)) {
+    result[cbind(triplets$row, triplets$column)] <- triplets$value
+    result[cbind(triplets$column, triplets$row)] <- triplets$value
+  }
+  result
+}
+
 .validate_ld_correlation <- function(matrix, label) {
   matrix <- .validate_gram_block(
     matrix, sprintf("`R[[\"%s\"]]`", label), TRUE
@@ -415,7 +664,8 @@ print.blm_ld <- function(x, ...) {
   list(row = as.integer(rows), column = columns, value = block$data)
 }
 
-.materialize_blm_ld <- function(ld, selected = seq_len(nrow(ld$variants))) {
+.materialize_blm_ld <- function(
+    ld, selected = seq_len(nrow(ld$variants)), ld_shrink = 0) {
   selected <- as.integer(selected)
   selected_position <- integer(nrow(ld$variants))
   selected_position[selected] <- seq_along(selected)
@@ -439,7 +689,7 @@ print.blm_ld <- function(x, ...) {
       } else {
         block$row_index[value_positions] + 1L
       }
-      values <- block$data[value_positions]
+      values <- (1 - ld_shrink) * block$data[value_positions]
       global_column <- offset + column
       global_rows <- offset + rows
       keep <- selected_position[global_rows] > 0L &

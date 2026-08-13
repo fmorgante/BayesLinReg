@@ -22,7 +22,7 @@
                             XtX = NULL, XtX_center = NULL,
                             XtX_indices = NULL, XtX_types = NULL, Xty = NULL,
                             ld_blocks = NULL, ld_indices = NULL,
-                            ld_scale = NULL,
+                            ld_scale = NULL, ld_shrink = 0,
                             eigen_X = NULL, eigen_y = NULL,
                             eigen_indices = NULL,
                             nthreads = 1L,
@@ -112,6 +112,7 @@
           ld_blocks = ld_blocks,
           ld_indices = ld_indices,
           ld_scale = ld_scale,
+          ld_shrink = ld_shrink,
           summary_Xty = Xty,
           summary_yty = if (is.null(yty)) 0 else yty,
           nthreads = nthreads

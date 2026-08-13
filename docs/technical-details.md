@@ -662,6 +662,17 @@ g_j=\sqrt{n-1}\sqrt{a_j}z_j,\qquad
 y_2=n-1.
 $$
 
+For `ld_shrink = lambda`, the LD-native operator substitutes
+
+$$
+R_\lambda=(1-\lambda)R+\lambda I.
+$$
+
+Only a scalar multiplier is passed to the native operator: stored
+off-diagonal values are not copied or modified, and the implicit diagonal
+remains one. This regularization can reduce sensitivity to external-reference
+LD but does not make reconstructed summary statistics exact.
+
 On the original scale, `reference_response_var` supplies $V_y$ and
 
 $$
@@ -692,6 +703,19 @@ GWAS summary statistics do not identify a phenotype mean, so this interface
 fits no intercept. Reference-panel LD, meta-analysis statistics, mixed-model
 statistics, or covariate-adjusted marginal estimates generally define an
 approximate working likelihood rather than exact sufficient statistics.
+Because learning the residual variance requires a compatible `G`, `g`, and
+`y2`, a fixed `residual_var` is recommended with external LD. On the
+standardized scale, `residual_var = 1` is a conservative robust choice.
+
+`diagnose_blm_ld()` performs blockwise eigenvalue diagnostics subject to
+dimension and estimated-memory limits. `regularize_blm_ld()` returns a new LD
+object and an audit report. It can eigen-repair manageable blocks, shrink
+off-diagonal correlations without densification, or choose between these
+policies automatically. Large blocks that receive shrinkage without an
+eigendecomposition are marked as uncertified in the report. Structural PSD
+repair and per-fit `ld_shrink` have
+different roles: a positive-definite matrix may still be mismatched to the
+GWAS population.
 
 ### 2.6 GWAS reconstruction with `compute_ss_from_gwas()`
 

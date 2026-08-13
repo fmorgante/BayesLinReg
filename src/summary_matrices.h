@@ -440,9 +440,14 @@ class LDSummaryMatrix {
       const Rcpp::List& input_blocks,
       const Rcpp::List& indices,
       const Rcpp::NumericVector& scale,
+      const double ld_shrink,
       const int nthreads = 1)
     : scale_(scale), p_(scale.size()), global_block_(p_, -1),
-      global_local_(p_, -1), nthreads_(nthreads) {
+      global_local_(p_, -1), off_diagonal_scale_(1.0 - ld_shrink),
+      nthreads_(nthreads) {
+    if (!std::isfinite(ld_shrink) || ld_shrink < 0.0 || ld_shrink >= 1.0) {
+      Rcpp::stop("`ld_shrink` must be finite and in [0, 1).");
+    }
     if (input_blocks.size() < 1 || input_blocks.size() != indices.size()) {
       Rcpp::stop("Invalid LD block representation.");
     }
@@ -539,7 +544,8 @@ class LDSummaryMatrix {
         : block.row_index[position];
       const int global_row = block.global[row];
       rhs[global_row] -=
-        column_scale * block.data[position] * scale_[global_row] * change;
+        column_scale * off_diagonal_scale_ * block.data[position] *
+        scale_[global_row] * change;
     }
   }
 
@@ -562,8 +568,8 @@ class LDSummaryMatrix {
           ? column + 1 + position - block.indptr[column]
           : block.row_index[position];
         const int global_row = block.global[row];
-        const double value = scale_[global_column] * block.data[position] *
-          scale_[global_row];
+        const double value = scale_[global_column] * off_diagonal_scale_ *
+          block.data[position] * scale_[global_row];
         fitted[global_row] += value * coefficient[global_column];
         fitted[global_column] += value * coefficient[global_row];
       }
@@ -599,7 +605,7 @@ class LDSummaryMatrix {
         const int global_row = block.global[row];
         if (block_id[global_row] - 1 == prior_block) {
           result += 2.0 * coefficient[j] * scale_[j] *
-            block.data[position] * scale_[global_row] *
+            off_diagonal_scale_ * block.data[position] * scale_[global_row] *
             coefficient[global_row];
         }
       }
@@ -622,6 +628,7 @@ class LDSummaryMatrix {
   std::vector<Block> blocks_;
   std::vector<int> global_block_;
   std::vector<int> global_local_;
+  double off_diagonal_scale_;
   int nthreads_;
 };
 

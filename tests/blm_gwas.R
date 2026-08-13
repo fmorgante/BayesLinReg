@@ -44,6 +44,62 @@ stopifnot(
   ))
 )
 
+# LD diagnostics are read-only. Exact repair is limited to manageable blocks,
+# while shrinkage preserves the compressed representation.
+indefinite_R <- matrix(c(
+  1, 0.9, 0.9,
+  0.9, 1, -0.9,
+  0.9, -0.9, 1
+), 3L, dimnames = list(ids[1:3], ids[1:3]))
+indefinite_ld <- as_blm_ld(indefinite_R, variants1)
+indefinite_diagnostics <- diagnose_blm_ld(indefinite_ld)
+stopifnot(
+  identical(indefinite_diagnostics$status, "indefinite"),
+  indefinite_diagnostics$minimum_eigenvalue < 0,
+  indefinite_diagnostics$minimum_ld_shrink > 0,
+  identical(indefinite_ld$blocks$LD$data,
+            as_blm_ld(indefinite_R, variants1)$blocks$LD$data)
+)
+unassessed_diagnostics <- diagnose_blm_ld(
+  indefinite_ld, max_block_size = 2L
+)
+stopifnot(
+  identical(unassessed_diagnostics$status, "not_assessed"),
+  is.na(unassessed_diagnostics$minimum_eigenvalue)
+)
+eigen_repaired_ld <- regularize_blm_ld(
+  indefinite_ld, method = "eigen", eigen_floor = 1e-6
+)
+eigen_repaired_R <- BayesLinReg:::.materialize_blm_ld(eigen_repaired_ld)
+stopifnot(
+  min(eigen(eigen_repaired_R, symmetric = TRUE, only.values = TRUE)$values) > 0,
+  all(diag(eigen_repaired_R) == 1),
+  identical(eigen_repaired_ld$regularization_report$method, "eigen"),
+  isTRUE(eigen_repaired_ld$regularization_report$positive_definite_after)
+)
+shrunk_ld <- regularize_blm_ld(
+  indefinite_ld, method = "shrink", shrink = 0.6
+)
+stopifnot(
+  isTRUE(all.equal(
+    BayesLinReg:::.materialize_blm_ld(shrunk_ld),
+    0.4 * indefinite_R + 0.6 * diag(3),
+    check.attributes = FALSE
+  )),
+  identical(shrunk_ld$regularization_report$shrink, 0.6),
+  is.na(shrunk_ld$regularization_report$positive_definite_after)
+)
+oversized_repair <- try(
+  regularize_blm_ld(
+    indefinite_ld, method = "eigen", max_block_size = 2L
+  ),
+  silent = TRUE
+)
+stopifnot(
+  inherits(oversized_repair, "try-error"),
+  grepl("Dense eigen repair exceeds", oversized_repair)
+)
+
 # Dimnames with array attributes compare by their character values.
 array_named_R1 <- R1
 dimnames(array_named_R1) <- list(ids[1:3], array(ids[1:3]))
@@ -184,6 +240,44 @@ stopifnot(
   )),
   identical(gwas_fit$gwas_scale, "original"),
   identical(gwas_fit$residual_df_gwas, n - 2)
+)
+
+# Runtime shrinkage is mathematically identical to supplying a pre-shrunk LD
+# matrix but leaves the original compressed values untouched.
+runtime_shrink <- 0.25
+explicit_ld <- as_blm_ld(
+  list(
+    chr1 = (1 - runtime_shrink) * R1 + runtime_shrink * diag(3),
+    chr2 = (1 - runtime_shrink) * R2 + runtime_shrink * diag(3)
+  ),
+  list(chr1 = variants1, chr2 = variants2)
+)
+original_ld_data <- lapply(ld$blocks, `[[`, "data")
+set.seed(1102)
+runtime_shrunk_fit <- do.call(
+  blm_gwas,
+  c(list(
+    gwas = gwas, ld = ld, reference_response_var = 2,
+    ld_shrink = runtime_shrink
+  ), common)
+)
+set.seed(1102)
+explicit_shrunk_fit <- do.call(
+  blm_gwas,
+  c(list(gwas = gwas, ld = explicit_ld, reference_response_var = 2), common)
+)
+stopifnot(
+  isTRUE(all.equal(
+    runtime_shrunk_fit$ETA, explicit_shrunk_fit$ETA, tolerance = 1e-12
+  )),
+  isTRUE(all.equal(
+    runtime_shrunk_fit$total_pve_samples,
+    explicit_shrunk_fit$total_pve_samples,
+    tolerance = 1e-12
+  )),
+  identical(runtime_shrunk_fit$ld_shrink, runtime_shrink),
+  identical(explicit_shrunk_fit$ld_shrink, 0),
+  identical(lapply(ld$blocks, `[[`, "data"), original_ld_data)
 )
 
 # Predictor order inside ETA blocks affects only output order. The sampler

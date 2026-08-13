@@ -30,6 +30,10 @@
 #'   `reference_response_var`.
 #' @param residual_df_gwas Positive residual degrees of freedom used by the
 #'   marginal GWAS regressions. The default is `N - 2`.
+#' @param ld_shrink Numeric scalar in `[0, 1)`. Off-diagonal LD correlations
+#'   are multiplied by `1 - ld_shrink` while the unit diagonal is retained.
+#'   This is applied by the native LD operator without copying or modifying
+#'   `ld`. Positive values can stabilize analyses using external LD.
 #'
 #' @return An object of class `blm_fit`. Coefficients are oriented to the input
 #'   GWAS `A1` alleles. No intercept is fitted because centered GWAS summary
@@ -51,6 +55,13 @@
 #'   `residual_df_gwas`, and `reference_response_var`. Reference-panel LD and
 #'   GWAS results not obtained by common-sample ordinary least squares define
 #'   approximate working sufficient statistics.
+#'
+#'   When LD was estimated outside the GWAS sample, fixing `residual_var` is
+#'   recommended. Learning it requires the reconstructed `XtX`, `Xty`, and
+#'   `yty` to be mutually compatible; reference-panel mismatch can violate
+#'   that requirement. For standardized quantitative traits,
+#'   `residual_var = 1` is a conservative robust choice. `ld_shrink` addresses
+#'   LD regularization but does not make approximate statistics exact.
 #' @export
 blm_gwas <- function(
     gwas, ld, ETA, residual_var = NULL,
@@ -58,12 +69,20 @@ blm_gwas <- function(
     reference_response_var = NULL,
     scale = c("auto", "standardized", "original"),
     residual_df_gwas = NULL,
+    ld_shrink = 0,
     iterations = 4000L, burnin = 1000L, thin = 1L,
     verbose = FALSE, nchains = 1L, nthreads = 1L,
     store_samples = FALSE, store_coefficient_cov = FALSE,
     check_psd = FALSE, compute_pve = FALSE,
     pve_type = c("standalone", "allocated")) {
   scale <- match.arg(scale)
+  if (!is.numeric(ld_shrink) || length(ld_shrink) != 1L ||
+      is.na(ld_shrink) || !is.finite(ld_shrink) ||
+      ld_shrink < 0 || ld_shrink >= 1) {
+    stop("`ld_shrink` must be a finite numeric scalar in [0, 1).",
+         call. = FALSE)
+  }
+  ld_shrink <- as.numeric(ld_shrink)
   pve_controls <- .validate_pve_controls(compute_pve, pve_type)
   compute_pve <- pve_controls$compute_pve
   pve_type <- pve_controls$pve_type
@@ -205,7 +224,7 @@ blm_gwas <- function(
   )
   fixed_source <- unlist(source_indices[fixed_blocks], use.names = FALSE)
   if (length(fixed_source)) {
-    fixed_R <- .materialize_blm_ld(ld, fixed_source)
+    fixed_R <- .materialize_blm_ld(ld, fixed_source, ld_shrink)
     fixed_scale <- sampler_scale[fixed_source]
     fixed_gram <- fixed_R * tcrossprod(fixed_scale)
     .validate_fixed_gram(
@@ -214,7 +233,7 @@ blm_gwas <- function(
     )
   }
   if (check_psd) {
-    source_R <- .materialize_blm_ld(ld)
+    source_R <- .materialize_blm_ld(ld, ld_shrink = ld_shrink)
     validation_XtX <- source_R * tcrossprod(sampler_scale)
     .validate_working_crossproducts(
       validation_XtX, working_Xty, components$yty
@@ -248,6 +267,7 @@ blm_gwas <- function(
   block_starts <- block_ends - vapply(ld$blocks, `[[`, integer(1), "size") + 1L
   sampler_arguments$ld_indices <- Map(seq.int, block_starts, block_ends)
   sampler_arguments$ld_scale <- sampler_scale
+  sampler_arguments$ld_shrink <- ld_shrink
   sampler_arguments$Xty <- working_Xty
   sampler_arguments$yty <- components$yty
   sampler_arguments$nthreads <- nthreads
@@ -277,6 +297,7 @@ blm_gwas <- function(
   result$reference_response_var <- components$reference_response_var
   result$ld_block_table <- ld$block_table
   result$ld_cross_block_assumption <- ld$cross_block_assumption
+  result$ld_shrink <- ld_shrink
   result$ld_harmonization <- harmonized$counts
   result$nthreads <- nthreads
   result

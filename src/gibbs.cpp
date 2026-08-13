@@ -297,6 +297,7 @@ Rcpp::List blm_gibbs_ld_rcpp_cpp(
     const Rcpp::List& ld_blocks,
     const Rcpp::List& ld_indices,
     const Rcpp::NumericVector& ld_scale,
+    const double ld_shrink,
     const Rcpp::NumericVector& summary_Xty,
     const double summary_yty,
     const bool compute_pve,
@@ -308,7 +309,7 @@ Rcpp::List blm_gibbs_ld_rcpp_cpp(
   const Rcpp::NumericVector empty_y;
   const Rcpp::NumericMatrix empty_X(0, 0);
   const LDSummaryMatrix summary_matrix(
-    ld_blocks, ld_indices, ld_scale, nthreads
+    ld_blocks, ld_indices, ld_scale, ld_shrink, nthreads
   );
   return blm_gibbs_core(
     empty_y, empty_X, residual_shape, residual_scale, iterations, burnin, thin,
