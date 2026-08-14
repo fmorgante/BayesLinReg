@@ -664,6 +664,7 @@ class EigenBlockSummaryMatrix {
       block.design = design.begin();
       block.response.assign(response.begin(), response.end());
       block.residual = block.response;
+      block.transformed_fitted.resize(block.rows, 0.0);
       block.global.resize(block.cols);
       for (int local = 0; local < block.cols; ++local) {
         const int global = mapping[local] - 1;
@@ -741,7 +742,8 @@ class EigenBlockSummaryMatrix {
       const std::vector<double>& coefficient,
       std::vector<double>& fitted) const {
     Block& block = blocks_[block_index];
-    std::vector<double> transformed_fitted(block.rows, 0.0);
+    std::vector<double>& transformed_fitted = block.transformed_fitted;
+    std::fill(transformed_fitted.begin(), transformed_fitted.end(), 0.0);
     for (int local = 0; local < block.cols; ++local) {
       const double beta = coefficient[block.global[local]];
       const double* column = block.design +
@@ -823,6 +825,7 @@ class EigenBlockSummaryMatrix {
     std::vector<int> global;
     std::vector<double> response;
     mutable std::vector<double> residual;
+    mutable std::vector<double> transformed_fitted;
   };
 
   int p_;

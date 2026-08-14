@@ -486,6 +486,10 @@ PVE calculations. Random draws use R's random-number state, so `set.seed()`
 controls reproducibility. Independent chains use parallel-safe streams managed
 through `future`. Within-chain threaded block sampling uses deterministic
 block-specific streams for a fixed seed and thread count.
+Serial and within-chain block-parallel sweeps call the same coefficient-
+conditional implementation through RNG-specific adapters. This keeps the
+Normal, SpikeSlab, GlobalLocal, SpikeMultiSlab, and Fixed update formulas in
+one place while preserving R's serial random-number sequence.
 
 ### 2.2 Individual-level fitting with `blm()`
 
@@ -607,7 +611,9 @@ $O(pq)$. The coordinate kernel maps each contiguous column of $Q$ and the
 block residual into Eigen vectors, using vectorized dot-product and scaled
 residual-update operations. List input applies this representation
 independently to exact eigen blocks and can process independent blocks
-concurrently.
+concurrently. Periodic state reconstruction reuses one transformed fitted-
+value workspace per eigen block, so it does not allocate a new length-$q_b$
+vector on every reconstruction.
 
 When `XtX_prop_var = 1`, the supplied eigenvectors must span `Xty`, and the
 representation is treated as exact. Values below one explicitly define an

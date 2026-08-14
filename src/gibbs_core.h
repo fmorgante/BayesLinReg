@@ -308,9 +308,6 @@ Rcpp::List blm_gibbs_core(
   std::vector< std::vector<double> > multi_gamma(number_of_blocks);
   std::vector< std::vector<double> > multi_pi_alpha(number_of_blocks);
   std::vector< std::vector<double> > multi_pi(number_of_blocks);
-  std::vector< std::vector<double> > multi_log_weights(number_of_blocks);
-  std::vector< std::vector<double> > multi_conditional_vars(number_of_blocks);
-  std::vector< std::vector<double> > multi_conditional_means(number_of_blocks);
   for (int block = 0; block < number_of_blocks; ++block) {
     if (prior_models[block] == PriorModel::Normal) {
       normal_var[block] = Rcpp::NumericVector::is_na(fixed_var[block])
@@ -335,9 +332,6 @@ Rcpp::List blm_gibbs_core(
       multi_pi_alpha[block] =
         Rcpp::as< std::vector<double> >(alpha_values);
       multi_pi[block].resize(alpha_values.size());
-      multi_log_weights[block].resize(alpha_values.size());
-      multi_conditional_vars[block].resize(alpha_values.size());
-      multi_conditional_means[block].resize(alpha_values.size());
       double alpha_total = 0.0;
       for (int component = 0; component < alpha_values.size(); ++component) {
         alpha_total += alpha_values[component];
@@ -416,6 +410,8 @@ Rcpp::List blm_gibbs_core(
     residual_sse = std::max(0.0, reconstructed_sse);
   };
   std::vector<BlockRng> block_rng;
+  RSessionRng serial_rng;
+  MixtureWorkspace serial_mixture_workspace;
   std::vector<MixtureWorkspace> parallel_mixture_workspace;
   if (nthreads > 1) {
     if constexpr (is_parallel_block_matrix<SummaryMatrix>::value) {
@@ -454,145 +450,57 @@ Rcpp::List blm_gibbs_core(
     }
     if (!parallel_sweep) {
       for (int j = 0; j < p; ++j) {
-      const int block = block_id[j] - 1;
-      const PriorModel model = prior_models[block];
-      const int local_index = model_local_index[j];
-      const double old_coefficient = coefficient[j];
-      double conditional_numerator = 0.0;
-      double partial_rhs = 0.0;
-      if (use_sufficient_statistics) {
-        partial_rhs = summary_XtX.corrected_value(
-          corrected_rhs, j, center_dot
-        ) + x_squared[j] * old_coefficient;
-        conditional_numerator = partial_rhs;
-      } else {
-        const double* x_column_begin = center_observations
-          ? x_centered.begin() + static_cast<std::size_t>(n) * j
-          : X.begin() + static_cast<std::size_t>(n) * j;
-        const Eigen::Map<const Eigen::VectorXd> x_column(
-          x_column_begin, n
-        );
-        const Eigen::Map<const Eigen::VectorXd> residual(
-          residuals.data(), n
-        );
-        conditional_numerator = x_column.dot(residual) +
-          x_squared[j] * old_coefficient;
-      }
-      if (model == PriorModel::SpikeMultiSlab) {
-        const int component_count = multi_gamma[block].size();
-        std::vector<double>& log_weights = multi_log_weights[block];
-        std::vector<double>& conditional_vars =
-          multi_conditional_vars[block];
-        std::vector<double>& conditional_means =
-          multi_conditional_means[block];
-        double maximum_log_weight = -std::numeric_limits<double>::infinity();
-        for (int component = 0; component < component_count; ++component) {
-          log_weights[component] = std::log(std::max(
-            multi_pi[block][component], std::numeric_limits<double>::min()
-          ));
-          if (component > 0) {
-            const double prior_var =
-              multi_gamma[block][component] * multi_var[block];
-            conditional_vars[component] = 1.0 / (
-              x_squared[j] / residual_var + 1.0 / prior_var
-            );
-            conditional_means[component] = conditional_vars[component] *
-              conditional_numerator / residual_var;
-            log_weights[component] +=
-              0.5 * std::log(conditional_vars[component] / prior_var) +
-              conditional_means[component] * conditional_means[component] /
-                (2.0 * conditional_vars[component]);
-          }
-          maximum_log_weight = std::max(
-            maximum_log_weight, log_weights[component]
-          );
-        }
-        double weight_total = 0.0;
-        for (int component = 0; component < component_count; ++component) {
-          log_weights[component] = std::exp(
-            log_weights[component] - maximum_log_weight
-          );
-          weight_total += log_weights[component];
-        }
-        const double threshold = R::runif(0.0, weight_total);
-        double cumulative_weight = 0.0;
-        int selected_component = component_count - 1;
-        for (int component = 0; component < component_count; ++component) {
-          cumulative_weight += log_weights[component];
-          if (threshold <= cumulative_weight) {
-            selected_component = component;
-            break;
-          }
-        }
-        multi_component[local_index] = selected_component;
-        coefficient[j] = selected_component == 0
-          ? 0.0
-          : R::rnorm(
-              conditional_means[selected_component],
-              std::sqrt(conditional_vars[selected_component])
-            );
-      } else {
-        const double prior_precision = model == PriorModel::Fixed
-          ? 0.0
-          : (model == PriorModel::GlobalLocal
-              ? 1.0 / tau_sq[block] / local_var[local_index]
-              : (model == PriorModel::SpikeSlab
-                  ? 1.0 / slab_var[block]
-                  : 1.0 / normal_var[block]));
-        const double conditional_var = 1.0 / (
-          x_squared[j] / residual_var + prior_precision
-        );
-        const double conditional_mean =
-          conditional_var * conditional_numerator / residual_var;
-        if (model == PriorModel::SpikeSlab) {
-          const double epsilon = std::numeric_limits<double>::epsilon();
-          const double bounded_pi = std::min(
-            std::max(pi[block], epsilon),
-            1.0 - epsilon
-          );
-          const double log_inclusion_odds =
-            std::log(bounded_pi) - std::log1p(-bounded_pi) +
-            0.5 * std::log(conditional_var / slab_var[block]) +
-            conditional_mean * conditional_mean / (2.0 * conditional_var);
-          const double inclusion_probability =
-            log_inclusion_odds >= 0.0
-              ? 1.0 / (1.0 + std::exp(-log_inclusion_odds))
-              : std::exp(log_inclusion_odds) /
-                  (1.0 + std::exp(log_inclusion_odds));
-          inclusion[local_index] = static_cast<int>(
-            R::rbinom(1.0, inclusion_probability)
-          );
-        }
-        if (model != PriorModel::SpikeSlab || inclusion[local_index] == 1) {
-          coefficient[j] = R::rnorm(
-            conditional_mean,
-            std::sqrt(conditional_var)
-          );
+        const int block = block_id[j] - 1;
+        const PriorModel model = prior_models[block];
+        const int local_index = model_local_index[j];
+        const double old_coefficient = coefficient[j];
+        double conditional_numerator = 0.0;
+        double partial_rhs = 0.0;
+        if (use_sufficient_statistics) {
+          partial_rhs = summary_XtX.corrected_value(
+            corrected_rhs, j, center_dot
+          ) + x_squared[j] * old_coefficient;
+          conditional_numerator = partial_rhs;
         } else {
-          coefficient[j] = 0.0;
+          const double* x_column_begin = center_observations
+            ? x_centered.begin() + static_cast<std::size_t>(n) * j
+            : X.begin() + static_cast<std::size_t>(n) * j;
+          const Eigen::Map<const Eigen::VectorXd> x_column(
+            x_column_begin, n
+          );
+          const Eigen::Map<const Eigen::VectorXd> residual(
+            residuals.data(), n
+          );
+          conditional_numerator = x_column.dot(residual) +
+            x_squared[j] * old_coefficient;
         }
-      }
-      const double coefficient_change = coefficient[j] - old_coefficient;
-      if (use_sufficient_statistics) {
-        if (coefficient_change != 0.0) {
-          summary_XtX.update(corrected_rhs, j, coefficient_change);
-          summary_XtX.update_center_dot(center_dot, j, coefficient_change);
-          if (learn_residual_var) {
-            residual_sse += -2.0 * coefficient_change * partial_rhs +
-              (coefficient[j] * coefficient[j] -
-               old_coefficient * old_coefficient) * x_squared[j];
-          }
-        }
-      } else if (coefficient_change != 0.0) {
-        const double* x_column_begin = center_observations
-          ? x_centered.begin() + static_cast<std::size_t>(n) * j
-          : X.begin() + static_cast<std::size_t>(n) * j;
-        const Eigen::Map<const Eigen::VectorXd> x_column(
-          x_column_begin, n
+        coefficient[j] = draw_coefficient_coordinate(
+          model, block, local_index, x_squared[j], residual_var,
+          conditional_numerator, normal_var, pi, slab_var, tau_sq, local_var,
+          multi_gamma, multi_pi, multi_var, inclusion, multi_component,
+          serial_rng, serial_mixture_workspace
         );
-        Eigen::Map<Eigen::VectorXd> residual(residuals.data(), n);
-        residual.noalias() -= coefficient_change * x_column;
-      }
+        const double coefficient_change = coefficient[j] - old_coefficient;
+        if (use_sufficient_statistics) {
+          if (coefficient_change != 0.0) {
+            summary_XtX.update(corrected_rhs, j, coefficient_change);
+            summary_XtX.update_center_dot(center_dot, j, coefficient_change);
+            if (learn_residual_var) {
+              residual_sse += -2.0 * coefficient_change * partial_rhs +
+                (coefficient[j] * coefficient[j] -
+                 old_coefficient * old_coefficient) * x_squared[j];
+            }
+          }
+        } else if (coefficient_change != 0.0) {
+          const double* x_column_begin = center_observations
+            ? x_centered.begin() + static_cast<std::size_t>(n) * j
+            : X.begin() + static_cast<std::size_t>(n) * j;
+          const Eigen::Map<const Eigen::VectorXd> x_column(
+            x_column_begin, n
+          );
+          Eigen::Map<Eigen::VectorXd> residual(residuals.data(), n);
+          residual.noalias() -= coefficient_change * x_column;
+        }
       }
     }
 
