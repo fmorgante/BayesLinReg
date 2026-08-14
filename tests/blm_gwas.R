@@ -114,6 +114,20 @@ stopifnot(
   identical(upgraded_report_ld$regularization_report$source_block, "LD"),
   identical(upgraded_report_ld$regularization_report$floor_shrink, 0)
 )
+complete_block_map <- BayesLinReg:::.ld_regularization_block_map(
+  eigen_repaired_ld$regularization_report,
+  eigen_repaired_ld$regularization_report
+)
+legacy_block_map <- BayesLinReg:::.ld_regularization_block_map(
+  legacy_report_ld$regularization_report,
+  legacy_report_ld$regularization_report
+)
+stopifnot(
+  identical(complete_block_map$fitted_block, "LD"),
+  identical(complete_block_map$source_block, "LD"),
+  !complete_block_map$subset,
+  identical(legacy_block_map, complete_block_map)
+)
 
 # Automatic repair uses the requested final floor, including for matrices
 # that are already positive definite but do not meet that floor.
@@ -520,7 +534,38 @@ excluded_fit <- withCallingHandlers(
 )
 stopifnot(
   identical(excluded_fit$gwas_variants$ID, ids[c(1L, 3L:6L)]),
-  identical(excluded_fit$ld_regularization_report, partial_report),
+  identical(
+    excluded_fit$ld_regularization_report,
+    regularized_ld$regularization_report
+  ),
+  identical(
+    names(excluded_fit$ld_regularization_block_map),
+    c(
+      "fitted_block", "source_block", "fitted_predictors",
+      "source_predictors", "subset"
+    )
+  ),
+  identical(
+    excluded_fit$ld_regularization_block_map$fitted_block,
+    excluded_fit$ld_block_table$block
+  ),
+  all(
+    excluded_fit$ld_regularization_block_map$fitted_predictors ==
+      excluded_fit$ld_block_table$predictors
+  ),
+  all(
+    excluded_fit$ld_regularization_block_map$source_predictors ==
+      regularized_ld$regularization_report$predictors[match(
+        excluded_fit$ld_regularization_block_map$source_block,
+        regularized_ld$regularization_report$block
+      )]
+  ),
+  all(excluded_fit$ld_regularization_block_map$subset[
+    excluded_fit$ld_regularization_block_map$source_block == "chr1"
+  ]),
+  all(!excluded_fit$ld_regularization_block_map$subset[
+    excluded_fit$ld_regularization_block_map$source_block == "chr2"
+  ]),
   identical(
     excluded_fit$ld_harmonization,
     c(

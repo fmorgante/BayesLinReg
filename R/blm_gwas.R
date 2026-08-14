@@ -38,8 +38,10 @@
 #' @return An object of class `blm_fit`. Coefficients are oriented to the input
 #'   GWAS `A1` alleles. No intercept is fitted because centered GWAS summary
 #'   statistics do not identify the phenotype mean. When `ld` was created by
-#'   [regularize_blm_ld()], `ld_regularization_report` records the applicable
-#'   regularization provenance after harmonization. `ld_harmonization` reports
+#'   [regularize_blm_ld()], `ld_regularization_report` preserves that object's
+#'   original regularization audit report unchanged, while
+#'   `ld_regularization_block_map` maps fitted post-harmonization blocks to the
+#'   source blocks in that report. `ld_harmonization` reports
 #'   retained and flipped variants together with separate counts for GWAS-only,
 #'   LD-only, location-mismatched, allele-mismatched, and ambiguous variants.
 #'   Its `excluded` element counts excluded table entries: unmatched entries
@@ -93,6 +95,7 @@ blm_gwas <- function(
   compute_pve <- pve_controls$compute_pve
   pve_type <- pve_controls$pve_type
   .validate_blm_ld_object(ld)
+  input_ld_regularization_report <- ld$regularization_report
   controls <- list(
     verbose = verbose,
     store_samples = store_samples,
@@ -303,8 +306,11 @@ blm_gwas <- function(
   result$reference_response_var <- components$reference_response_var
   result$ld_block_table <- ld$block_table
   result$ld_cross_block_assumption <- ld$cross_block_assumption
-  if (!is.null(ld$regularization_report)) {
-    result$ld_regularization_report <- ld$regularization_report
+  if (!is.null(input_ld_regularization_report)) {
+    result$ld_regularization_report <- input_ld_regularization_report
+    result$ld_regularization_block_map <- .ld_regularization_block_map(
+      input_ld_regularization_report, ld$regularization_report
+    )
   }
   result$ld_shrink <- ld_shrink
   result$ld_harmonization <- harmonized$counts
@@ -600,6 +606,31 @@ blm_gwas <- function(
     result$regularization_report <- report
   }
   result
+}
+
+.ld_regularization_block_map <- function(source_report, fitted_report) {
+  source_block <- if ("source_block" %in% names(fitted_report)) {
+    fitted_report$source_block
+  } else {
+    fitted_report$block
+  }
+  source_row <- match(source_block, source_report$block)
+  if (anyNA(source_row)) {
+    stop("`ld` regularization metadata are inconsistent.", call. = FALSE)
+  }
+  source_predictors <- as.integer(source_report$predictors[source_row])
+  fitted_predictors <- as.integer(fitted_report$predictors)
+  fitted_block <- as.character(fitted_report$block)
+  data.frame(
+    fitted_block = fitted_block,
+    source_block = as.character(source_block),
+    fitted_predictors = fitted_predictors,
+    source_predictors = source_predictors,
+    subset = fitted_block != source_block |
+      fitted_predictors != source_predictors,
+    stringsAsFactors = FALSE,
+    row.names = NULL
+  )
 }
 
 .orient_gwas_coefficients <- function(result, orientation, source_indices,

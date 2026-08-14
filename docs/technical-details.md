@@ -729,10 +729,17 @@ GWAS population.
 
 After eigen repair restores a unit diagonal, the implementation applies the
 smallest additional identity shrinkage needed to enforce the requested final
-eigenvalue floor. GWAS harmonization preserves the regularization action and
-source-block provenance when it subsets or splits computational LD blocks;
-eigenvalue fields are set to missing for a proper sub-block because the
-original whole-block values no longer describe that submatrix.
+eigenvalue floor. A fit preserves the input object's original regularization
+report unchanged. Its separate `ld_regularization_block_map` links each fitted
+post-harmonization block to the source report row, gives fitted and source
+predictor counts, and indicates whether subsetting occurred. The fit's
+`ld_block_table` describes the resulting computational blocks.
+
+A harmonized block obtained only by deleting matching rows and columns is a
+principal submatrix of its repaired source block. Cauchy interlacing therefore
+guarantees that its minimum eigenvalue is at least the source block's reported
+post-repair minimum eigenvalue. The source value remains a valid lower bound,
+but it is not presented as the fitted block's exact eigenvalue.
 
 ### 2.6 GWAS reconstruction with `compute_ss_from_gwas()`
 

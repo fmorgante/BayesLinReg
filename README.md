@@ -370,6 +370,11 @@ The returned `ld_harmonization` vector separates GWAS-only, LD-only,
 location-mismatched, allele-mismatched, and ambiguous exclusions. Its aggregate
 `excluded` value counts input-table entries, so a rejected matched pair
 contributes two.
+For a regularized LD input, `ld_regularization_report` in the fit is the
+unchanged source audit report. `ld_regularization_block_map` links each fitted
+post-harmonization block to its source report row and records both predictor
+counts and whether subsetting occurred; `ld_block_table` describes the fitted
+computational blocks.
 Character variant IDs should be used for multi-block `ETA` definitions when
 harmonization may exclude variants. Numeric indices are rejected after an LD
 variant is excluded because their original positional meaning is ambiguous.
