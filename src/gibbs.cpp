@@ -4,12 +4,16 @@
 #include <GIGrvg.h>
 #include <cmath>
 #include "gibbs_core.h"
+#include "gig_sampler.h"
 
 namespace bayeslinreg {
 
 typedef SEXP (*gig_sampler_type)(int, double, double, double);
 
-double draw_gig(const double lambda, const double chi, const double psi) {
+double draw_gig_gigrvg(
+    const double lambda,
+    const double chi,
+    const double psi) {
   if (!std::isfinite(lambda) || !std::isfinite(chi) ||
       !std::isfinite(psi) || chi <= 0.0 || psi <= 0.0) {
     Rcpp::stop(
@@ -31,6 +35,23 @@ double draw_gig(const double lambda, const double chi, const double psi) {
     Rcpp::stop("The GIG sampler returned a non-positive or non-finite draw.");
   }
   return draw;
+}
+
+class RUniformRng {
+ public:
+  double uniform() {
+    return ::unif_rand();
+  }
+};
+
+double draw_gig(const double lambda, const double chi, const double psi) {
+  RUniformRng rng;
+  try {
+    return sample_gig(lambda, chi, psi, rng);
+  } catch (const std::exception& error) {
+    Rcpp::stop("%s", error.what());
+  }
+  return NA_REAL;
 }
 
 }  // namespace bayeslinreg
@@ -71,7 +92,31 @@ Rcpp::NumericVector draw_gig_rcpp_cpp(
   }
   Rcpp::NumericVector draws(n);
   for (int index = 0; index < n; ++index) {
-    draws[index] = draw_gig(lambda, chi, psi);
+    draws[index] = bayeslinreg::draw_gig_gigrvg(
+      lambda, chi, psi
+    );
+  }
+  return draws;
+}
+
+// [[Rcpp::export]]
+Rcpp::NumericVector draw_gig_native_rcpp_cpp(
+    const int n,
+    const double lambda,
+    const double chi,
+    const double psi) {
+  Rcpp::RNGScope scope;
+  if (n < 1) {
+    Rcpp::stop("GIG sample size must be a positive integer.");
+  }
+  Rcpp::NumericVector draws(n);
+  bayeslinreg::RUniformRng rng;
+  try {
+    for (int index = 0; index < n; ++index) {
+      draws[index] = bayeslinreg::sample_gig(lambda, chi, psi, rng);
+    }
+  } catch (const std::exception& error) {
+    Rcpp::stop("%s", error.what());
   }
   return draws;
 }

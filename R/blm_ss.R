@@ -87,7 +87,9 @@
 #'   With list input and zero working predictor means, `nthreads > 1` updates
 #'   separate Gram blocks concurrently through `RcppParallel`. Updates remain
 #'   sequential within each Gram block. Shared prior hyperparameters and the
-#'   residual variance are updated after the parallel coefficient sweep.
+#'   residual variance are updated after the parallel coefficient sweep. For
+#'   GlobalLocal blocks, the conditionally independent local-variance GIG
+#'   updates also run concurrently across Gram blocks.
 #'   After [set.seed()], threaded runs are reproducible and use a different RNG
 #'   stream from the serial sampler.
 #'   Set `check_psd = TRUE` when the supplied statistics are not known to come

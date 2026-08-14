@@ -730,6 +730,17 @@ Rcpp::List blm_gibbs_core(
     }
 
     if (has_global_local) {
+      bool parallel_local_variance = false;
+      if constexpr (is_parallel_block_matrix<SummaryMatrix>::value) {
+        if (nthreads > 1) {
+          parallel_local_variance_sweep(
+            summary_XtX, block_id, prior_models, model_local_index,
+            coefficient, tau_sq, local_a, local_aux, local_var, block_rng,
+            nthreads
+          );
+          parallel_local_variance = true;
+        }
+      }
       for (int block = 0; block < number_of_blocks; ++block) {
         if (prior_models[block] != PriorModel::GlobalLocal) {
           continue;
@@ -744,11 +755,13 @@ Rcpp::List blm_gibbs_core(
             raw_chi,
             std::numeric_limits<double>::min()
           );
-          local_var[local_index] = draw_gig(
-            local_a[block] - 0.5,
-            chi,
-            2.0 * local_aux[local_index]
-          );
+          if (!parallel_local_variance) {
+            local_var[local_index] = draw_gig(
+              local_a[block] - 0.5,
+              chi,
+              2.0 * local_aux[local_index]
+            );
+          }
           local_aux[local_index] = R::rgamma(
             local_a[block] + local_b[block],
             1.0 / (1.0 + local_var[local_index])

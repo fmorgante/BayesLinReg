@@ -307,7 +307,13 @@ $$
 ).
 $$
 
-The C++ sampler obtains GIG draws from the registered `GIGrvg` C interface.
+The Rcpp sampler uses an independent implementation of the Hörmann--Leydold
+(2014) GIG rejection algorithms. For block-parallel sufficient-statistic fits,
+conditionally independent local-variance updates run concurrently across
+computational blocks using per-block C++ random-number streams. Local auxiliary
+and shared global-variance updates remain serial after the workers join. The
+`GIGrvg` implementation remains an internal statistical and performance
+reference.
 
 ### 1.7 Residual variance
 
@@ -858,3 +864,6 @@ The main implementations are located in:
 - `R/fit_methods.R`: coefficient extraction, prediction, and summaries.
 - `inst/benchmarks/benchmark_ld_preprocessing.R`: configurable LD construction,
   compressed-filtering, and `ETA`-ordering benchmarks.
+- `inst/benchmarks/benchmark_gig_sampler.R`: compares an independently
+  implemented Hörmann--Leydold GIG rejection sampler with the current GIGrvg
+  reference backend.

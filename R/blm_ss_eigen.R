@@ -71,8 +71,9 @@
 #'   approximately \eqn{\sum_b p_b q_b} values instead of a global
 #'   \eqn{p\sum_b q_b} pseudo-design. ETA prior blocks may cross eigen blocks.
 #'   When `nthreads > 1`, coefficient sweeps are sequential within each eigen
-#'   block and concurrent across blocks. Shared prior and residual parameters
-#'   are updated after the workers join. Nonzero `X_means` are supported
+#'   block and concurrent across blocks. GlobalLocal local-variance GIG updates
+#'   are also concurrent across eigen blocks. Shared prior and residual
+#'   parameters are updated after the workers join. Nonzero `X_means` are supported
 #'   because the supplied eigenpairs must already represent centered `XtX`;
 #'   independently decomposed uncentered blocks are not valid substitutes.
 #'

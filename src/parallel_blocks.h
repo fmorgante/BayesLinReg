@@ -8,6 +8,7 @@
 #include <limits>
 #include <type_traits>
 #include <vector>
+#include "gig_sampler.h"
 #include "summary_matrices.h"
 
 namespace bayeslinreg {
@@ -403,6 +404,81 @@ void parallel_coefficient_sweep(
   if (learn_residual_var) {
     for (const double change : residual_sse_change) residual_sse += change;
   }
+}
+
+template <typename BlockMatrix>
+class BlockLocalVarianceWorker : public RcppParallel::Worker {
+ public:
+  BlockLocalVarianceWorker(
+      const BlockMatrix& matrix,
+      const int* block_id,
+      const std::vector<PriorModel>& block_model,
+      const std::vector<int>& model_local_index,
+      const std::vector<double>& coefficient,
+      const std::vector<double>& tau_sq,
+      const double* local_a,
+      const std::vector<double>& local_aux,
+      std::vector<double>& local_var,
+      std::vector<BlockRng>& rng)
+    : matrix_(matrix), block_id_(block_id), block_model_(block_model),
+      model_local_index_(model_local_index), coefficient_(coefficient),
+      tau_sq_(tau_sq), local_a_(local_a), local_aux_(local_aux),
+      local_var_(local_var), rng_(rng) {}
+
+  void operator()(const std::size_t begin, const std::size_t end) {
+    for (std::size_t gram_block = begin; gram_block < end; ++gram_block) {
+      BlockRng& generator = rng_[gram_block];
+      const std::vector<int>& predictors =
+        matrix_.block_predictors(static_cast<int>(gram_block));
+      for (const int j : predictors) {
+        const int prior_block = block_id_[j] - 1;
+        if (block_model_[prior_block] != PriorModel::GlobalLocal) continue;
+        const int local_index = model_local_index_[j];
+        const double raw_chi =
+          coefficient_[j] * coefficient_[j] / tau_sq_[prior_block];
+        local_var_[local_index] = sample_gig(
+          local_a_[prior_block] - 0.5,
+          std::max(raw_chi, std::numeric_limits<double>::min()),
+          2.0 * local_aux_[local_index],
+          generator
+        );
+      }
+    }
+  }
+
+ private:
+  const BlockMatrix& matrix_;
+  const int* block_id_;
+  const std::vector<PriorModel>& block_model_;
+  const std::vector<int>& model_local_index_;
+  const std::vector<double>& coefficient_;
+  const std::vector<double>& tau_sq_;
+  const double* local_a_;
+  const std::vector<double>& local_aux_;
+  std::vector<double>& local_var_;
+  std::vector<BlockRng>& rng_;
+};
+
+template <typename BlockMatrix>
+void parallel_local_variance_sweep(
+    const BlockMatrix& matrix,
+    const Rcpp::IntegerVector& block_id,
+    const std::vector<PriorModel>& block_model,
+    const std::vector<int>& model_local_index,
+    const std::vector<double>& coefficient,
+    const std::vector<double>& tau_sq,
+    const Rcpp::NumericVector& local_a,
+    const std::vector<double>& local_aux,
+    std::vector<double>& local_var,
+    std::vector<BlockRng>& rng,
+    const int nthreads) {
+  BlockLocalVarianceWorker<BlockMatrix> worker(
+    matrix, block_id.begin(), block_model, model_local_index, coefficient,
+    tau_sq, local_a.begin(), local_aux, local_var, rng
+  );
+  RcppParallel::parallelFor(
+    0, matrix.block_count(), worker, 1, nthreads
+  );
 }
 
 template <typename SummaryMatrix>

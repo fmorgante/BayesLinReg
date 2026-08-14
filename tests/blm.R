@@ -433,6 +433,55 @@ stopifnot(
   identical(horseshoe_fit$residual_var_var, 0)
 )
 
+# The native Rcpp GlobalLocal update agrees with the GIGrvg-backed R reference
+# for both default Strawderman-Berger and horseshoe local-scale priors.
+global_local_shapes <- list(c(1, 0.5), c(0.5, 0.5))
+for (shape_index in seq_along(global_local_shapes)) {
+  local_shape <- global_local_shapes[[shape_index]]
+  comparison_eta <- list(
+    X = multi_X,
+    model = "GlobalLocal",
+    local_shape = local_shape,
+    global_scale = 0.5
+  )
+  set.seed(430 + shape_index)
+  native_global_fit <- blm(
+    multi_y, ETA = comparison_eta, residual_var = 0.25,
+    iterations = 2500, burnin = 500, version = "Rcpp"
+  )
+  set.seed(530 + shape_index)
+  reference_global_fit <- blm(
+    multi_y, ETA = comparison_eta, residual_var = 0.25,
+    iterations = 2500, burnin = 500, version = "R"
+  )
+  native_block <- native_global_fit$ETA$ETA1
+  reference_block <- reference_global_fit$ETA$ETA1
+  stopifnot(
+    max(abs(
+      native_block$coefficient_mean - reference_block$coefficient_mean
+    )) < 0.15,
+    abs(
+      stats::median(native_block$tau_sq_samples) /
+        stats::median(reference_block$tau_sq_samples) - 1
+    ) < 0.4
+  )
+}
+
+# Large local-shape parameters and exactly zero starting coefficients exercise
+# the native sampler's extreme small-chi fallback in a complete Gibbs fit.
+set.seed(433)
+extreme_shape_fit <- blm(
+  multi_y,
+  ETA = list(
+    X = multi_X, model = "GlobalLocal", local_shape = c(5, 0.5)
+  ),
+  residual_var = 0.25, iterations = 100, burnin = 30
+)
+stopifnot(
+  all(is.finite(extreme_shape_fit$ETA$ETA1$local_var_samples)),
+  all(extreme_shape_fit$ETA$ETA1$local_var_samples > 0)
+)
+
 # GlobalLocal can calibrate its global scale from expected sparsity.
 calibrated_scale <- 1 / (ncol(multi_X) - 1) * 0.5 / sqrt(multi_n)
 set.seed(110)
@@ -698,12 +747,51 @@ set.seed(302)
 gig_rcpp <- BayesLinReg:::draw_gig_rcpp_cpp(
   20000L, gig_lambda, gig_chi, gig_psi
 )
+set.seed(303)
+gig_native <- BayesLinReg:::draw_gig_native_rcpp_cpp(
+  20000L, gig_lambda, gig_chi, gig_psi
+)
 stopifnot(
   abs(mean(gig_r) - gig_expected_mean) / gig_expected_mean < 0.03,
   abs(mean(gig_rcpp) - gig_expected_mean) / gig_expected_mean < 0.03,
+  abs(mean(gig_native) - gig_expected_mean) / gig_expected_mean < 0.03,
   all(is.finite(BayesLinReg:::.draw_gig(100L, -0.4, 1e-8, 1e3))),
-  all(is.finite(BayesLinReg:::draw_gig_rcpp_cpp(100L, 5, 1e3, 1e-4)))
+  all(is.finite(BayesLinReg:::draw_gig_rcpp_cpp(100L, 5, 1e3, 1e-4))),
+  all(is.finite(
+    BayesLinReg:::draw_gig_native_rcpp_cpp(100L, -0.4, 1e-8, 1e3)
+  )),
+  all(is.finite(
+    BayesLinReg:::draw_gig_native_rcpp_cpp(100L, 5, 1e3, 1e-4)
+  )),
+  all(is.finite(
+    BayesLinReg:::draw_gig_native_rcpp_cpp(
+      100L, 5, .Machine$double.xmin, 1
+    )
+  ))
 )
+
+# The independent native sampler covers its small-parameter, unshifted, and
+# shifted rejection regimes, as well as the reciprocal transformation.
+native_gig_cases <- data.frame(
+  lambda = c(0.2, 0.8, 5, -0.5),
+  chi = c(0.01, 0.25, 4, 2),
+  psi = c(0.01, 1, 4, 3)
+)
+for (case in seq_len(nrow(native_gig_cases))) {
+  parameters <- native_gig_cases[case, ]
+  argument <- sqrt(parameters$chi * parameters$psi)
+  expected_mean <- sqrt(parameters$chi / parameters$psi) *
+    besselK(argument, parameters$lambda + 1) /
+    besselK(argument, parameters$lambda)
+  set.seed(303 + case)
+  draws <- BayesLinReg:::draw_gig_native_rcpp_cpp(
+    30000L, parameters$lambda, parameters$chi, parameters$psi
+  )
+  stopifnot(
+    all(is.finite(draws)), all(draws > 0),
+    abs(mean(draws) - expected_mean) / expected_mean < 0.05
+  )
+}
 
 # Both low-level implementations report progress at 10-percent intervals.
 for (sampler_version in c("Rcpp", "R")) {

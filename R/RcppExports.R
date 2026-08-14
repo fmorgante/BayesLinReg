@@ -17,6 +17,10 @@ draw_gig_rcpp_cpp <- function(n, lambda, chi, psi) {
     .Call(`_BayesLinReg_draw_gig_rcpp_cpp`, n, lambda, chi, psi)
 }
 
+draw_gig_native_rcpp_cpp <- function(n, lambda, chi, psi) {
+    .Call(`_BayesLinReg_draw_gig_native_rcpp_cpp`, n, lambda, chi, psi)
+}
+
 blm_gibbs_rcpp_cpp <- function(y, X, residual_shape, residual_scale, iterations, burnin, thin, progress_callback, block_id, block_model, normal_shape, normal_scale, pi_alpha, pi_beta, spike_var_shape, spike_var_scale, global_scale, fixed_global_var, local_a, local_b, multi_gamma_list, multi_pi_alpha_list, multi_var_shape, multi_var_scale, fixed_var, learn_residual_var, fixed_residual_var, store_samples, store_coefficient_cov, effective_n, fit_intercept, intercept_x_mean, intercept_y_mean, use_sufficient_statistics, summary_XtX, summary_Xty, summary_yty, center_observations, residual_sse_offset, compute_pve, pve_type_code) {
     .Call(`_BayesLinReg_blm_gibbs_rcpp_cpp`, y, X, residual_shape, residual_scale, iterations, burnin, thin, progress_callback, block_id, block_model, normal_shape, normal_scale, pi_alpha, pi_beta, spike_var_shape, spike_var_scale, global_scale, fixed_global_var, local_a, local_b, multi_gamma_list, multi_pi_alpha_list, multi_var_shape, multi_var_scale, fixed_var, learn_residual_var, fixed_residual_var, store_samples, store_coefficient_cov, effective_n, fit_intercept, intercept_x_mean, intercept_y_mean, use_sufficient_statistics, summary_XtX, summary_Xty, summary_yty, center_observations, residual_sse_offset, compute_pve, pve_type_code)
 }

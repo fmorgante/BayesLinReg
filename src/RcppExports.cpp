@@ -62,6 +62,20 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// draw_gig_native_rcpp_cpp
+Rcpp::NumericVector draw_gig_native_rcpp_cpp(const int n, const double lambda, const double chi, const double psi);
+RcppExport SEXP _BayesLinReg_draw_gig_native_rcpp_cpp(SEXP nSEXP, SEXP lambdaSEXP, SEXP chiSEXP, SEXP psiSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const int >::type n(nSEXP);
+    Rcpp::traits::input_parameter< const double >::type lambda(lambdaSEXP);
+    Rcpp::traits::input_parameter< const double >::type chi(chiSEXP);
+    Rcpp::traits::input_parameter< const double >::type psi(psiSEXP);
+    rcpp_result_gen = Rcpp::wrap(draw_gig_native_rcpp_cpp(n, lambda, chi, psi));
+    return rcpp_result_gen;
+END_RCPP
+}
 // blm_gibbs_rcpp_cpp
 Rcpp::List blm_gibbs_rcpp_cpp(const Rcpp::NumericVector& y, const Rcpp::NumericMatrix& X, const double residual_shape, const double residual_scale, const int iterations, const int burnin, const int thin, const Rcpp::Function& progress_callback, const Rcpp::IntegerVector& block_id, const Rcpp::IntegerVector& block_model, const Rcpp::NumericVector& normal_shape, const Rcpp::NumericVector& normal_scale, const Rcpp::NumericVector& pi_alpha, const Rcpp::NumericVector& pi_beta, const Rcpp::NumericVector& spike_var_shape, const Rcpp::NumericVector& spike_var_scale, const Rcpp::NumericVector& global_scale, const Rcpp::NumericVector& fixed_global_var, const Rcpp::NumericVector& local_a, const Rcpp::NumericVector& local_b, const Rcpp::List& multi_gamma_list, const Rcpp::List& multi_pi_alpha_list, const Rcpp::NumericVector& multi_var_shape, const Rcpp::NumericVector& multi_var_scale, const Rcpp::NumericVector& fixed_var, const bool learn_residual_var, const double fixed_residual_var, const bool store_samples, const bool store_coefficient_cov, const int effective_n, const bool fit_intercept, const Rcpp::NumericVector& intercept_x_mean, const double intercept_y_mean, const bool use_sufficient_statistics, const Rcpp::NumericMatrix& summary_XtX, const Rcpp::NumericVector& summary_Xty, const double summary_yty, const bool center_observations, const double residual_sse_offset, const bool compute_pve, const int pve_type_code);
 RcppExport SEXP _BayesLinReg_blm_gibbs_rcpp_cpp(SEXP ySEXP, SEXP XSEXP, SEXP residual_shapeSEXP, SEXP residual_scaleSEXP, SEXP iterationsSEXP, SEXP burninSEXP, SEXP thinSEXP, SEXP progress_callbackSEXP, SEXP block_idSEXP, SEXP block_modelSEXP, SEXP normal_shapeSEXP, SEXP normal_scaleSEXP, SEXP pi_alphaSEXP, SEXP pi_betaSEXP, SEXP spike_var_shapeSEXP, SEXP spike_var_scaleSEXP, SEXP global_scaleSEXP, SEXP fixed_global_varSEXP, SEXP local_aSEXP, SEXP local_bSEXP, SEXP multi_gamma_listSEXP, SEXP multi_pi_alpha_listSEXP, SEXP multi_var_shapeSEXP, SEXP multi_var_scaleSEXP, SEXP fixed_varSEXP, SEXP learn_residual_varSEXP, SEXP fixed_residual_varSEXP, SEXP store_samplesSEXP, SEXP store_coefficient_covSEXP, SEXP effective_nSEXP, SEXP fit_interceptSEXP, SEXP intercept_x_meanSEXP, SEXP intercept_y_meanSEXP, SEXP use_sufficient_statisticsSEXP, SEXP summary_XtXSEXP, SEXP summary_XtySEXP, SEXP summary_ytySEXP, SEXP center_observationsSEXP, SEXP residual_sse_offsetSEXP, SEXP compute_pveSEXP, SEXP pve_type_codeSEXP) {
@@ -315,6 +329,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_BayesLinReg_build_scaled_eigen_factor_cpp", (DL_FUNC) &_BayesLinReg_build_scaled_eigen_factor_cpp, 4},
     {"_BayesLinReg_blm_build_info_cpp", (DL_FUNC) &_BayesLinReg_blm_build_info_cpp, 0},
     {"_BayesLinReg_draw_gig_rcpp_cpp", (DL_FUNC) &_BayesLinReg_draw_gig_rcpp_cpp, 4},
+    {"_BayesLinReg_draw_gig_native_rcpp_cpp", (DL_FUNC) &_BayesLinReg_draw_gig_native_rcpp_cpp, 4},
     {"_BayesLinReg_blm_gibbs_rcpp_cpp", (DL_FUNC) &_BayesLinReg_blm_gibbs_rcpp_cpp, 41},
     {"_BayesLinReg_blm_gibbs_sparse_rcpp_cpp", (DL_FUNC) &_BayesLinReg_blm_gibbs_sparse_rcpp_cpp, 37},
     {"_BayesLinReg_blm_gibbs_block_rcpp_cpp", (DL_FUNC) &_BayesLinReg_blm_gibbs_block_rcpp_cpp, 40},
