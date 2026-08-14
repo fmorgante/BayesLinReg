@@ -217,8 +217,10 @@ fit_summary <- blm(
 ```
 
 Individual draws and convergence diagnostics are unavailable for the default
-summary-only fit. Every `ETA` block always returns a named `coefficient_var`
-vector. Set `store_coefficient_cov = TRUE` to request its full
+summary-only fit. When draws are stored, convergence diagnostics omit fixed
+residual and coefficient-prior variances because they are deterministic. Every
+`ETA` block always returns a named `coefficient_var` vector. Set
+`store_coefficient_cov = TRUE` to request its full
 `coefficient_cov` matrix. With online summaries, covariance storage and work
 are quadratic within each `ETA` block.
 
@@ -364,6 +366,10 @@ incompatible variants are excluded. Returned coefficients are effects per
 input GWAS `A1` allele. `residual_df_gwas` controls the finite-sample marginal-
 regression conversion and defaults to `N - 2`; it is distinct from the fitted
 model's `residual_var`, `residual_shape`, and `residual_scale` arguments.
+The returned `ld_harmonization` vector separates GWAS-only, LD-only,
+location-mismatched, allele-mismatched, and ambiguous exclusions. Its aggregate
+`excluded` value counts input-table entries, so a rejected matched pair
+contributes two.
 Character variant IDs should be used for multi-block `ETA` definitions when
 harmonization may exclude variants. Numeric indices are rejected after an LD
 variant is excluded because their original positional meaning is ambiguous.
@@ -373,7 +379,8 @@ blocks cross LD blocks or list predictors in a different order. Consequently,
 arbitrary prior layouts do not require reconstructing or recompressing LD.
 Saved `blm_ld` objects carry an internal format version; recreate an object
 with the current `as_blm_ld()` if a later package version reports that its
-format is unsupported.
+format is unsupported. Compressed indexed blocks and any regularization report
+are also validated before compiled code is entered.
 
 When LD comes from an external reference panel, fixing `residual_var` is
 recommended because the reconstructed `XtX`, `Xty`, and `yty` need not be

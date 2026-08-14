@@ -72,10 +72,51 @@ eigen_repaired_ld <- regularize_blm_ld(
 )
 eigen_repaired_R <- BayesLinReg:::.materialize_blm_ld(eigen_repaired_ld)
 stopifnot(
-  min(eigen(eigen_repaired_R, symmetric = TRUE, only.values = TRUE)$values) > 0,
+  min(eigen(eigen_repaired_R, symmetric = TRUE, only.values = TRUE)$values) >=
+    1e-6,
   all(diag(eigen_repaired_R) == 1),
   identical(eigen_repaired_ld$regularization_report$method, "eigen"),
+  identical(eigen_repaired_ld$regularization_report$source_block, "LD"),
+  eigen_repaired_ld$regularization_report$floor_shrink > 0,
   isTRUE(eigen_repaired_ld$regularization_report$positive_definite_after)
+)
+corrupt_report_ld <- eigen_repaired_ld
+corrupt_report_ld$regularization_report$block <- "wrong"
+corrupt_report_error <- try(
+  BayesLinReg:::.validate_blm_ld_object(corrupt_report_ld), silent = TRUE
+)
+corrupt_report_value_ld <- eigen_repaired_ld
+corrupt_report_value_ld$regularization_report$shrink <- 0.1
+corrupt_report_value_error <- try(
+  BayesLinReg:::.validate_blm_ld_object(corrupt_report_value_ld), silent = TRUE
+)
+stopifnot(
+  inherits(corrupt_report_error, "try-error"),
+  grepl("regularization metadata", corrupt_report_error),
+  inherits(corrupt_report_value_error, "try-error"),
+  grepl("regularization metadata", corrupt_report_value_error)
+)
+
+# Automatic repair uses the requested final floor, including for matrices
+# that are already positive definite but do not meet that floor.
+near_singular_R <- matrix(c(1, 0.999, 0.999, 1), 2L)
+dimnames(near_singular_R) <- list(ids[1:2], ids[1:2])
+near_singular_ld <- as_blm_ld(near_singular_R, variants1[1:2, ])
+auto_floor <- 0.01
+auto_repaired_ld <- regularize_blm_ld(
+  near_singular_ld, method = "auto", eigen_floor = auto_floor
+)
+auto_repaired_R <- BayesLinReg:::.materialize_blm_ld(auto_repaired_ld)
+auto_unchanged_ld <- regularize_blm_ld(
+  as_blm_ld(R1, variants1), method = "auto", eigen_floor = auto_floor
+)
+stopifnot(
+  identical(auto_repaired_ld$regularization_report$method, "eigen"),
+  min(eigen(auto_repaired_R, symmetric = TRUE, only.values = TRUE)$values) >=
+    auto_floor,
+  auto_repaired_ld$regularization_report$floor_shrink > 0,
+  identical(auto_unchanged_ld$regularization_report$method, "none"),
+  identical(auto_unchanged_ld$regularization_report$floor_shrink, 0)
 )
 shrunk_ld <- regularize_blm_ld(
   indefinite_ld, method = "shrink", shrink = 0.6
@@ -372,6 +413,7 @@ stopifnot(
 # Harmonization exclusions are removed from character-indexed ETA blocks.
 incompatible_gwas <- gwas
 incompatible_gwas$POS[incompatible_gwas$ID == "rs2"] <- 200L
+regularized_ld <- regularize_blm_ld(ld, method = "eigen")
 numeric_eta_error <- try(
   suppressWarnings(blm_gwas(
     incompatible_gwas, ld,
@@ -389,15 +431,49 @@ stopifnot(
 )
 partial_harmonization <- suppressWarnings(
   BayesLinReg:::.harmonize_gwas_ld(
-    BayesLinReg:::.validate_blm_gwas(incompatible_gwas), ld
+    BayesLinReg:::.validate_blm_gwas(incompatible_gwas), regularized_ld
   )
 )
-stopifnot(identical(partial_harmonization$ld$blocks$chr2, ld$blocks$chr2))
+partial_report <- partial_harmonization$ld$regularization_report
+stopifnot(
+  identical(
+    partial_harmonization$ld$blocks$chr2, regularized_ld$blocks$chr2
+  ),
+  nrow(partial_report) == nrow(partial_harmonization$ld$block_table),
+  all(partial_report$source_block %in% c("chr1", "chr2")),
+  all(is.na(partial_report$minimum_eigenvalue_after[
+    partial_report$source_block == "chr1"
+  ])),
+  all(!is.na(partial_report$minimum_eigenvalue_after[
+    partial_report$source_block == "chr2"
+  ]))
+)
+categorized_gwas <- gwas[gwas$ID != "rs6", ]
+categorized_gwas$POS[categorized_gwas$ID == "rs2"] <- 200L
+categorized_gwas$A1[categorized_gwas$ID == "rs3"] <- "A"
+categorized_gwas$A0[categorized_gwas$ID == "rs3"] <- "C"
+categorized_gwas <- rbind(
+  categorized_gwas,
+  transform(gwas[1L, ], ID = "gwas_only", POS = 999L)
+)
+categorized_harmonization <- suppressWarnings(
+  BayesLinReg:::.harmonize_gwas_ld(
+    BayesLinReg:::.validate_blm_gwas(categorized_gwas), ld
+  )
+)
+stopifnot(identical(
+  categorized_harmonization$counts,
+  c(
+    retained = 3L, flipped = 0L, excluded = 6L, gwas_only = 1L,
+    ld_only = 1L, location_mismatch = 1L, allele_mismatch = 1L,
+    ambiguous = 0L
+  )
+))
 harmonization_warnings <- character()
 set.seed(1104)
 excluded_fit <- withCallingHandlers(
   blm_gwas(
-    incompatible_gwas, ld, ETA,
+    incompatible_gwas, regularized_ld, ETA,
     residual_var = 1, iterations = 30L, burnin = 10L
   ),
   warning = function(condition) {
@@ -409,7 +485,17 @@ excluded_fit <- withCallingHandlers(
 )
 stopifnot(
   identical(excluded_fit$gwas_variants$ID, ids[c(1L, 3L:6L)]),
+  identical(excluded_fit$ld_regularization_report, partial_report),
+  identical(
+    excluded_fit$ld_harmonization,
+    c(
+      retained = 5L, flipped = 0L, excluded = 2L, gwas_only = 0L,
+      ld_only = 0L, location_mismatch = 1L, allele_mismatch = 0L,
+      ambiguous = 0L
+    )
+  ),
   any(grepl("normal \\(1\\)", harmonization_warnings)),
+  any(grepl("location mismatch 1", harmonization_warnings)),
   !"rs2" %in% names(coef(excluded_fit))
 )
 
@@ -509,6 +595,8 @@ ambiguous_fit <- withCallingHandlers(
 )
 stopifnot(
   identical(ambiguous_fit$gwas_variants$ID, "amb2"),
+  ambiguous_fit$ld_harmonization[["ambiguous"]] == 1,
+  ambiguous_fit$ld_harmonization[["excluded"]] == 2,
   any(grepl("ambiguous", ambiguous_warnings))
 )
 
@@ -729,6 +817,7 @@ if (any(parallel_test_flags == "true")) {
 irregular_ids <- paste0("ir", seq_len(6L))
 irregular_R <- diag(6L)
 irregular_R[6L, 1L] <- irregular_R[1L, 6L] <- 0.15
+irregular_R[4L, 1L] <- irregular_R[1L, 4L] <- 0.05
 irregular_R[5L, 2L] <- irregular_R[2L, 5L] <- -0.1
 irregular_R[4L, 3L] <- irregular_R[3L, 4L] <- 0.2
 dimnames(irregular_R) <- list(irregular_ids, irregular_ids)
@@ -741,6 +830,30 @@ irregular_ld <- as_blm_ld(
   Matrix::forceSymmetric(Matrix::Matrix(irregular_R, sparse = TRUE), "L"),
   irregular_variants
 )
+indexed_columns <- rep.int(
+  seq_len(irregular_ld$blocks[[1L]]$size),
+  diff(irregular_ld$blocks[[1L]]$indptr)
+)
+duplicate_column <- which(tabulate(indexed_columns) > 1L)[1L]
+duplicate_positions <- which(indexed_columns == duplicate_column)[1:2]
+duplicate_index_ld <- irregular_ld
+duplicate_index_ld$blocks[[1L]]$row_index[duplicate_positions[2L]] <-
+  duplicate_index_ld$blocks[[1L]]$row_index[duplicate_positions[1L]]
+unsorted_index_ld <- irregular_ld
+unsorted_index_ld$blocks[[1L]]$row_index[duplicate_positions] <-
+  rev(unsorted_index_ld$blocks[[1L]]$row_index[duplicate_positions])
+above_diagonal_ld <- irregular_ld
+above_diagonal_ld$blocks[[1L]]$row_index[1L] <-
+  indexed_columns[[1L]] - 1L
+indexed_validation_errors <- lapply(
+  list(duplicate_index_ld, unsorted_index_ld, above_diagonal_ld),
+  function(object) try(
+    BayesLinReg:::.validate_blm_ld_object(object), silent = TRUE
+  )
+)
+stopifnot(all(vapply(indexed_validation_errors, function(error) {
+  inherits(error, "try-error") && grepl("strictly lower triangular", error)
+}, logical(1))))
 irregular_beta <- stats::setNames(
   c(0.1, -0.05, 0.2, 0, -0.1, 0.15), irregular_ids
 )

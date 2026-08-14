@@ -74,7 +74,13 @@ compatibility validation; see \code{\link[=blm_ss]{blm_ss()}}.}
 \value{
 An object of class \code{blm_fit}. Coefficients are oriented to the input
 GWAS \code{A1} alleles. No intercept is fitted because centered GWAS summary
-statistics do not identify the phenotype mean.
+statistics do not identify the phenotype mean. When \code{ld} was created by
+\code{\link[=regularize_blm_ld]{regularize_blm_ld()}}, \code{ld_regularization_report} records the applicable
+regularization provenance after harmonization. \code{ld_harmonization} reports
+retained and flipped variants together with separate counts for GWAS-only,
+LD-only, location-mismatched, allele-mismatched, and ambiguous variants.
+Its \code{excluded} element counts excluded table entries: unmatched entries
+contribute one and matched-but-incompatible variant pairs contribute two.
 }
 \description{
 Fits the same coefficient-prior models as \code{\link[=blm_ss]{blm_ss()}} from additive

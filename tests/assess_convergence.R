@@ -142,6 +142,23 @@ known_fit <- blm(
   iterations = 100,
   burnin = 40
 )
+set.seed(105)
+fixed_variance_fit <- blm(
+  y,
+  ETA = list(X = X, model = "Normal", var = 0.5),
+  residual_var = 1,
+  iterations = 100,
+  burnin = 40
+)
+set.seed(106)
+no_diagnostic_target_fit <- suppressWarnings(BayesLinReg::blm_ss(
+  nrow(X), crossprod(X), drop(crossprod(X, y)),
+  ETA = list(model = "Normal", var = 0.5),
+  residual_var = 1,
+  iterations = 60,
+  burnin = 20,
+  store_samples = TRUE
+))
 set.seed(104)
 summary_only_fit <- blm(
   y,
@@ -153,7 +170,22 @@ summary_only_fit <- blm(
   store_samples = FALSE
 )
 stopifnot(
-  assess_convergence(known_fit, plot = FALSE)$nchains == 1L,
+  identical(
+    names(assess_convergence(known_fit, plot = FALSE)$rhat),
+    c("intercept", "normal_var_ETA1")
+  ),
+  identical(
+    names(assess_convergence(fixed_variance_fit, plot = FALSE)$rhat),
+    "intercept"
+  ),
+  grepl(
+    "no sampled non-coefficient parameters",
+    as.character(try(
+      assess_convergence(no_diagnostic_target_fit, plot = FALSE),
+      silent = TRUE
+    )),
+    fixed = TRUE
+  ),
   grepl(
     "store_samples = TRUE",
     as.character(try(assess_convergence(summary_only_fit), silent = TRUE)),

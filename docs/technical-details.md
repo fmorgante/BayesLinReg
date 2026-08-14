@@ -696,8 +696,16 @@ blocks can cross LD blocks or request a different output order without
 rebuilding the compressed correlations. Partial harmonization filters the
 compressed triangle directly and recomputes exact contiguous sub-blocks from
 the retained triplets, avoiding an intermediate `sparseMatrix`. Reusable LD
-objects carry a validated internal format version so incompatible serialized
-objects fail before entering compiled code.
+objects carry a validated internal format version. Indexed triangles are
+checked for strict-lower, sorted, unique row indices within every column, and
+regularization reports are checked against current block names, parents, and
+sizes, so incompatible serialized objects fail before entering compiled code.
+
+The returned `ld_harmonization` vector separates GWAS-only and LD-only entries
+from location-mismatched, allele-mismatched, and unresolved ambiguous matched
+variants. These categories are mutually exclusive. Its aggregate `excluded`
+count is measured in input-table entries: an unmatched entry contributes one,
+whereas a matched variant pair rejected from both inputs contributes two.
 
 GWAS summary statistics do not identify a phenotype mean, so this interface
 fits no intercept. Reference-panel LD, meta-analysis statistics, mixed-model
@@ -716,6 +724,13 @@ eigendecomposition are marked as uncertified in the report. Structural PSD
 repair and per-fit `ld_shrink` have
 different roles: a positive-definite matrix may still be mismatched to the
 GWAS population.
+
+After eigen repair restores a unit diagonal, the implementation applies the
+smallest additional identity shrinkage needed to enforce the requested final
+eigenvalue floor. GWAS harmonization preserves the regularization action and
+source-block provenance when it subsets or splits computational LD blocks;
+eigenvalue fields are set to missing for a proper sub-block because the
+original whole-block values no longer describe that submatrix.
 
 ### 2.6 GWAS reconstruction with `compute_ss_from_gwas()`
 
@@ -780,6 +795,11 @@ coefficient covariance matrices.
 With `store_samples = TRUE`, retained coefficient, variance, inclusion,
 component, PVE, intercept, and residual-variance draws are stored as applicable.
 With `store_samples = FALSE`, means and variances are accumulated online.
+Convergence conversion excludes fixed residual and coefficient-prior
+variances, which are stored as constant values for posterior reporting but are
+not sampled parameters. If a fit has no remaining sampled scalar or PVE
+quantity, convergence assessment reports that no diagnostic target is
+available.
 
 `store_coefficient_cov = TRUE` additionally accumulates a coefficient
 cross-product for every retained draw within each `ETA` block, requiring

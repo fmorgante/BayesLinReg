@@ -37,7 +37,13 @@
 #'
 #' @return An object of class `blm_fit`. Coefficients are oriented to the input
 #'   GWAS `A1` alleles. No intercept is fitted because centered GWAS summary
-#'   statistics do not identify the phenotype mean.
+#'   statistics do not identify the phenotype mean. When `ld` was created by
+#'   [regularize_blm_ld()], `ld_regularization_report` records the applicable
+#'   regularization provenance after harmonization. `ld_harmonization` reports
+#'   retained and flipped variants together with separate counts for GWAS-only,
+#'   LD-only, location-mismatched, allele-mismatched, and ambiguous variants.
+#'   Its `excluded` element counts excluded table entries: unmatched entries
+#'   contribute one and matched-but-incompatible variant pairs contribute two.
 #'
 #' @details Variants are matched by `ID` and checked against chromosome,
 #'   position, and alleles. Reversed alleles are handled by changing effect
@@ -297,6 +303,9 @@ blm_gwas <- function(
   result$reference_response_var <- components$reference_response_var
   result$ld_block_table <- ld$block_table
   result$ld_cross_block_assumption <- ld$cross_block_assumption
+  if (!is.null(ld$regularization_report)) {
+    result$ld_regularization_report <- ld$regularization_report
+  }
   result$ld_shrink <- ld_shrink
   result$ld_harmonization <- harmonized$counts
   result$nthreads <- nthreads
@@ -420,8 +429,8 @@ blm_gwas <- function(
 
 .harmonize_gwas_ld <- function(gwas, ld) {
   match_index <- match(ld$variants$ID, gwas$ID)
-  location_match <- !is.na(match_index)
-  candidate <- which(location_match)
+  id_match <- !is.na(match_index)
+  candidate <- which(id_match)
   if (!length(candidate)) {
     stop("No GWAS variants match the LD object by `ID`.", call. = FALSE)
   }
@@ -440,8 +449,9 @@ blm_gwas <- function(
     complement_a1 == ld_variants$A1 & complement_a0 == ld_variants$A0
   complement_reversed <- !is.na(complement_a1) & !is.na(complement_a0) &
     complement_a1 == ld_variants$A0 & complement_a0 == ld_variants$A1
-  compatible <- location_match & !palindromic &
-    (direct | reversed | complement_direct | complement_reversed)
+  allele_compatible <- direct | reversed | complement_direct |
+    complement_reversed
+  compatible <- location_match & !palindromic & allele_compatible
   retained_ld <- candidate[compatible]
   if (!length(retained_ld)) {
     stop("No GWAS variants remain after position and allele harmonization.",
@@ -456,11 +466,22 @@ blm_gwas <- function(
   } else {
     .subset_blm_ld(ld, retained_ld)
   }
-  excluded <- nrow(gwas) + nrow(ld$variants) - 2L * length(retained_ld)
+  gwas_unmatched <- sum(!gwas$ID %in% ld$variants$ID)
+  ld_unmatched <- sum(!id_match)
+  location_mismatch <- sum(!location_match)
+  ambiguous <- sum(location_match & palindromic)
+  allele_mismatch <- sum(location_match & !palindromic & !allele_compatible)
+  excluded <- gwas_unmatched + ld_unmatched +
+    2L * (location_mismatch + ambiguous + allele_mismatch)
   if (excluded > 0L) {
     warning(sprintf(
-      "GWAS-LD harmonization retained %d variants and excluded %d unmatched, location-incompatible, allele-incompatible, or ambiguous entries.",
-      length(retained_ld), excluded
+      paste0(
+        "GWAS-LD harmonization retained %d variants and excluded %d entries ",
+        "(GWAS-only %d; LD-only %d; location mismatch %d; allele mismatch ",
+        "%d; ambiguous %d)."
+      ),
+      length(retained_ld), excluded, gwas_unmatched, ld_unmatched,
+      location_mismatch, allele_mismatch, ambiguous
     ), call. = FALSE)
   }
   list(
@@ -470,7 +491,12 @@ blm_gwas <- function(
     counts = c(
       retained = length(retained_ld),
       flipped = sum(orientation < 0),
-      excluded = excluded
+      excluded = excluded,
+      gwas_only = gwas_unmatched,
+      ld_only = ld_unmatched,
+      location_mismatch = location_mismatch,
+      allele_mismatch = allele_mismatch,
+      ambiguous = ambiguous
     )
   )
 }
@@ -479,6 +505,8 @@ blm_gwas <- function(
   selected_flag <- logical(nrow(ld$variants))
   selected_flag[selected] <- TRUE
   new_blocks <- list()
+  source_blocks <- character()
+  complete_blocks <- logical()
   reserved_names <- vapply(ld$blocks, `[[`, character(1), "name")
   offset <- 0L
   parent_counts <- integer()
@@ -491,6 +519,8 @@ blm_gwas <- function(
       output_index <- length(new_blocks) + 1L
       new_blocks[[output_index]] <- block
       names(new_blocks)[output_index] <- block$name
+      source_blocks[block$name] <- block$name
+      complete_blocks[block$name] <- TRUE
       next
     }
     local_map <- integer(block$size)
@@ -526,13 +556,15 @@ blm_gwas <- function(
         columns[in_range] - first + 1L, values[in_range], parent, child_name
       )
       new_blocks[[child$name]] <- child
+      source_blocks[child$name] <- block$name
+      complete_blocks[child$name] <- FALSE
     }
   }
   if (!length(new_blocks)) stop("LD subset is empty.", call. = FALSE)
   variants <- ld$variants[selected_flag, , drop = FALSE]
   rownames(variants) <- NULL
   block_table <- .ld_block_table(new_blocks)
-  structure(list(
+  result <- structure(list(
     blocks = new_blocks,
     variants = variants,
     parents = unique(block_table$parent),
@@ -540,6 +572,34 @@ blm_gwas <- function(
     format_version = .blm_ld_format_version,
     cross_block_assumption = if (length(new_blocks) > 1L) "zero" else NULL
   ), class = "blm_ld")
+  if (!is.null(ld$regularization_report)) {
+    input_report <- ld$regularization_report
+    report_rows <- match(
+      unname(source_blocks[names(new_blocks)]), input_report$block
+    )
+    if (anyNA(report_rows)) {
+      stop("`ld` regularization metadata are inconsistent.", call. = FALSE)
+    }
+    report <- input_report[report_rows, , drop = FALSE]
+    if (!"source_block" %in% names(report)) {
+      report$source_block <- report$block
+    }
+    report$block <- names(new_blocks)
+    report$parent <- vapply(new_blocks, `[[`, character(1), "parent")
+    report$predictors <- vapply(new_blocks, `[[`, integer(1), "size")
+    incomplete <- !unname(complete_blocks[names(new_blocks)])
+    numerical_fields <- intersect(
+      c(
+        "minimum_eigenvalue_before", "minimum_eigenvalue_after",
+        "positive_definite_after"
+      ),
+      names(report)
+    )
+    report[incomplete, numerical_fields] <- NA
+    rownames(report) <- NULL
+    result$regularization_report <- report
+  }
+  result
 }
 
 .orient_gwas_coefficients <- function(result, orientation, source_indices,

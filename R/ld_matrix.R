@@ -209,10 +209,11 @@ diagnose_blm_ld <- function(
 #' `method = "eigen"` clips the eigenvalues of eligible dense blocks and
 #' restores their unit diagonal. `method = "shrink"` applies
 #' `(1 - shrink) R + shrink I` directly to the compressed representation.
-#' `method = "auto"` leaves eligible positive-definite blocks unchanged,
-#' eigen-repairs other eligible blocks, and uses shrinkage for blocks that are
-#' too large for dense repair. Large-block shrinkage is not a PSD certificate;
-#' its report fields remain missing when no eigendecomposition was performed.
+#' `method = "auto"` leaves eligible blocks whose minimum eigenvalue is at
+#' least `eigen_floor` unchanged, eigen-repairs other eligible blocks, and uses
+#' shrinkage for blocks that are too large for dense repair. Large-block
+#' shrinkage is not a PSD certificate; its report fields remain missing when
+#' no eigendecomposition was performed.
 #'
 #' @param ld A `blm_ld` object returned by [as_blm_ld()].
 #' @param method Regularization policy: `"auto"`, `"eigen"`, or `"shrink"`.
@@ -223,7 +224,11 @@ diagnose_blm_ld <- function(
 #' @param eigen_floor Positive absolute floor for repaired eigenvalues.
 #'
 #' @return A new `blm_ld` object. Its `regularization_report` component records
-#'   the action and numerical adjustment applied to every block.
+#'   the action and numerical adjustment applied to every block. For eigen
+#'   repair, `floor_shrink` is the minimal additional identity shrinkage used
+#'   after unit-diagonal normalization to enforce `eigen_floor`.
+#'   `source_block` preserves the block on which regularization was originally
+#'   performed if later GWAS harmonization subsets or splits that block.
 #' @export
 regularize_blm_ld <- function(
     ld, method = c("auto", "eigen", "shrink"), shrink = 0.01,
@@ -284,6 +289,7 @@ regularize_blm_ld <- function(
       }
     }
     applied_shrink <- 0
+    floor_shrink <- 0
     minimum_after <- minimum_before
     if (action == "eigen") {
       repaired_values <- pmax(decomposition$values, eigen_floor)
@@ -294,12 +300,22 @@ regularize_blm_ld <- function(
       repaired <- repaired / tcrossprod(diagonal_scale)
       repaired <- (repaired + t(repaired)) / 2
       diag(repaired) <- 1
-      new_block <- .compress_ld_block(
-        repaired, block$parent, block$name
-      )
       minimum_after <- min(eigen(
         repaired, symmetric = TRUE, only.values = TRUE
       )$values)
+      if (minimum_after < eigen_floor) {
+        numerical_margin <- 64 * .Machine$double.eps * max(1, block$size)
+        floor_target <- min(1, eigen_floor + numerical_margin)
+        floor_shrink <-
+          (floor_target - minimum_after) / (1 - minimum_after)
+        repaired <- (1 - floor_shrink) * repaired
+        diag(repaired) <- 1
+        minimum_after <-
+          (1 - floor_shrink) * minimum_after + floor_shrink
+      }
+      new_block <- .compress_ld_block(
+        repaired, block$parent, block$name
+      )
     } else if (action == "shrink") {
       new_block <- block
       applied_shrink <- as.numeric(shrink)
@@ -316,10 +332,12 @@ regularize_blm_ld <- function(
     new_blocks[[block_index]] <- new_block
     report[[block_index]] <- data.frame(
       block = block$name,
+      source_block = block$name,
       parent = block$parent,
       predictors = block$size,
       method = action,
       shrink = applied_shrink,
+      floor_shrink = floor_shrink,
       minimum_eigenvalue_before = minimum_before,
       minimum_eigenvalue_after = minimum_after,
       positive_definite_after = if (is.na(minimum_after)) {
@@ -621,6 +639,22 @@ regularize_blm_ld <- function(
           any(block$row_index < 0L | block$row_index >= block$size)) {
         stop("`ld` contains an invalid indexed block.", call. = FALSE)
       }
+      for (column in seq_len(block$size)) {
+        start <- block$indptr[[column]] + 1L
+        end <- block$indptr[[column + 1L]]
+        if (start > end) next
+        rows <- block$row_index[seq.int(start, end)]
+        if (any(rows <= column - 1L) ||
+            (length(rows) > 1L && any(diff(rows) <= 0L))) {
+          stop(
+            paste0(
+              "`ld` indexed entries must be strictly lower triangular, ",
+              "sorted, and unique within each column."
+            ),
+            call. = FALSE
+          )
+        }
+      }
     }
   }
   block_sizes <- vapply(ld$blocks, `[[`, integer(1), "size")
@@ -628,7 +662,51 @@ regularize_blm_ld <- function(
       !identical(ld$block_table, .ld_block_table(ld$blocks))) {
     stop("`ld` block metadata are inconsistent.", call. = FALSE)
   }
+  .validate_ld_regularization_report(ld)
   invisible(ld)
+}
+
+.validate_ld_regularization_report <- function(ld) {
+  report <- ld$regularization_report
+  if (is.null(report)) return(invisible(NULL))
+  required <- c(
+    "block", "source_block", "parent", "predictors", "method", "shrink",
+    "floor_shrink", "minimum_eigenvalue_before",
+    "minimum_eigenvalue_after", "positive_definite_after"
+  )
+  block_names <- names(ld$blocks)
+  block_parents <- vapply(ld$blocks, `[[`, character(1), "parent")
+  block_sizes <- vapply(ld$blocks, `[[`, integer(1), "size")
+  structurally_valid <- is.data.frame(report) &&
+    all(required %in% names(report)) && nrow(report) == length(ld$blocks) &&
+    is.character(report$block) && identical(report$block, block_names) &&
+    is.character(report$source_block) &&
+    !anyNA(report$source_block) && all(report$source_block != "") &&
+    is.character(report$parent) &&
+    identical(unname(report$parent), unname(block_parents)) &&
+    is.integer(report$predictors) &&
+    identical(unname(report$predictors), unname(block_sizes)) &&
+    is.character(report$method) && !anyNA(report$method) &&
+    all(report$method %in% c("none", "eigen", "shrink")) &&
+    is.numeric(report$shrink) && is.numeric(report$floor_shrink) &&
+    is.numeric(report$minimum_eigenvalue_before) &&
+    is.numeric(report$minimum_eigenvalue_after) &&
+    is.logical(report$positive_definite_after)
+  if (!structurally_valid) {
+    stop("`ld` regularization metadata are inconsistent.", call. = FALSE)
+  }
+  finite_or_missing <- function(value) all(is.na(value) | is.finite(value))
+  if (anyNA(report$shrink) || anyNA(report$floor_shrink) ||
+      any(!is.finite(report$shrink)) || any(!is.finite(report$floor_shrink)) ||
+      any(report$shrink < 0 | report$shrink >= 1) ||
+      any(report$floor_shrink < 0 | report$floor_shrink >= 1) ||
+      !finite_or_missing(report$minimum_eigenvalue_before) ||
+      !finite_or_missing(report$minimum_eigenvalue_after) ||
+      any(report$shrink[report$method != "shrink"] != 0) ||
+      any(report$floor_shrink[report$method != "eigen"] != 0)) {
+    stop("`ld` regularization metadata are inconsistent.", call. = FALSE)
+  }
+  invisible(NULL)
 }
 
 .ld_block_table <- function(blocks) {

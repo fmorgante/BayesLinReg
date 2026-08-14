@@ -2,14 +2,17 @@
 #'
 #' Produces trace plots and computes convergence diagnostics for the retained
 #' non-coefficient draws in a sampled fit returned by [blm()], [blm_ss()],
-#' [blm_ss_eigen()], or [blm_gwas()]. These include
-#' the intercept (when fitted) and residual variance; the shared coefficient variance for
-#' each normal block; the inclusion probability and slab variance for each
-#' spike-and-slab block; and the global variance for each global-local block.
+#' [blm_ss_eigen()], or [blm_gwas()]. These include the intercept (when fitted),
+#' residual variance when learned, and the shared coefficient variance when
+#' learned for each normal block; the inclusion probability and learned slab
+#' variance for each spike-and-slab block; and learned global variance for each
+#' global-local block.
 #' For each spike-and-multiple-slab block, they also include every mixture
-#' probability and the shared coefficient variance.
+#' probability and the shared coefficient variance when learned.
 #' When posterior PVE was requested, block, total, and cross-block PVE are
 #' included as derived quantities.
+#' Fixed residual and coefficient-prior variances are deterministic and are
+#' excluded.
 #' All per-predictor quantities, including regression coefficients, local
 #' variances, and spike-and-slab inclusion indicators, are intentionally
 #' excluded.

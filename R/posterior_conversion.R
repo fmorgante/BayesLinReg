@@ -33,13 +33,14 @@
          call. = FALSE)
   }
 
-  sample_matrix <- if (has_intercept) {
-    cbind(
-      intercept = fit$intercept_samples,
-      residual_var = fit$residual_var_samples
+  sample_matrix <- matrix(numeric(), nrow = number_of_draws, ncol = 0L)
+  if (has_intercept) {
+    sample_matrix <- cbind(sample_matrix, intercept = fit$intercept_samples)
+  }
+  if (!is.null(fit$residual_shape)) {
+    sample_matrix <- cbind(
+      sample_matrix, residual_var = fit$residual_var_samples
     )
-  } else {
-    cbind(residual_var = fit$residual_var_samples)
   }
 
   for (block_name in names(fit$ETA)) {
@@ -59,7 +60,7 @@
         "pve_", block_name
       )
     }
-    if (identical(block$model, "Normal")) {
+    if (identical(block$model, "Normal") && is.null(block$var)) {
       if (is.null(block$normal_var_samples) ||
           length(block$normal_var_samples) != number_of_draws) {
         stop("`fit` contains incompatible normal-variance samples.",
@@ -79,18 +80,21 @@
       sample_matrix <- cbind(sample_matrix, block$pi_samples)
       colnames(sample_matrix)[ncol(sample_matrix)] <- paste0("pi_", block_name)
 
-      if (is.null(block$slab_var_samples) ||
-          length(block$slab_var_samples) != number_of_draws) {
-        stop("`fit` contains incompatible slab-variance samples.",
-             call. = FALSE)
+      if (is.null(block$var)) {
+        if (is.null(block$slab_var_samples) ||
+            length(block$slab_var_samples) != number_of_draws) {
+          stop("`fit` contains incompatible slab-variance samples.",
+               call. = FALSE)
+        }
+        sample_matrix <- cbind(sample_matrix, block$slab_var_samples)
+        colnames(sample_matrix)[ncol(sample_matrix)] <- paste0(
+          "slab_var_", block_name
+        )
       }
-      sample_matrix <- cbind(sample_matrix, block$slab_var_samples)
-      colnames(sample_matrix)[ncol(sample_matrix)] <- paste0(
-        "slab_var_", block_name
-      )
     }
 
-    if (identical(block$model, "GlobalLocal")) {
+    if (identical(block$model, "GlobalLocal") &&
+        is.null(block$global_var)) {
       if (length(block$tau_sq_samples) != number_of_draws) {
         stop("`fit` contains incompatible global-variance samples.",
              call. = FALSE)
@@ -115,15 +119,17 @@
       colnames(sample_matrix)[new_columns] <- paste0(
         "pi_", block_name, "_", component_names
       )
-      if (is.null(block$var_samples) ||
-          length(block$var_samples) != number_of_draws) {
-        stop("`fit` contains incompatible multi-slab variance samples.",
-             call. = FALSE)
+      if (is.null(block$var)) {
+        if (is.null(block$var_samples) ||
+            length(block$var_samples) != number_of_draws) {
+          stop("`fit` contains incompatible multi-slab variance samples.",
+               call. = FALSE)
+        }
+        sample_matrix <- cbind(sample_matrix, block$var_samples)
+        colnames(sample_matrix)[ncol(sample_matrix)] <- paste0(
+          "var_", block_name
+        )
       }
-      sample_matrix <- cbind(sample_matrix, block$var_samples)
-      colnames(sample_matrix)[ncol(sample_matrix)] <- paste0(
-        "var_", block_name
-      )
     }
   }
   if (!is.null(fit$total_pve_samples)) {
@@ -135,6 +141,15 @@
       sample_matrix,
       total_pve = fit$total_pve_samples,
       cross_block_pve = fit$cross_block_pve_samples
+    )
+  }
+  if (ncol(sample_matrix) == 0L) {
+    stop(
+      paste0(
+        "The fit has no sampled non-coefficient parameters or posterior ",
+        "PVE quantities to assess."
+      ),
+      call. = FALSE
     )
   }
   sample_matrix

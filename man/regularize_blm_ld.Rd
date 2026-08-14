@@ -28,15 +28,20 @@ memory limits, with the same meaning as in \code{diagnose_blm_ld()}.}
 }
 \value{
 A new \code{blm_ld} object. Its \code{regularization_report} component records
-the action and numerical adjustment applied to every block.
+the action and numerical adjustment applied to every block. For eigen
+repair, \code{floor_shrink} is the minimal additional identity shrinkage used
+after unit-diagonal normalization to enforce \code{eigen_floor}.
+\code{source_block} preserves the block on which regularization was originally
+performed if later GWAS harmonization subsets or splits that block.
 }
 \description{
 Creates a new object from \code{\link[=as_blm_ld]{as_blm_ld()}} with blockwise numerical regularization.
 \code{method = "eigen"} clips the eigenvalues of eligible dense blocks and
 restores their unit diagonal. \code{method = "shrink"} applies
 \verb{(1 - shrink) R + shrink I} directly to the compressed representation.
-\code{method = "auto"} leaves eligible positive-definite blocks unchanged,
-eigen-repairs other eligible blocks, and uses shrinkage for blocks that are
-too large for dense repair. Large-block shrinkage is not a PSD certificate;
-its report fields remain missing when no eigendecomposition was performed.
+\code{method = "auto"} leaves eligible blocks whose minimum eigenvalue is at
+least \code{eigen_floor} unchanged, eigen-repairs other eligible blocks, and uses
+shrinkage for blocks that are too large for dense repair. Large-block
+shrinkage is not a PSD certificate; its report fields remain missing when
+no eigendecomposition was performed.
 }
