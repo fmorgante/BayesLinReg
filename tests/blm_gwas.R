@@ -96,6 +96,24 @@ stopifnot(
   inherits(corrupt_report_value_error, "try-error"),
   grepl("regularization metadata", corrupt_report_value_error)
 )
+legacy_report_ld <- eigen_repaired_ld
+legacy_report_ld$regularization_report$source_block <- NULL
+legacy_report_ld$regularization_report$floor_shrink <- NULL
+legacy_report_ld$regularization_report$predictors <- as.numeric(
+  legacy_report_ld$regularization_report$predictors
+)
+stopifnot(inherits(
+  BayesLinReg:::.validate_blm_ld_object(legacy_report_ld), "blm_ld"
+))
+upgraded_report_ld <- regularize_blm_ld(
+  legacy_report_ld, method = "shrink", shrink = 0.01
+)
+stopifnot(
+  all(c("source_block", "floor_shrink") %in%
+      names(upgraded_report_ld$regularization_report)),
+  identical(upgraded_report_ld$regularization_report$source_block, "LD"),
+  identical(upgraded_report_ld$regularization_report$floor_shrink, 0)
+)
 
 # Automatic repair uses the requested final floor, including for matrices
 # that are already positive definite but do not meet that floor.
@@ -435,6 +453,15 @@ partial_harmonization <- suppressWarnings(
   )
 )
 partial_report <- partial_harmonization$ld$regularization_report
+legacy_regularized_ld <- regularized_ld
+legacy_regularized_ld$regularization_report$source_block <- NULL
+legacy_regularized_ld$regularization_report$floor_shrink <- NULL
+legacy_partial_harmonization <- suppressWarnings(
+  BayesLinReg:::.harmonize_gwas_ld(
+    BayesLinReg:::.validate_blm_gwas(incompatible_gwas),
+    legacy_regularized_ld
+  )
+)
 stopifnot(
   identical(
     partial_harmonization$ld$blocks$chr2, regularized_ld$blocks$chr2
@@ -446,7 +473,15 @@ stopifnot(
   ])),
   all(!is.na(partial_report$minimum_eigenvalue_after[
     partial_report$source_block == "chr2"
-  ]))
+  ])),
+  inherits(
+    BayesLinReg:::.validate_blm_ld_object(legacy_partial_harmonization$ld),
+    "blm_ld"
+  ),
+  "source_block" %in%
+    names(legacy_partial_harmonization$ld$regularization_report),
+  !"floor_shrink" %in%
+    names(legacy_partial_harmonization$ld$regularization_report)
 )
 categorized_gwas <- gwas[gwas$ID != "rs6", ]
 categorized_gwas$POS[categorized_gwas$ID == "rs2"] <- 200L

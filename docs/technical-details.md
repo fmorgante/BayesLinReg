@@ -700,6 +700,8 @@ objects carry a validated internal format version. Indexed triangles are
 checked for strict-lower, sorted, unique row indices within every column, and
 regularization reports are checked against current block names, parents, and
 sizes, so incompatible serialized objects fail before entering compiled code.
+Reports created before the provenance and final-floor fields were introduced
+remain valid when their shared structural and numerical fields are consistent.
 
 The returned `ld_harmonization` vector separates GWAS-only and LD-only entries
 from location-mismatched, allele-mismatched, and unresolved ambiguous matched

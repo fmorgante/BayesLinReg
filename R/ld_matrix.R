@@ -670,9 +670,9 @@ regularize_blm_ld <- function(
   report <- ld$regularization_report
   if (is.null(report)) return(invisible(NULL))
   required <- c(
-    "block", "source_block", "parent", "predictors", "method", "shrink",
-    "floor_shrink", "minimum_eigenvalue_before",
-    "minimum_eigenvalue_after", "positive_definite_after"
+    "block", "parent", "predictors", "method", "shrink",
+    "minimum_eigenvalue_before", "minimum_eigenvalue_after",
+    "positive_definite_after"
   )
   block_names <- names(ld$blocks)
   block_parents <- vapply(ld$blocks, `[[`, character(1), "parent")
@@ -680,30 +680,44 @@ regularize_blm_ld <- function(
   structurally_valid <- is.data.frame(report) &&
     all(required %in% names(report)) && nrow(report) == length(ld$blocks) &&
     is.character(report$block) && identical(report$block, block_names) &&
-    is.character(report$source_block) &&
-    !anyNA(report$source_block) && all(report$source_block != "") &&
     is.character(report$parent) &&
     identical(unname(report$parent), unname(block_parents)) &&
-    is.integer(report$predictors) &&
-    identical(unname(report$predictors), unname(block_sizes)) &&
+    is.numeric(report$predictors) && !anyNA(report$predictors) &&
+    all(is.finite(report$predictors)) &&
+    identical(
+      as.numeric(report$predictors), as.numeric(unname(block_sizes))
+    ) &&
     is.character(report$method) && !anyNA(report$method) &&
     all(report$method %in% c("none", "eigen", "shrink")) &&
-    is.numeric(report$shrink) && is.numeric(report$floor_shrink) &&
+    is.numeric(report$shrink) &&
     is.numeric(report$minimum_eigenvalue_before) &&
     is.numeric(report$minimum_eigenvalue_after) &&
     is.logical(report$positive_definite_after)
   if (!structurally_valid) {
     stop("`ld` regularization metadata are inconsistent.", call. = FALSE)
   }
+  if ("source_block" %in% names(report) &&
+      (!is.character(report$source_block) || anyNA(report$source_block) ||
+       any(report$source_block == ""))) {
+    stop("`ld` regularization metadata are inconsistent.", call. = FALSE)
+  }
+  floor_shrink <- if ("floor_shrink" %in% names(report)) {
+    if (!is.numeric(report$floor_shrink)) {
+      stop("`ld` regularization metadata are inconsistent.", call. = FALSE)
+    }
+    report$floor_shrink
+  } else {
+    numeric(nrow(report))
+  }
   finite_or_missing <- function(value) all(is.na(value) | is.finite(value))
-  if (anyNA(report$shrink) || anyNA(report$floor_shrink) ||
-      any(!is.finite(report$shrink)) || any(!is.finite(report$floor_shrink)) ||
+  if (anyNA(report$shrink) || anyNA(floor_shrink) ||
+      any(!is.finite(report$shrink)) || any(!is.finite(floor_shrink)) ||
       any(report$shrink < 0 | report$shrink >= 1) ||
-      any(report$floor_shrink < 0 | report$floor_shrink >= 1) ||
+      any(floor_shrink < 0 | floor_shrink >= 1) ||
       !finite_or_missing(report$minimum_eigenvalue_before) ||
       !finite_or_missing(report$minimum_eigenvalue_after) ||
       any(report$shrink[report$method != "shrink"] != 0) ||
-      any(report$floor_shrink[report$method != "eigen"] != 0)) {
+      any(floor_shrink[report$method != "eigen"] != 0)) {
     stop("`ld` regularization metadata are inconsistent.", call. = FALSE)
   }
   invisible(NULL)
