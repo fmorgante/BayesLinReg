@@ -41,6 +41,11 @@
 #' @param nthreads Number of threads used within one Rcpp chain for list `XtX`.
 #'   Values greater than one require `nchains = 1` and zero working predictor
 #'   means. The default preserves the serial sampler and its RNG sequence.
+#' @param likelihood_df Optional positive integer no greater than `n`, giving
+#'   the likelihood dimension used in residual-variance and PVE calculations.
+#'   The default is `n - 1` when `X_means` and `y_mean` identify an intercept,
+#'   and `n` otherwise. For centered sufficient statistics supplied without
+#'   means, set `likelihood_df = n - 1` explicitly.
 #' @inheritParams blm
 #'
 #' @return A fitted object with the same block-specific posterior summaries as
@@ -131,7 +136,8 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
                    XtX_storage = c("auto", "speed", "memory"),
                    XtX_memory_limit = 1024^3,
                    compute_pve = FALSE,
-                   pve_type = c("standalone", "allocated")) {
+                   pve_type = c("standalone", "allocated"),
+                   likelihood_df = NULL) {
   version <- match.arg(version)
   XtX_storage <- match.arg(XtX_storage)
   pve_controls <- .validate_pve_controls(compute_pve, pve_type)
@@ -188,6 +194,7 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
   gram_block_names <- statistics$block_names
   gram_block_sizes <- statistics$block_sizes
   fit_intercept <- !is.null(X_means)
+  likelihood_df <- .resolve_likelihood_df(n, fit_intercept, likelihood_df)
 
   if (is.null(yty) && is.null(residual_var)) {
     stop(
@@ -455,6 +462,7 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
     compute_pve = compute_pve,
     pve_type = pve_type,
     effective_n = n,
+    likelihood_df = likelihood_df,
     fit_intercept = fit_intercept,
     intercept_x_mean = if (fit_intercept) {
       X_means[source_order] / scale_order
@@ -494,7 +502,8 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
       residual_prior$residual_scale_calibrated,
     expected_pve_total = residual_prior$expected_pve_total,
     reference_response_var = reference_response_var,
-    reference_residual_var = residual_prior$reference_residual_var
+    reference_residual_var = residual_prior$reference_residual_var,
+    likelihood_df = likelihood_df
   )
   if (list_XtX) {
     result$XtX_representation <- "block_diagonal"

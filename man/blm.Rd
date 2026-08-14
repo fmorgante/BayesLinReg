@@ -88,7 +88,9 @@ when \code{store_coefficient_cov = TRUE}. When
 returned. With multiple chains, \code{chain_id} identifies the origin of each
 retained draw when samples are stored. When the residual variance is
 learned, the result also records \code{residual_shape}, \code{residual_scale}, and
-\code{residual_scale_calibrated}. A calibrated residual prior additionally
+\code{residual_scale_calibrated}. \code{likelihood_df} records the dimension used
+in the residual-variance update and PVE variance normalization. A
+calibrated residual prior additionally
 records \code{expected_pve_total}, \code{reference_response_var}, and
 \code{reference_residual_var}. \code{SpikeMultiSlab} blocks additionally
 return per-predictor \code{component_probability} values, an

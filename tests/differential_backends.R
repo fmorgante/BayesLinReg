@@ -62,7 +62,8 @@ for (case in seq_len(4L)) {
   model <- summary_models[[case]]
   ETA <- list(model = model)
   arguments <- list(
-    n = n, Xty = Xty, ETA = ETA, yty = yty, residual_var = 1,
+    n = n, Xty = Xty, ETA = ETA, yty = yty,
+    likelihood_df = n - 1L, residual_var = 1,
     iterations = 70L, burnin = 20L, store_samples = TRUE,
     store_coefficient_cov = TRUE, compute_pve = TRUE
   )

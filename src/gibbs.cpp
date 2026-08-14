@@ -153,6 +153,7 @@ Rcpp::List blm_gibbs_rcpp_cpp(
     const bool store_samples,
     const bool store_coefficient_cov,
     const int effective_n,
+    const int likelihood_df,
     const bool fit_intercept,
     const Rcpp::NumericVector& intercept_x_mean,
     const double intercept_y_mean,
@@ -172,7 +173,8 @@ Rcpp::List blm_gibbs_rcpp_cpp(
     fixed_global_var,
     local_a, local_b, multi_gamma_list, multi_pi_alpha_list, multi_var_shape,
     multi_var_scale, fixed_var, learn_residual_var, fixed_residual_var, store_samples,
-    store_coefficient_cov, effective_n, fit_intercept, intercept_x_mean,
+    store_coefficient_cov, effective_n, likelihood_df, fit_intercept,
+    intercept_x_mean,
     intercept_y_mean, use_sufficient_statistics, summary_matrix, summary_Xty,
     summary_yty, center_observations, residual_sse_offset, compute_pve,
     pve_type_code, 1
@@ -209,6 +211,7 @@ Rcpp::List blm_gibbs_sparse_rcpp_cpp(
     const bool store_samples,
     const bool store_coefficient_cov,
     const int effective_n,
+    const int likelihood_df,
     const bool fit_intercept,
     const Rcpp::NumericVector& intercept_x_mean,
     const double intercept_y_mean,
@@ -228,7 +231,8 @@ Rcpp::List blm_gibbs_sparse_rcpp_cpp(
     fixed_global_var,
     local_a, local_b, multi_gamma_list, multi_pi_alpha_list, multi_var_shape,
     multi_var_scale, fixed_var, learn_residual_var, fixed_residual_var, store_samples,
-    store_coefficient_cov, effective_n, fit_intercept, intercept_x_mean,
+    store_coefficient_cov, effective_n, likelihood_df, fit_intercept,
+    intercept_x_mean,
     intercept_y_mean, true, summary_matrix, summary_Xty, summary_yty,
     true, 0.0, compute_pve, pve_type_code, 1
   );
@@ -264,6 +268,7 @@ Rcpp::List blm_gibbs_block_rcpp_cpp(
     const bool store_samples,
     const bool store_coefficient_cov,
     const int effective_n,
+    const int likelihood_df,
     const bool fit_intercept,
     const Rcpp::NumericVector& intercept_x_mean,
     const double intercept_y_mean,
@@ -300,7 +305,8 @@ Rcpp::List blm_gibbs_block_rcpp_cpp(
     fixed_global_var,
     local_a, local_b, multi_gamma_list, multi_pi_alpha_list, multi_var_shape,
     multi_var_scale, fixed_var, learn_residual_var, fixed_residual_var, store_samples,
-    store_coefficient_cov, effective_n, fit_intercept, intercept_x_mean,
+    store_coefficient_cov, effective_n, likelihood_df, fit_intercept,
+    intercept_x_mean,
     intercept_y_mean, true, summary_matrix, summary_Xty, summary_yty,
     true, 0.0, compute_pve, pve_type_code, nthreads
   );
@@ -336,6 +342,7 @@ Rcpp::List blm_gibbs_ld_rcpp_cpp(
     const bool store_samples,
     const bool store_coefficient_cov,
     const int effective_n,
+    const int likelihood_df,
     const bool fit_intercept,
     const Rcpp::NumericVector& intercept_x_mean,
     const double intercept_y_mean,
@@ -363,7 +370,8 @@ Rcpp::List blm_gibbs_ld_rcpp_cpp(
     fixed_global_var,
     local_a, local_b, multi_gamma_list, multi_pi_alpha_list, multi_var_shape,
     multi_var_scale, fixed_var, learn_residual_var, fixed_residual_var, store_samples,
-    store_coefficient_cov, effective_n, fit_intercept, intercept_x_mean,
+    store_coefficient_cov, effective_n, likelihood_df, fit_intercept,
+    intercept_x_mean,
     intercept_y_mean, true, summary_matrix, summary_Xty, summary_yty,
     true, 0.0, compute_pve, pve_type_code, nthreads
   );
@@ -399,6 +407,7 @@ Rcpp::List blm_gibbs_eigen_block_rcpp_cpp(
     const bool store_samples,
     const bool store_coefficient_cov,
     const int effective_n,
+    const int likelihood_df,
     const bool fit_intercept,
     const Rcpp::NumericVector& intercept_x_mean,
     const double intercept_y_mean,
@@ -425,7 +434,8 @@ Rcpp::List blm_gibbs_eigen_block_rcpp_cpp(
     fixed_global_var,
     local_a, local_b, multi_gamma_list, multi_pi_alpha_list, multi_var_shape,
     multi_var_scale, fixed_var, learn_residual_var, fixed_residual_var, store_samples,
-    store_coefficient_cov, effective_n, fit_intercept, intercept_x_mean,
+    store_coefficient_cov, effective_n, likelihood_df, fit_intercept,
+    intercept_x_mean,
     intercept_y_mean, true, summary_matrix, summary_Xty, summary_yty,
     true, 0.0, compute_pve, pve_type_code, nthreads
   );

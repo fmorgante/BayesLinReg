@@ -301,7 +301,10 @@ gwas_fit <- do.call(
 set.seed(1101)
 ss_fit <- suppressWarnings(do.call(
   blm_ss,
-  c(list(n = n, XtX = ss$XtX, Xty = ss$Xty, yty = ss$yty), common)
+  c(list(
+    n = n, XtX = ss$XtX, Xty = ss$Xty, yty = ss$yty,
+    likelihood_df = n - 1L
+  ), common)
 ))
 stopifnot(
   isTRUE(all.equal(gwas_fit$ETA, ss_fit$ETA, tolerance = 1e-10)),
@@ -312,7 +315,9 @@ stopifnot(
     gwas_fit$total_pve_mean, ss_fit$total_pve_mean, tolerance = 1e-10
   )),
   identical(gwas_fit$gwas_scale, "original"),
-  identical(gwas_fit$residual_df_gwas, n - 2)
+  identical(gwas_fit$residual_df_gwas, n - 2),
+  identical(gwas_fit$likelihood_df, n - 1L),
+  identical(ss_fit$likelihood_df, n - 1L)
 )
 
 # Runtime shrinkage is mathematically identical to supplying a pre-shrunk LD
@@ -416,7 +421,7 @@ crossed_samples <- crossed_samples[, ids, drop = FALSE]
 materialized_XtX <- as.matrix(Matrix::bdiag(ss$XtX))
 signal_variance <- rowSums(
   (crossed_samples %*% materialized_XtX) * crossed_samples
-) / n
+) / (n - 1L)
 expected_total_pve <- signal_variance / (signal_variance + 1)
 expected_standalone <- vapply(names(crossed_eta), function(block_name) {
   block_ids <- crossed_eta[[block_name]]$indices
@@ -426,7 +431,7 @@ expected_standalone <- vapply(names(crossed_eta), function(block_name) {
     (block_samples %*%
        materialized_XtX[block_indices, block_indices, drop = FALSE]) *
       block_samples
-  ) / n
+  ) / (n - 1L)
   block_signal / (signal_variance + 1)
 }, numeric(nrow(crossed_samples)))
 stopifnot(
@@ -781,7 +786,7 @@ for (pve_definition in c("standalone", "allocated")) {
     blm_ss,
     c(list(
       n = n, XtX = all_ss$XtX, Xty = all_ss$Xty, yty = all_ss$yty,
-      reference_response_var = 2
+      reference_response_var = 2, likelihood_df = n - 1L
     ), all_common)
   ))
   stopifnot(
@@ -877,7 +882,7 @@ if (any(parallel_test_flags == "true")) {
     blm_ss,
     c(list(
       n = n, XtX = all_ss$XtX, Xty = all_ss$Xty, yty = all_ss$yty,
-      reference_response_var = 2
+      reference_response_var = 2, likelihood_df = n - 1L
     ),
       chain_common)
   ))
@@ -959,7 +964,8 @@ irregular_ss_fit <- suppressWarnings(do.call(
   blm_ss,
   c(list(
     n = n, XtX = irregular_ss$XtX,
-    Xty = irregular_ss$Xty, yty = irregular_ss$yty
+    Xty = irregular_ss$Xty, yty = irregular_ss$yty,
+    likelihood_df = n - 1L
   ), irregular_arguments)
 ))
 stopifnot(

@@ -31,7 +31,7 @@
 #'   \eqn{O(pq^2)} cross-product.
 #' @param nthreads Number of threads used within one Rcpp chain for list eigen
 #'   input. Values above one require `nchains = 1`.
-#' @inheritParams blm
+#' @inheritParams blm_ss
 #'
 #' @return A `blm_fit` object. In addition to the usual fields, it records
 #'   `XtX_eigen_rank`, `XtX_prop_var`, `XtX_approximate`, and
@@ -109,7 +109,7 @@ blm_ss_eigen <- function(
     verbose = FALSE, nchains = 1L, nthreads = 1L, store_samples = FALSE,
     store_coefficient_cov = FALSE, check_eigenvectors = FALSE,
     compute_pve = FALSE,
-    pve_type = c("standalone", "allocated")) {
+    pve_type = c("standalone", "allocated"), likelihood_df = NULL) {
   pve_controls <- .validate_pve_controls(compute_pve, pve_type)
   compute_pve <- pve_controls$compute_pve
   pve_type <- pve_controls$pve_type
@@ -152,6 +152,7 @@ blm_ss_eigen <- function(
   predictor_names <- statistics$predictor_names
   list_eigen <- statistics$block_input
   fit_intercept <- !is.null(X_means)
+  likelihood_df <- .resolve_likelihood_df(n, fit_intercept, likelihood_df)
 
   if (is.null(yty) && is.null(residual_var)) {
     stop(
@@ -398,6 +399,7 @@ blm_ss_eigen <- function(
     compute_pve = compute_pve,
     pve_type = pve_type,
     effective_n = n,
+    likelihood_df = likelihood_df,
     fit_intercept = fit_intercept,
     intercept_x_mean = if (fit_intercept) {
       X_means[source_order] / scale_order
@@ -431,7 +433,8 @@ blm_ss_eigen <- function(
       residual_prior$residual_scale_calibrated,
     expected_pve_total = residual_prior$expected_pve_total,
     reference_response_var = reference_response_var,
-    reference_residual_var = residual_prior$reference_residual_var
+    reference_residual_var = residual_prior$reference_residual_var,
+    likelihood_df = likelihood_df
   )
   eigen_rank_by_block <- vapply(eigenvalue_blocks, length, integer(1))
   retained_trace <- vapply(eigenvalue_blocks, sum, numeric(1))

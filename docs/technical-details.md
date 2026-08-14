@@ -308,7 +308,10 @@ $$
 $$
 
 The Rcpp sampler uses an independent implementation of the Hörmann--Leydold
-(2014) GIG rejection algorithms. For block-parallel sufficient-statistic fits,
+(2014) GIG rejection algorithms. Its small-parameter envelope is evaluated on
+the log scale, and positive gamma auxiliaries are bounded at the smallest
+positive normal double if a valid draw underflows numerically. For
+block-parallel sufficient-statistic fits,
 conditionally independent local-variance updates run concurrently across
 computational blocks using per-block C++ random-number streams. Local auxiliary
 and shared global-variance updates remain serial after the workers join. The
@@ -323,12 +326,14 @@ $$
 \sigma_e^2\sim\mathrm{IG}(a_e,b_e),
 $$
 
-where `residual_shape` $=a_e$ and `residual_scale` $=b_e$. Let
-$n_c=n-1$ when an intercept is fitted and $n_c=n$ otherwise. Its update is
+where `residual_shape` $=a_e$ and `residual_scale` $=b_e$. Let $d_L$ denote
+the likelihood dimension recorded as `likelihood_df`. For ordinary raw-data
+fits and sufficient statistics with an identified intercept, $d_L=n-1$; for
+uncentered sufficient statistics without an intercept, $d_L=n$. Its update is
 
 $$
 \sigma_e^2\mid-\sim\mathrm{IG}(
-  a_e+\frac{n_c}{2},
+  a_e+\frac{d_L}{2},
   b_e+\frac12\|y_c-Z\theta\|^2
 ).
 $$
@@ -658,7 +663,11 @@ $$
 The default $\nu_{\mathrm{GWAS}}=n-2$ corresponds to an intercept and one
 tested predictor. This input is separate from `residual_var`,
 `residual_shape`, and `residual_scale`, which describe residual variation in
-the fitted joint Bayesian regression.
+the fitted joint Bayesian regression. It is also separate from the joint
+model's `likelihood_df`. Because the reconstructed GWAS statistics are
+centered, `blm_gwas()` uses `likelihood_df = n - 1` for the residual-variance
+update and PVE normalization even though the phenotype mean is unavailable and
+no intercept is returned.
 
 On the standardized working scale,
 
@@ -790,7 +799,8 @@ The package:
 - validates symmetry, finite values, dimensions, names, and block partitions;
 - periodically reconstructs residual or cross-product state;
 - uses log-scale component probabilities and stable logistic calculations;
-- bounds tiny GIG $\chi$ parameters away from zero;
+- bounds tiny GIG parameters and gamma auxiliaries away from zero;
+- rejects execution-control values that exceed the C++ integer range;
 - clamps residual SSE and PVE quadratic forms only when their negative values
   are within scale-aware floating-point tolerances, and stops when a
   reconstructed residual SSE is materially negative; and
@@ -809,15 +819,19 @@ coefficient covariance matrices.
 
 With `store_samples = TRUE`, retained coefficient, variance, inclusion,
 component, PVE, intercept, and residual-variance draws are stored as applicable.
-With `store_samples = FALSE`, means and variances are accumulated online.
+With `store_samples = FALSE`, means and centered second moments are accumulated
+online with Welford updates. Multiple chains are combined with Chan's parallel
+moment formulas, including the between-chain contribution to coefficient
+covariances. This avoids the cancellation inherent in subtracting squared raw
+sums when a posterior mean is large.
 Convergence conversion excludes fixed residual and coefficient-prior
 variances, which are stored as constant values for posterior reporting but are
 not sampled parameters. If a fit has no remaining sampled scalar or PVE
 quantity, convergence assessment reports that no diagnostic target is
 available.
 
-`store_coefficient_cov = TRUE` additionally accumulates a coefficient
-cross-product for every retained draw within each `ETA` block, requiring
+`store_coefficient_cov = TRUE` additionally accumulates a centered coefficient
+second-moment matrix for every retained draw within each `ETA` block, requiring
 $O(\sum_b p_b^2)$ storage and work. Turning it off retains only marginal
 coefficient variances.
 The scalable `summary()` method reports block-level summaries by default and

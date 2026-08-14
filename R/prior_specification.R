@@ -10,13 +10,12 @@
   }
 }
 
-.variance_from_sums <- function(sum, sum_sq, number_of_draws) {
-  variance <- (sum_sq - sum^2 / number_of_draws) / (number_of_draws - 1)
-  max(0, variance)
+.variance_from_m2 <- function(m2, number_of_draws) {
+  pmax(0, m2 / (number_of_draws - 1))
 }
 
-.covariance_from_sums <- function(sum, crossprod, number_of_draws) {
-  (crossprod - tcrossprod(sum) / number_of_draws) / (number_of_draws - 1)
+.covariance_from_m2 <- function(m2, number_of_draws) {
+  m2 / (number_of_draws - 1)
 }
 
 .validate_local_shape <- function(local_shape) {

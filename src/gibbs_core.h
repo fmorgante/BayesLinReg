@@ -13,6 +13,16 @@ namespace bayeslinreg {
 
 double draw_gig(double lambda, double chi, double psi);
 
+inline void update_online_moment(
+    const double value,
+    const int count,
+    double& mean,
+    double& m2) {
+  const double delta = value - mean;
+  mean += delta / static_cast<double>(count);
+  m2 += delta * (value - mean);
+}
+
 template <typename SummaryMatrix>
 Rcpp::List blm_gibbs_core(
     const Rcpp::NumericVector& y,
@@ -45,6 +55,7 @@ Rcpp::List blm_gibbs_core(
     const bool store_samples,
     const bool store_coefficient_cov,
     const int effective_n,
+    const int likelihood_df,
     const bool fit_intercept,
     const Rcpp::NumericVector& intercept_x_mean,
     const double intercept_y_mean,
@@ -185,75 +196,76 @@ Rcpp::List blm_gibbs_core(
   Rcpp::NumericMatrix multi_var_samples(
     stored_rows, has_spike_multi_slab ? number_of_blocks : 0
   );
-  Rcpp::NumericVector coefficient_sum(p);
-  Rcpp::NumericVector coefficient_sum_sq(p);
+  Rcpp::NumericVector coefficient_mean(p);
+  Rcpp::NumericVector coefficient_m2(p);
+  std::vector<double> coefficient_delta(p, 0.0);
   // Only within-prior-block covariance matrices are returned. Accumulate the
   // matching block cross-products rather than a global p-by-p matrix.
-  Rcpp::List coefficient_crossprod(number_of_blocks);
+  Rcpp::List coefficient_cov_m2(number_of_blocks);
   for (int block = 0; block < number_of_blocks; ++block) {
     if (!store_samples && store_coefficient_cov) {
       const int block_size = static_cast<int>(block_predictors[block].size());
-      coefficient_crossprod[block] = Rcpp::NumericMatrix(
+      coefficient_cov_m2[block] = Rcpp::NumericMatrix(
         block_size, block_size
       );
     } else {
-      coefficient_crossprod[block] = R_NilValue;
+      coefficient_cov_m2[block] = R_NilValue;
     }
   }
-  double intercept_sum = 0.0;
-  double intercept_sum_sq = 0.0;
-  double residual_var_sum = 0.0;
-  double residual_var_sum_sq = 0.0;
-  Rcpp::NumericVector block_pve_sum(
+  double intercept_mean = 0.0;
+  double intercept_m2 = 0.0;
+  double residual_var_mean = 0.0;
+  double residual_var_m2 = 0.0;
+  Rcpp::NumericVector block_pve_mean(
     compute_pve ? number_of_blocks : 0
   );
-  Rcpp::NumericVector block_pve_sum_sq(
+  Rcpp::NumericVector block_pve_m2(
     compute_pve ? number_of_blocks : 0
   );
-  double total_pve_sum = 0.0;
-  double total_pve_sum_sq = 0.0;
-  double cross_block_pve_sum = 0.0;
-  double cross_block_pve_sum_sq = 0.0;
-  Rcpp::NumericVector normal_var_sum(
+  double total_pve_mean = 0.0;
+  double total_pve_m2 = 0.0;
+  double cross_block_pve_mean = 0.0;
+  double cross_block_pve_m2 = 0.0;
+  Rcpp::NumericVector normal_var_mean(
     has_normal ? number_of_blocks : 0
   );
-  Rcpp::NumericVector normal_var_sum_sq(
+  Rcpp::NumericVector normal_var_m2(
     has_normal ? number_of_blocks : 0
   );
   Rcpp::NumericVector inclusion_sum(
     model_size[bayeslinreg::prior_model_index(PriorModel::SpikeSlab)]
   );
-  Rcpp::NumericVector pi_sum(
+  Rcpp::NumericVector pi_mean(
     has_spike_slab ? number_of_blocks : 0
   );
-  Rcpp::NumericVector pi_sum_sq(
+  Rcpp::NumericVector pi_m2(
     has_spike_slab ? number_of_blocks : 0
   );
-  Rcpp::NumericVector slab_var_sum(
+  Rcpp::NumericVector slab_var_mean(
     has_spike_slab ? number_of_blocks : 0
   );
-  Rcpp::NumericVector slab_var_sum_sq(
+  Rcpp::NumericVector slab_var_m2(
     has_spike_slab ? number_of_blocks : 0
   );
-  Rcpp::NumericVector local_var_sum(
+  Rcpp::NumericVector local_var_mean(
     model_size[bayeslinreg::prior_model_index(PriorModel::GlobalLocal)]
   );
-  Rcpp::NumericVector local_var_sum_sq(
+  Rcpp::NumericVector local_var_m2(
     model_size[bayeslinreg::prior_model_index(PriorModel::GlobalLocal)]
   );
-  Rcpp::NumericVector tau_sq_sum(
+  Rcpp::NumericVector tau_sq_mean(
     has_global_local ? number_of_blocks : 0
   );
-  Rcpp::NumericVector tau_sq_sum_sq(
+  Rcpp::NumericVector tau_sq_m2(
     has_global_local ? number_of_blocks : 0
   );
   Rcpp::List multi_component_sum(number_of_blocks);
-  Rcpp::List multi_pi_sum(number_of_blocks);
-  Rcpp::List multi_pi_sum_sq(number_of_blocks);
-  Rcpp::NumericVector multi_var_sum(
+  Rcpp::List multi_pi_mean(number_of_blocks);
+  Rcpp::List multi_pi_m2(number_of_blocks);
+  Rcpp::NumericVector multi_var_mean(
     has_spike_multi_slab ? number_of_blocks : 0
   );
-  Rcpp::NumericVector multi_var_sum_sq(
+  Rcpp::NumericVector multi_var_m2(
     has_spike_multi_slab ? number_of_blocks : 0
   );
   std::vector<double> coefficient(p, 0.0);
@@ -345,19 +357,18 @@ Rcpp::List blm_gibbs_core(
         multi_component_sum[block] = Rcpp::NumericMatrix(
           predictors.size(), alpha_values.size()
         );
-        multi_pi_sum[block] = Rcpp::NumericVector(alpha_values.size());
-        multi_pi_sum_sq[block] = Rcpp::NumericVector(alpha_values.size());
+        multi_pi_mean[block] = Rcpp::NumericVector(alpha_values.size());
+        multi_pi_m2[block] = Rcpp::NumericVector(alpha_values.size());
       }
     } else {
       multi_pi_samples[block] = R_NilValue;
       multi_component_sum[block] = R_NilValue;
-      multi_pi_sum[block] = R_NilValue;
-      multi_pi_sum_sq[block] = R_NilValue;
+      multi_pi_mean[block] = R_NilValue;
+      multi_pi_m2[block] = R_NilValue;
     }
   }
   const double posterior_shape =
-    residual_shape +
-      static_cast<double>(effective_n - (fit_intercept ? 1 : 0)) / 2.0;
+    residual_shape + static_cast<double>(likelihood_df) / 2.0;
   int retained_index = 0;
   int next_progress_percent = 10;
   int last_reported_iteration = 0;
@@ -766,6 +777,9 @@ Rcpp::List blm_gibbs_core(
             local_a[block] + local_b[block],
             1.0 / (1.0 + local_var[local_index])
           );
+          local_aux[local_index] = std::max(
+            local_aux[local_index], std::numeric_limits<double>::min()
+          );
         }
 
         if (Rcpp::NumericVector::is_na(fixed_global_var[block])) {
@@ -775,15 +789,19 @@ Rcpp::List blm_gibbs_core(
             tau_rate += coefficient[j] * coefficient[j] /
               (2.0 * local_var[model_local_index[j]]);
           }
-          tau_sq[block] = 1.0 / R::rgamma(
+          const double tau_precision = std::max(R::rgamma(
             (static_cast<double>(predictors.size()) + 1.0) / 2.0,
             1.0 / tau_rate
-          );
+          ), std::numeric_limits<double>::min());
+          tau_sq[block] = 1.0 / tau_precision;
           const double global_aux_rate =
             1.0 / (global_scale[block] * global_scale[block]) +
             1.0 / tau_sq[block];
-          global_aux[block] =
-            1.0 / R::rgamma(1.0, 1.0 / global_aux_rate);
+          const double global_aux_precision = std::max(
+            R::rgamma(1.0, 1.0 / global_aux_rate),
+            std::numeric_limits<double>::min()
+          );
+          global_aux[block] = 1.0 / global_aux_precision;
         }
       }
     }
@@ -872,9 +890,7 @@ Rcpp::List blm_gibbs_core(
             }
           }
         }
-        const double variance_df = static_cast<double>(
-          effective_n - (fit_intercept ? 1 : 0)
-        );
+        const double variance_df = static_cast<double>(likelihood_df);
         const double total_signal_variance = total_sum_squares / variance_df;
         const double pve_denominator = total_signal_variance + residual_var;
         double standalone_total = 0.0;
@@ -891,7 +907,7 @@ Rcpp::List blm_gibbs_core(
           (total_sum_squares - standalone_total) /
             variance_df / pve_denominator;
       }
-      double intercept_mean = intercept_y_mean;
+      double intercept_location = intercept_y_mean;
       for (int j = 0; j < p; ++j) {
         const int block = block_id[j] - 1;
         const PriorModel model = prior_models[block];
@@ -911,11 +927,11 @@ Rcpp::List blm_gibbs_core(
               multi_component[local_index] + 1;
           }
         }
-        intercept_mean -= intercept_x_mean[j] * coefficient[j];
+        intercept_location -= intercept_x_mean[j] * coefficient[j];
       }
       const double intercept_draw = fit_intercept
         ? R::rnorm(
-            intercept_mean,
+            intercept_location,
             std::sqrt(residual_var / effective_n)
           )
         : 0.0;
@@ -967,18 +983,26 @@ Rcpp::List blm_gibbs_core(
           }
         }
       } else {
+        const int online_count = retained_index + 1;
         for (int j = 0; j < p; ++j) {
-          coefficient_sum[j] += coefficient[j];
-          coefficient_sum_sq[j] += coefficient[j] * coefficient[j];
+          const double delta = coefficient[j] - coefficient_mean[j];
+          coefficient_delta[j] = delta;
+          coefficient_mean[j] += delta / static_cast<double>(online_count);
+          coefficient_m2[j] +=
+            delta * (coefficient[j] - coefficient_mean[j]);
           const int block = block_id[j] - 1;
           const PriorModel model = prior_models[block];
           const int local_index = model_local_index[j];
           if (model == PriorModel::SpikeSlab) {
             inclusion_sum[local_index] += inclusion[local_index];
           } else if (model == PriorModel::GlobalLocal) {
-            local_var_sum[local_index] += local_var[local_index];
-            local_var_sum_sq[local_index] +=
-              local_var[local_index] * local_var[local_index];
+            double mean = local_var_mean[local_index];
+            double m2 = local_var_m2[local_index];
+            update_online_moment(
+              local_var[local_index], online_count, mean, m2
+            );
+            local_var_mean[local_index] = mean;
+            local_var_m2[local_index] = m2;
           } else if (model == PriorModel::SpikeMultiSlab) {
             Rcpp::NumericMatrix block_component_sum =
               multi_component_sum[block];
@@ -988,63 +1012,94 @@ Rcpp::List blm_gibbs_core(
           }
         }
         if (store_coefficient_cov) {
+          const double covariance_factor =
+            static_cast<double>(online_count - 1) / online_count;
           for (int block = 0; block < number_of_blocks; ++block) {
             const std::vector<int>& predictors = block_predictors[block];
-            Rcpp::NumericMatrix crossproduct = coefficient_crossprod[block];
+            Rcpp::NumericMatrix covariance_m2 = coefficient_cov_m2[block];
             const int block_size = static_cast<int>(predictors.size());
             for (int column = 0; column < block_size; ++column) {
-              const double column_coefficient =
-                coefficient[predictors[column]];
-              double* destination = crossproduct.begin() +
+              const double column_delta =
+                coefficient_delta[predictors[column]];
+              double* destination = covariance_m2.begin() +
                 static_cast<std::size_t>(block_size) * column;
               for (int row = 0; row < block_size; ++row) {
-                destination[row] +=
-                  coefficient[predictors[row]] * column_coefficient;
+                destination[row] += covariance_factor *
+                  coefficient_delta[predictors[row]] * column_delta;
               }
             }
           }
         }
-        intercept_sum += intercept_draw;
-        intercept_sum_sq += intercept_draw * intercept_draw;
-        residual_var_sum += residual_var;
-        residual_var_sum_sq += residual_var * residual_var;
+        update_online_moment(
+          intercept_draw, online_count, intercept_mean, intercept_m2
+        );
+        update_online_moment(
+          residual_var, online_count, residual_var_mean, residual_var_m2
+        );
         if (compute_pve) {
           for (int block = 0; block < number_of_blocks; ++block) {
-            block_pve_sum[block] += block_pve[block];
-            block_pve_sum_sq[block] += block_pve[block] * block_pve[block];
+            double mean = block_pve_mean[block];
+            double m2 = block_pve_m2[block];
+            update_online_moment(block_pve[block], online_count, mean, m2);
+            block_pve_mean[block] = mean;
+            block_pve_m2[block] = m2;
           }
-          total_pve_sum += total_pve;
-          total_pve_sum_sq += total_pve * total_pve;
-          cross_block_pve_sum += cross_block_pve;
-          cross_block_pve_sum_sq +=
-            cross_block_pve * cross_block_pve;
+          update_online_moment(
+            total_pve, online_count, total_pve_mean, total_pve_m2
+          );
+          update_online_moment(
+            cross_block_pve, online_count,
+            cross_block_pve_mean, cross_block_pve_m2
+          );
         }
         for (int block = 0; block < number_of_blocks; ++block) {
           const PriorModel model = prior_models[block];
           if (model == PriorModel::Normal) {
-            normal_var_sum[block] += normal_var[block];
-            normal_var_sum_sq[block] +=
-              normal_var[block] * normal_var[block];
+            double mean = normal_var_mean[block];
+            double m2 = normal_var_m2[block];
+            update_online_moment(normal_var[block], online_count, mean, m2);
+            normal_var_mean[block] = mean;
+            normal_var_m2[block] = m2;
           } else if (model == PriorModel::SpikeSlab) {
-            pi_sum[block] += pi[block];
-            pi_sum_sq[block] += pi[block] * pi[block];
-            slab_var_sum[block] += slab_var[block];
-            slab_var_sum_sq[block] += slab_var[block] * slab_var[block];
+            double pi_block_mean = pi_mean[block];
+            double pi_block_m2 = pi_m2[block];
+            update_online_moment(
+              pi[block], online_count, pi_block_mean, pi_block_m2
+            );
+            pi_mean[block] = pi_block_mean;
+            pi_m2[block] = pi_block_m2;
+            double variance_mean = slab_var_mean[block];
+            double variance_m2 = slab_var_m2[block];
+            update_online_moment(
+              slab_var[block], online_count, variance_mean, variance_m2
+            );
+            slab_var_mean[block] = variance_mean;
+            slab_var_m2[block] = variance_m2;
           } else if (model == PriorModel::GlobalLocal) {
-            tau_sq_sum[block] += tau_sq[block];
-            tau_sq_sum_sq[block] += tau_sq[block] * tau_sq[block];
+            double mean = tau_sq_mean[block];
+            double m2 = tau_sq_m2[block];
+            update_online_moment(tau_sq[block], online_count, mean, m2);
+            tau_sq_mean[block] = mean;
+            tau_sq_m2[block] = m2;
           } else if (model == PriorModel::SpikeMultiSlab) {
-            Rcpp::NumericVector block_pi_sum = multi_pi_sum[block];
-            Rcpp::NumericVector block_pi_sum_sq = multi_pi_sum_sq[block];
+            Rcpp::NumericVector block_pi_mean = multi_pi_mean[block];
+            Rcpp::NumericVector block_pi_m2 = multi_pi_m2[block];
             for (int component = 0;
                  component < static_cast<int>(multi_pi[block].size());
                  ++component) {
-              block_pi_sum[component] += multi_pi[block][component];
-              block_pi_sum_sq[component] +=
-                multi_pi[block][component] * multi_pi[block][component];
+              double mean = block_pi_mean[component];
+              double m2 = block_pi_m2[component];
+              update_online_moment(
+                multi_pi[block][component], online_count, mean, m2
+              );
+              block_pi_mean[component] = mean;
+              block_pi_m2[component] = m2;
             }
-            multi_var_sum[block] += multi_var[block];
-            multi_var_sum_sq[block] += multi_var[block] * multi_var[block];
+            double mean = multi_var_mean[block];
+            double m2 = multi_var_m2[block];
+            update_online_moment(multi_var[block], online_count, mean, m2);
+            multi_var_mean[block] = mean;
+            multi_var_m2[block] = m2;
           }
         }
       }
@@ -1053,7 +1108,7 @@ Rcpp::List blm_gibbs_core(
 
     if (next_progress_percent <= 100) {
       int threshold = static_cast<int>(std::ceil(
-        iterations * next_progress_percent / 100.0
+        static_cast<double>(iterations) * next_progress_percent / 100.0
       ));
       if (iteration >= threshold) {
         do {
@@ -1062,7 +1117,7 @@ Rcpp::List blm_gibbs_core(
             break;
           }
           threshold = static_cast<int>(std::ceil(
-            iterations * next_progress_percent / 100.0
+            static_cast<double>(iterations) * next_progress_percent / 100.0
           ));
         } while (iteration >= threshold);
         progress_callback(
@@ -1099,37 +1154,37 @@ Rcpp::List blm_gibbs_core(
   }
   Rcpp::List summaries = Rcpp::List::create(
     Rcpp::Named("number_of_draws") = number_of_draws,
-    Rcpp::Named("coefficient_sum") = coefficient_sum,
-    Rcpp::Named("coefficient_sum_sq") = coefficient_sum_sq,
-    Rcpp::Named("intercept_sum") = intercept_sum,
-    Rcpp::Named("intercept_sum_sq") = intercept_sum_sq,
-    Rcpp::Named("residual_var_sum") = residual_var_sum,
-    Rcpp::Named("residual_var_sum_sq") = residual_var_sum_sq,
-    Rcpp::Named("normal_var_sum") = normal_var_sum,
-    Rcpp::Named("normal_var_sum_sq") = normal_var_sum_sq,
+    Rcpp::Named("coefficient_mean") = coefficient_mean,
+    Rcpp::Named("coefficient_m2") = coefficient_m2,
+    Rcpp::Named("intercept_mean") = intercept_mean,
+    Rcpp::Named("intercept_m2") = intercept_m2,
+    Rcpp::Named("residual_var_mean") = residual_var_mean,
+    Rcpp::Named("residual_var_m2") = residual_var_m2,
+    Rcpp::Named("normal_var_mean") = normal_var_mean,
+    Rcpp::Named("normal_var_m2") = normal_var_m2,
     Rcpp::Named("inclusion_sum") = inclusion_sum,
-    Rcpp::Named("pi_sum") = pi_sum,
-    Rcpp::Named("pi_sum_sq") = pi_sum_sq,
-    Rcpp::Named("slab_var_sum") = slab_var_sum,
-    Rcpp::Named("slab_var_sum_sq") = slab_var_sum_sq,
-    Rcpp::Named("local_var_sum") = local_var_sum,
-    Rcpp::Named("local_var_sum_sq") = local_var_sum_sq,
-    Rcpp::Named("tau_sq_sum") = tau_sq_sum,
-    Rcpp::Named("tau_sq_sum_sq") = tau_sq_sum_sq,
+    Rcpp::Named("pi_mean") = pi_mean,
+    Rcpp::Named("pi_m2") = pi_m2,
+    Rcpp::Named("slab_var_mean") = slab_var_mean,
+    Rcpp::Named("slab_var_m2") = slab_var_m2,
+    Rcpp::Named("local_var_mean") = local_var_mean,
+    Rcpp::Named("local_var_m2") = local_var_m2,
+    Rcpp::Named("tau_sq_mean") = tau_sq_mean,
+    Rcpp::Named("tau_sq_m2") = tau_sq_m2,
     Rcpp::Named("multi_component_sum") = multi_component_sum,
-    Rcpp::Named("multi_pi_sum") = multi_pi_sum,
-    Rcpp::Named("multi_pi_sum_sq") = multi_pi_sum_sq,
-    Rcpp::Named("multi_var_sum") = multi_var_sum,
-    Rcpp::Named("multi_var_sum_sq") = multi_var_sum_sq,
-    Rcpp::Named("block_pve_sum") = block_pve_sum,
-    Rcpp::Named("block_pve_sum_sq") = block_pve_sum_sq,
-    Rcpp::Named("total_pve_sum") = total_pve_sum,
-    Rcpp::Named("total_pve_sum_sq") = total_pve_sum_sq,
-    Rcpp::Named("cross_block_pve_sum") = cross_block_pve_sum,
-    Rcpp::Named("cross_block_pve_sum_sq") = cross_block_pve_sum_sq
+    Rcpp::Named("multi_pi_mean") = multi_pi_mean,
+    Rcpp::Named("multi_pi_m2") = multi_pi_m2,
+    Rcpp::Named("multi_var_mean") = multi_var_mean,
+    Rcpp::Named("multi_var_m2") = multi_var_m2,
+    Rcpp::Named("block_pve_mean") = block_pve_mean,
+    Rcpp::Named("block_pve_m2") = block_pve_m2,
+    Rcpp::Named("total_pve_mean") = total_pve_mean,
+    Rcpp::Named("total_pve_m2") = total_pve_m2,
+    Rcpp::Named("cross_block_pve_mean") = cross_block_pve_mean,
+    Rcpp::Named("cross_block_pve_m2") = cross_block_pve_m2
   );
   if (store_coefficient_cov) {
-    summaries["coefficient_crossprod"] = coefficient_crossprod;
+    summaries["coefficient_cov_m2"] = coefficient_cov_m2;
   }
   return summaries;
 }

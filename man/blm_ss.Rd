@@ -29,7 +29,8 @@ blm_ss(
   XtX_storage = c("auto", "speed", "memory"),
   XtX_memory_limit = 1024^3,
   compute_pve = FALSE,
-  pve_type = c("standalone", "allocated")
+  pve_type = c("standalone", "allocated"),
+  likelihood_df = NULL
 )
 }
 \arguments{
@@ -124,6 +125,12 @@ block's fitted-value variance by total fitted variance plus residual
 variance. \code{"allocated"} additionally allocates cross-block covariance so
 that block PVE values sum to total PVE. It is used only when
 \code{compute_pve = TRUE}.}
+
+\item{likelihood_df}{Optional positive integer no greater than \code{n}, giving
+the likelihood dimension used in residual-variance and PVE calculations.
+The default is \code{n - 1} when \code{X_means} and \code{y_mean} identify an intercept,
+and \code{n} otherwise. For centered sufficient statistics supplied without
+means, set \code{likelihood_df = n - 1} explicitly.}
 }
 \value{
 A fitted object with the same block-specific posterior summaries as

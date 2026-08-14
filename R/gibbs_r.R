@@ -15,6 +15,12 @@
   GIGrvg::rgig(n = n, lambda = lambda, chi = chi, psi = psi)
 }
 
+.update_online_moments <- function(value, count, mean, m2) {
+  delta <- value - mean
+  mean <- mean + delta / count
+  list(mean = mean, m2 = m2 + delta * (value - mean), delta = delta)
+}
+
 .guard_reconstructed_sse <- function(sse, yty, linear, quadratic,
                                      iteration) {
   scale <- max(1, abs(yty), 2 * abs(linear), abs(quadratic))
@@ -60,7 +66,8 @@
                        fixed_var = NULL,
                        store_samples = TRUE,
                        store_coefficient_cov = TRUE,
-                       effective_n = NULL, fit_intercept = TRUE,
+                       effective_n = NULL, likelihood_df = NULL,
+                       fit_intercept = TRUE,
                        intercept_x_mean = NULL, intercept_y_mean = NULL,
                        XtX = NULL, XtX_center = NULL, Xty = NULL, yty = NULL,
                        center_observations = TRUE,
@@ -126,6 +133,9 @@
     y_centered <- if (center_observations) y - y_mean else y
     x_squared <- colSums(x_centered^2)
   }
+  likelihood_df <- .resolve_likelihood_df(
+    effective_n, fit_intercept, likelihood_df
+  )
 
   number_of_draws <- length(retained_iterations)
   if (store_samples) {
@@ -138,15 +148,15 @@
     intercept_samples <- numeric(number_of_draws)
     residual_var_samples <- numeric(number_of_draws)
   } else {
-    coefficient_sum <- numeric(number_of_predictors)
-    coefficient_sum_sq <- numeric(number_of_predictors)
+    coefficient_mean <- numeric(number_of_predictors)
+    coefficient_m2 <- numeric(number_of_predictors)
     if (store_coefficient_cov) {
-      coefficient_crossprod <- lapply(block_predictors, function(predictors) {
+      coefficient_cov_m2 <- lapply(block_predictors, function(predictors) {
         matrix(0, length(predictors), length(predictors))
       })
     }
-    intercept_sum <- intercept_sum_sq <- 0
-    residual_var_sum <- residual_var_sum_sq <- 0
+    intercept_mean <- intercept_m2 <- 0
+    residual_var_mean <- residual_var_m2 <- 0
   }
   if (compute_pve) {
     if (store_samples) {
@@ -156,9 +166,9 @@
       total_pve_samples <- cross_block_pve_samples <-
         numeric(number_of_draws)
     } else {
-      block_pve_sum <- block_pve_sum_sq <- numeric(number_of_blocks)
-      total_pve_sum <- total_pve_sum_sq <- 0
-      cross_block_pve_sum <- cross_block_pve_sum_sq <- 0
+      block_pve_mean <- block_pve_m2 <- numeric(number_of_blocks)
+      total_pve_mean <- total_pve_m2 <- 0
+      cross_block_pve_mean <- cross_block_pve_m2 <- 0
     }
   }
   has_normal <- any(block_model == 0L)
@@ -169,7 +179,7 @@
     if (store_samples) {
       normal_var_samples <- matrix(NA_real_, number_of_draws, number_of_blocks)
     } else {
-      normal_var_sum <- normal_var_sum_sq <- numeric(number_of_blocks)
+      normal_var_mean <- normal_var_m2 <- numeric(number_of_blocks)
     }
     normal_var <- ifelse(
       is.na(fixed_var), normal_scale / (normal_shape + 1), fixed_var
@@ -187,8 +197,8 @@
       slab_var_samples <- matrix(NA_real_, number_of_draws, number_of_blocks)
     } else {
       inclusion_sum <- numeric(length(model_predictors[[2L]]))
-      pi_sum <- pi_sum_sq <- numeric(number_of_blocks)
-      slab_var_sum <- slab_var_sum_sq <- numeric(number_of_blocks)
+      pi_mean <- pi_m2 <- numeric(number_of_blocks)
+      slab_var_mean <- slab_var_m2 <- numeric(number_of_blocks)
     }
     inclusion <- rep.int(1L, length(model_predictors[[2L]]))
     pi <- pi_alpha / (pi_alpha + pi_beta)
@@ -206,9 +216,9 @@
       )
       tau_sq_samples <- matrix(NA_real_, number_of_draws, number_of_blocks)
     } else {
-      local_var_sum <- local_var_sum_sq <-
+      local_var_mean <- local_var_m2 <-
         numeric(length(model_predictors[[3L]]))
-      tau_sq_sum <- tau_sq_sum_sq <- numeric(number_of_blocks)
+      tau_sq_mean <- tau_sq_m2 <- numeric(number_of_blocks)
     }
     local_var <- rep(1, length(model_predictors[[3L]]))
     local_aux <- rep(1, length(model_predictors[[3L]]))
@@ -248,9 +258,9 @@
           NULL
         }
       })
-      multi_pi_sum <- lapply(multi_pi, function(value) numeric(length(value)))
-      multi_pi_sum_sq <- lapply(multi_pi, function(value) numeric(length(value)))
-      multi_var_sum <- multi_var_sum_sq <- numeric(number_of_blocks)
+      multi_pi_mean <- lapply(multi_pi, function(value) numeric(length(value)))
+      multi_pi_m2 <- lapply(multi_pi, function(value) numeric(length(value)))
+      multi_var_mean <- multi_var_m2 <- numeric(number_of_blocks)
     }
   }
 
@@ -259,14 +269,13 @@
   learn_residual_var <- is.null(residual_var)
   if (learn_residual_var) {
     residual_var <- residual_scale / (residual_shape + 1)
-    residual_posterior_shape <- residual_shape +
-      (effective_n - as.integer(fit_intercept)) / 2
+    residual_posterior_shape <- residual_shape + likelihood_df / 2
   }
   retained_index <- 1L
   progress_thresholds <- if (!is.null(progress_callback)) {
     unique(pmax(
       1L,
-      as.integer((iterations * seq_len(10L) + 9) %/% 10)
+      as.integer((as.double(iterations) * seq_len(10L) + 9) %/% 10)
     ))
   } else {
     integer(0)
@@ -477,23 +486,35 @@
           },
           numeric(1)
         )
-        local_aux[local_indices] <- stats::rgamma(
-          length(predictors),
-          shape = local_a[block] + local_b[block],
-          rate = 1 + local_var[local_indices]
+        local_aux[local_indices] <- pmax(
+          stats::rgamma(
+            length(predictors),
+            shape = local_a[block] + local_b[block],
+            rate = 1 + local_var[local_indices]
+          ),
+          .Machine$double.xmin
         )
         if (is.na(fixed_global_var[block])) {
-          tau_sq[block] <- 1 / stats::rgamma(
-            1L,
-            shape = (length(predictors) + 1) / 2,
-            rate = 1 / global_aux[block] +
-              sum(coefficient[predictors]^2 / local_var[local_indices]) / 2
+          tau_precision <- max(
+            stats::rgamma(
+              1L,
+              shape = (length(predictors) + 1) / 2,
+              rate = 1 / global_aux[block] +
+                sum(coefficient[predictors]^2 /
+                  local_var[local_indices]) / 2
+            ),
+            .Machine$double.xmin
           )
-          global_aux[block] <- 1 / stats::rgamma(
-            1L,
-            shape = 1,
-            rate = 1 / global_scale[block]^2 + 1 / tau_sq[block]
+          tau_sq[block] <- 1 / tau_precision
+          global_aux_precision <- max(
+            stats::rgamma(
+              1L,
+              shape = 1,
+              rate = 1 / global_scale[block]^2 + 1 / tau_sq[block]
+            ),
+            .Machine$double.xmin
           )
+          global_aux[block] <- 1 / global_aux_precision
         }
       }
     }
@@ -567,7 +588,7 @@
             allocated_sum_squares[block] <- sum(block_fitted * total_fitted)
           }
         }
-        variance_df <- effective_n - as.integer(fit_intercept)
+        variance_df <- likelihood_df
         total_signal_variance <- total_sum_squares / variance_df
         pve_denominator <- total_signal_variance + residual_var
         block_pve <- if (pve_type == "standalone") {
@@ -618,45 +639,81 @@
           }
         }
       } else {
-        coefficient_sum <- coefficient_sum + coefficient
-        coefficient_sum_sq <- coefficient_sum_sq + coefficient^2
+        online_count <- retained_index
+        coefficient_update <- .update_online_moments(
+          coefficient, online_count, coefficient_mean, coefficient_m2
+        )
+        coefficient_mean <- coefficient_update$mean
+        coefficient_m2 <- coefficient_update$m2
         if (store_coefficient_cov) {
+          covariance_factor <- (online_count - 1) / online_count
           for (block in seq_len(number_of_blocks)) {
             predictors <- block_predictors[[block]]
-            coefficient_crossprod[[block]] <-
-              coefficient_crossprod[[block]] +
-                tcrossprod(coefficient[predictors])
+            block_delta <- coefficient_update$delta[predictors]
+            coefficient_cov_m2[[block]] <-
+              coefficient_cov_m2[[block]] +
+                covariance_factor * tcrossprod(block_delta)
           }
         }
-        intercept_sum <- intercept_sum + intercept_draw
-        intercept_sum_sq <- intercept_sum_sq + intercept_draw^2
-        residual_var_sum <- residual_var_sum + residual_var
-        residual_var_sum_sq <- residual_var_sum_sq + residual_var^2
+        update <- .update_online_moments(
+          intercept_draw, online_count, intercept_mean, intercept_m2
+        )
+        intercept_mean <- update$mean
+        intercept_m2 <- update$m2
+        update <- .update_online_moments(
+          residual_var, online_count, residual_var_mean, residual_var_m2
+        )
+        residual_var_mean <- update$mean
+        residual_var_m2 <- update$m2
         if (compute_pve) {
-          block_pve_sum <- block_pve_sum + block_pve
-          block_pve_sum_sq <- block_pve_sum_sq + block_pve^2
-          total_pve_sum <- total_pve_sum + total_pve
-          total_pve_sum_sq <- total_pve_sum_sq + total_pve^2
-          cross_block_pve_sum <- cross_block_pve_sum + cross_block_pve
-          cross_block_pve_sum_sq <-
-            cross_block_pve_sum_sq + cross_block_pve^2
+          update <- .update_online_moments(
+            block_pve, online_count, block_pve_mean, block_pve_m2
+          )
+          block_pve_mean <- update$mean
+          block_pve_m2 <- update$m2
+          update <- .update_online_moments(
+            total_pve, online_count, total_pve_mean, total_pve_m2
+          )
+          total_pve_mean <- update$mean
+          total_pve_m2 <- update$m2
+          update <- .update_online_moments(
+            cross_block_pve, online_count,
+            cross_block_pve_mean, cross_block_pve_m2
+          )
+          cross_block_pve_mean <- update$mean
+          cross_block_pve_m2 <- update$m2
         }
         if (has_normal) {
-          normal_var_sum <- normal_var_sum + normal_var
-          normal_var_sum_sq <- normal_var_sum_sq + normal_var^2
+          update <- .update_online_moments(
+            normal_var, online_count, normal_var_mean, normal_var_m2
+          )
+          normal_var_mean <- update$mean
+          normal_var_m2 <- update$m2
         }
         if (has_spike_slab) {
           inclusion_sum <- inclusion_sum + inclusion
-          pi_sum <- pi_sum + pi
-          pi_sum_sq <- pi_sum_sq + pi^2
-          slab_var_sum <- slab_var_sum + slab_var
-          slab_var_sum_sq <- slab_var_sum_sq + slab_var^2
+          update <- .update_online_moments(
+            pi, online_count, pi_mean, pi_m2
+          )
+          pi_mean <- update$mean
+          pi_m2 <- update$m2
+          update <- .update_online_moments(
+            slab_var, online_count, slab_var_mean, slab_var_m2
+          )
+          slab_var_mean <- update$mean
+          slab_var_m2 <- update$m2
         }
         if (has_global_local) {
-          local_var_sum <- local_var_sum + local_var
-          local_var_sum_sq <- local_var_sum_sq + local_var^2
-          tau_sq_sum <- tau_sq_sum + tau_sq
-          tau_sq_sum_sq <- tau_sq_sum_sq + tau_sq^2
+          update <- .update_online_moments(
+            local_var, online_count, local_var_mean, local_var_m2
+          )
+          local_var_mean <- update$mean
+          local_var_m2 <- update$m2
+          update <- .update_online_moments(
+            tau_sq, online_count, tau_sq_mean, tau_sq_m2
+          )
+          tau_sq_mean <- update$mean
+          tau_sq_m2 <- update$m2
         }
         if (has_spike_multi_slab) {
           for (block in which(block_model == 3L)) {
@@ -668,13 +725,18 @@
               multi_component_sum[[block]][selected, component] <-
                 multi_component_sum[[block]][selected, component] + 1
             }
-            multi_pi_sum[[block]] <-
-              multi_pi_sum[[block]] + multi_pi[[block]]
-            multi_pi_sum_sq[[block]] <-
-              multi_pi_sum_sq[[block]] + multi_pi[[block]]^2
-            multi_var_sum[block] <- multi_var_sum[block] + multi_var[block]
-            multi_var_sum_sq[block] <-
-              multi_var_sum_sq[block] + multi_var[block]^2
+            update <- .update_online_moments(
+              multi_pi[[block]], online_count,
+              multi_pi_mean[[block]], multi_pi_m2[[block]]
+            )
+            multi_pi_mean[[block]] <- update$mean
+            multi_pi_m2[[block]] <- update$m2
+            update <- .update_online_moments(
+              multi_var[block], online_count,
+              multi_var_mean[block], multi_var_m2[block]
+            )
+            multi_var_mean[block] <- update$mean
+            multi_var_m2[block] <- update$m2
           }
         }
       }
@@ -701,16 +763,16 @@
   } else {
     list(
       number_of_draws = number_of_draws,
-      coefficient_sum = coefficient_sum,
-      coefficient_sum_sq = coefficient_sum_sq,
-      intercept_sum = intercept_sum,
-      intercept_sum_sq = intercept_sum_sq,
-      residual_var_sum = residual_var_sum,
-      residual_var_sum_sq = residual_var_sum_sq
+      coefficient_mean = coefficient_mean,
+      coefficient_m2 = coefficient_m2,
+      intercept_mean = intercept_mean,
+      intercept_m2 = intercept_m2,
+      residual_var_mean = residual_var_mean,
+      residual_var_m2 = residual_var_m2
     )
   }
   if (!store_samples && store_coefficient_cov) {
-    samples$coefficient_crossprod <- coefficient_crossprod
+    samples$coefficient_cov_m2 <- coefficient_cov_m2
   }
   if (compute_pve) {
     if (store_samples) {
@@ -718,20 +780,20 @@
       samples$total_pve_samples <- total_pve_samples
       samples$cross_block_pve_samples <- cross_block_pve_samples
     } else {
-      samples$block_pve_sum <- block_pve_sum
-      samples$block_pve_sum_sq <- block_pve_sum_sq
-      samples$total_pve_sum <- total_pve_sum
-      samples$total_pve_sum_sq <- total_pve_sum_sq
-      samples$cross_block_pve_sum <- cross_block_pve_sum
-      samples$cross_block_pve_sum_sq <- cross_block_pve_sum_sq
+      samples$block_pve_mean <- block_pve_mean
+      samples$block_pve_m2 <- block_pve_m2
+      samples$total_pve_mean <- total_pve_mean
+      samples$total_pve_m2 <- total_pve_m2
+      samples$cross_block_pve_mean <- cross_block_pve_mean
+      samples$cross_block_pve_m2 <- cross_block_pve_m2
     }
   }
   if (has_normal) {
     if (store_samples) {
       samples$normal_var_samples <- normal_var_samples
     } else {
-      samples$normal_var_sum <- normal_var_sum
-      samples$normal_var_sum_sq <- normal_var_sum_sq
+      samples$normal_var_mean <- normal_var_mean
+      samples$normal_var_m2 <- normal_var_m2
     }
   }
   if (has_spike_slab) {
@@ -741,10 +803,10 @@
       samples$slab_var_samples <- slab_var_samples
     } else {
       samples$inclusion_sum <- inclusion_sum
-      samples$pi_sum <- pi_sum
-      samples$pi_sum_sq <- pi_sum_sq
-      samples$slab_var_sum <- slab_var_sum
-      samples$slab_var_sum_sq <- slab_var_sum_sq
+      samples$pi_mean <- pi_mean
+      samples$pi_m2 <- pi_m2
+      samples$slab_var_mean <- slab_var_mean
+      samples$slab_var_m2 <- slab_var_m2
     }
   }
   if (has_global_local) {
@@ -752,10 +814,10 @@
       samples$local_var_samples <- local_var_samples
       samples$tau_sq_samples <- tau_sq_samples
     } else {
-      samples$local_var_sum <- local_var_sum
-      samples$local_var_sum_sq <- local_var_sum_sq
-      samples$tau_sq_sum <- tau_sq_sum
-      samples$tau_sq_sum_sq <- tau_sq_sum_sq
+      samples$local_var_mean <- local_var_mean
+      samples$local_var_m2 <- local_var_m2
+      samples$tau_sq_mean <- tau_sq_mean
+      samples$tau_sq_m2 <- tau_sq_m2
     }
   }
   if (has_spike_multi_slab) {
@@ -765,10 +827,10 @@
       samples$multi_var_samples <- multi_var_samples
     } else {
       samples$multi_component_sum <- multi_component_sum
-      samples$multi_pi_sum <- multi_pi_sum
-      samples$multi_pi_sum_sq <- multi_pi_sum_sq
-      samples$multi_var_sum <- multi_var_sum
-      samples$multi_var_sum_sq <- multi_var_sum_sq
+      samples$multi_pi_mean <- multi_pi_mean
+      samples$multi_pi_m2 <- multi_pi_m2
+      samples$multi_var_mean <- multi_var_mean
+      samples$multi_var_m2 <- multi_var_m2
     }
   }
   samples

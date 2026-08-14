@@ -74,7 +74,9 @@ compatibility validation; see \code{\link[=blm_ss]{blm_ss()}}.}
 \value{
 An object of class \code{blm_fit}. Coefficients are oriented to the input
 GWAS \code{A1} alleles. No intercept is fitted because centered GWAS summary
-statistics do not identify the phenotype mean. When \code{ld} was created by
+statistics do not identify the phenotype mean. Nevertheless, their
+centered likelihood has \code{likelihood_df = N - 1}; this value is recorded
+in the result and is separate from \code{residual_df_gwas}. When \code{ld} was created by
 \code{\link[=regularize_blm_ld]{regularize_blm_ld()}}, \code{ld_regularization_report} preserves that object's
 original regularization audit report unchanged, while
 \code{ld_regularization_block_map} maps fitted post-harmonization blocks to the
@@ -107,6 +109,9 @@ predictor cross-product diagonals are reconstructed from \code{BETA}, \code{SE},
 \code{residual_df_gwas}, and \code{reference_response_var}. Reference-panel LD and
 GWAS results not obtained by common-sample ordinary least squares define
 approximate working sufficient statistics.
+The centered working likelihood uses \code{N - 1} degrees of freedom for the
+residual inverse-gamma update and PVE normalization even though no
+intercept can be returned from the summary statistics.
 
 When LD was estimated outside the GWAS sample, fixing \code{residual_var} is
 recommended. Learning it requires the reconstructed \code{XtX}, \code{Xty}, and

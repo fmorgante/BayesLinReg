@@ -53,10 +53,39 @@ for (sampler_version in c("Rcpp", "R")) {
       version = sampler_version
     )
     stopifnot(
+      identical(raw_fit$likelihood_df, as.integer(n - 1)),
+      identical(ss_fit$likelihood_df, as.integer(n - 1)),
       isTRUE(all.equal(raw_fit, ss_fit, tolerance = 1e-8))
     )
   }
 }
+
+# Centered statistics can declare their likelihood dimension without making
+# an unidentified intercept part of the returned model.
+default_df_fit <- suppressWarnings(blm_ss(
+  n, crossprod(scale(X, center = TRUE, scale = FALSE)),
+  crossprod(scale(X, center = TRUE, scale = FALSE), y - mean(y)),
+  ETA = list(model = "Normal", var = 1), residual_var = 1,
+  iterations = 10, burnin = 5
+))
+centered_df_fit <- suppressWarnings(blm_ss(
+  n, crossprod(scale(X, center = TRUE, scale = FALSE)),
+  crossprod(scale(X, center = TRUE, scale = FALSE), y - mean(y)),
+  ETA = list(model = "Normal", var = 1), residual_var = 1,
+  likelihood_df = n - 1L, iterations = 10, burnin = 5
+))
+stopifnot(
+  identical(default_df_fit$likelihood_df, as.integer(n)),
+  identical(centered_df_fit$likelihood_df, as.integer(n - 1)),
+  is.null(centered_df_fit$intercept_mean),
+  inherits(try(
+    blm_ss(
+      n, XtX, Xty, ETA = list(model = "Normal"), residual_var = 1,
+      likelihood_df = n + 1L, iterations = 10, burnin = 5
+    ),
+    silent = TRUE
+  ), "try-error")
+)
 
 # Every hierarchical coefficient prior can hold its shared/global variance fixed.
 fixed_variance_specs <- list(

@@ -113,6 +113,10 @@ for (model in c(
     "XtX_eigen_rank", "XtX_prop_var", "XtX_approximate",
     "residual_sse_offset"
   )]
+  stopifnot(
+    identical(dense_fit$likelihood_df, as.integer(n - 1)),
+    identical(eigen_fit$likelihood_df, as.integer(n - 1))
+  )
   eigen_fit[c(
     "XtX_eigen_rank", "XtX_prop_var", "XtX_approximate",
     "residual_sse_offset"

@@ -379,6 +379,39 @@ for (sampler_version in c("Rcpp", "R")) {
   )
 }
 
+# Online Welford summaries remain stable when a posterior location is large.
+set.seed(781)
+offset_x <- cbind(x1 = seq(-1, 1, length.out = 60))
+offset_y <- 1e9 + 1.5 * offset_x[, 1L] + stats::rnorm(60, sd = 0.2)
+for (sampler_version in c("Rcpp", "R")) {
+  set.seed(782)
+  offset_stored <- blm(
+    offset_y,
+    ETA = list(X = offset_x, model = "Normal", var = 1),
+    residual_var = 0.04, iterations = 300, burnin = 100,
+    version = sampler_version, store_samples = TRUE
+  )
+  set.seed(782)
+  offset_online <- blm(
+    offset_y,
+    ETA = list(X = offset_x, model = "Normal", var = 1),
+    residual_var = 0.04, iterations = 300, burnin = 100,
+    version = sampler_version, store_samples = FALSE
+  )
+  stopifnot(
+    isTRUE(all.equal(
+      offset_online$intercept_var,
+      stats::var(offset_stored$intercept_samples),
+      tolerance = 1e-5
+    )),
+    isTRUE(all.equal(
+      offset_online$ETA$ETA1$coefficient_var,
+      apply(offset_stored$ETA$ETA1$coefficient_samples, 2L, stats::var),
+      tolerance = 1e-10
+    ))
+  )
+}
+
 # Covariance storage can be disabled while retaining individual draws.
 stored_variance_only_fit <- blm(
   y,
@@ -480,6 +513,29 @@ extreme_shape_fit <- blm(
 stopifnot(
   all(is.finite(extreme_shape_fit$ETA$ETA1$local_var_samples)),
   all(extreme_shape_fit$ETA$ETA1$local_var_samples > 0)
+)
+
+# Log-scale envelope calculations cover representable extreme GIG inputs,
+# and tiny valid beta-prime shapes no longer underflow an auxiliary to zero.
+stopifnot(
+  all(is.finite(BayesLinReg:::draw_gig_native_rcpp_cpp(
+    100L, 0.5, 1e-300, 1e-50
+  ))),
+  all(is.finite(BayesLinReg:::draw_gig_native_rcpp_cpp(
+    100L, -0.5, 1e-50, 1e-300
+  )))
+)
+set.seed(434)
+tiny_shape_fit <- blm(
+  multi_y,
+  ETA = list(
+    X = multi_X, model = "GlobalLocal", local_shape = c(1e-4, 1e-4)
+  ),
+  residual_var = 0.25, iterations = 100, burnin = 30
+)
+stopifnot(
+  all(is.finite(tiny_shape_fit$ETA$ETA1$local_var_samples)),
+  all(tiny_shape_fit$ETA$ETA1$local_var_samples > 0)
 )
 
 # GlobalLocal can calibrate its global scale from expected sparsity.
@@ -849,34 +905,70 @@ stopifnot(
   identical(dim(mock_combined$tau_sq_samples), c(4L, 3L))
 )
 
-# Online coefficient cross-products combine independently within each block.
-mock_online_chain <- list(
+# Online moments use Chan merging, including the between-chain covariance.
+mock_online_chain_left <- list(
   number_of_draws = 2L,
-  coefficient_sum = c(1, 2, 3),
-  coefficient_sum_sq = c(1, 4, 9),
-  intercept_sum = 1,
-  intercept_sum_sq = 1,
-  residual_var_sum = 2,
-  residual_var_sum_sq = 2,
-  coefficient_crossprod = list(
-    matrix(4, nrow = 1L),
-    matrix(c(1, 2, 2, 5), nrow = 2L)
+  coefficient_mean = c(0.5, 1, 1.5),
+  coefficient_m2 = c(0.5, 2, 4.5),
+  intercept_mean = 1,
+  intercept_m2 = 2,
+  residual_var_mean = 2,
+  residual_var_m2 = 2,
+  coefficient_cov_m2 = list(
+    matrix(0.5, nrow = 1L),
+    matrix(c(2, 3, 3, 4.5), nrow = 2L)
+  )
+)
+mock_online_chain_right <- list(
+  number_of_draws = 2L,
+  coefficient_mean = c(11, 22, 33),
+  coefficient_m2 = c(2, 8, 18),
+  intercept_mean = 12,
+  intercept_m2 = 8,
+  residual_var_mean = 7,
+  residual_var_m2 = 8,
+  coefficient_cov_m2 = list(
+    matrix(2, nrow = 1L),
+    matrix(c(8, 12, 12, 18), nrow = 2L)
   )
 )
 mock_online_combined <- BayesLinReg:::.combine_blm_chains(
-  list(mock_online_chain, mock_online_chain),
+  list(mock_online_chain_left, mock_online_chain_right),
   block_model = c(4L, 4L),
+  block_id = c(1L, 2L, 2L),
   store_samples = FALSE,
   store_coefficient_cov = TRUE
 )
+mock_coefficient_draws <- rbind(
+  c(0, 0, 0), c(1, 2, 3), c(10, 20, 30), c(12, 24, 36)
+)
 stopifnot(
-  identical(mock_online_combined$number_of_draws, 4L),
+  identical(mock_online_combined$number_of_draws, 4),
   isTRUE(all.equal(
-    mock_online_combined$coefficient_crossprod,
-    lapply(mock_online_chain$coefficient_crossprod, function(values) {
-      2 * values
-    })
-  ))
+    mock_online_combined$coefficient_mean,
+    colMeans(mock_coefficient_draws)
+  )),
+  isTRUE(all.equal(
+    mock_online_combined$coefficient_m2,
+    apply(mock_coefficient_draws, 2L, stats::var) * 3
+  )),
+  isTRUE(all.equal(
+    mock_online_combined$coefficient_cov_m2[[1L]],
+    stats::cov(mock_coefficient_draws[, 1L, drop = FALSE]) * 3
+  )),
+  isTRUE(all.equal(
+    mock_online_combined$coefficient_cov_m2[[2L]],
+    stats::cov(mock_coefficient_draws[, 2:3, drop = FALSE]) * 3
+  )),
+  isTRUE(all.equal(mock_online_combined$intercept_mean, 6.5)),
+  isTRUE(all.equal(mock_online_combined$intercept_m2, 131))
+)
+large_count_merge <- BayesLinReg:::.merge_online_moment(
+  1, 2, 100000L, 3, 4, 100000L
+)
+stopifnot(
+  identical(large_count_merge$mean, 2),
+  identical(large_count_merge$m2, 200006)
 )
 
 # Real multisession tests are enabled outside restricted check environments.
@@ -918,6 +1010,17 @@ if (any(parallel_test_flags == "true")) {
 }
 
 # Invalid ETA specifications and model parameters are rejected.
+integer_limit <- .Machine$integer.max + 1
+integer_bound_calls <- list(
+  function() BayesLinReg:::.validate_mcmc(integer_limit, 0, 1),
+  function() BayesLinReg:::.validate_mcmc(100, 20, integer_limit),
+  function() BayesLinReg:::.validate_nchains(integer_limit),
+  function() BayesLinReg:::.validate_nthreads(integer_limit)
+)
+stopifnot(all(vapply(integer_bound_calls, function(call) {
+  inherits(try(call(), silent = TRUE), "try-error")
+}, logical(1))))
+
 invalid_calls <- list(
   function() blm(y, residual_var = 1),
   function() blm(

@@ -55,7 +55,9 @@
 #'   returned. With multiple chains, `chain_id` identifies the origin of each
 #'   retained draw when samples are stored. When the residual variance is
 #'   learned, the result also records `residual_shape`, `residual_scale`, and
-#'   `residual_scale_calibrated`. A calibrated residual prior additionally
+#'   `residual_scale_calibrated`. `likelihood_df` records the dimension used
+#'   in the residual-variance update and PVE variance normalization. A
+#'   calibrated residual prior additionally
 #'   records `expected_pve_total`, `reference_response_var`, and
 #'   `reference_residual_var`. `SpikeMultiSlab` blocks additionally
 #'   return per-predictor `component_probability` values, an
@@ -298,6 +300,7 @@ blm <- function(y, ETA, residual_var = NULL,
     compute_pve = compute_pve,
     pve_type = pve_type,
     effective_n = length(y),
+    likelihood_df = length(y) - 1L,
     fit_intercept = TRUE,
     intercept_x_mean = intercept_x_mean,
     intercept_y_mean = mean(y),
@@ -318,6 +321,7 @@ blm <- function(y, ETA, residual_var = NULL,
       residual_prior$residual_scale_calibrated,
     expected_pve_total = residual_prior$expected_pve_total,
     reference_response_var = reference_response_var,
-    reference_residual_var = residual_prior$reference_residual_var
+    reference_residual_var = residual_prior$reference_residual_var,
+    likelihood_df = length(y) - 1L
   )
 }

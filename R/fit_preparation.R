@@ -66,7 +66,7 @@
 .prepare_sampler_arguments <- function(
     blocks, layout, y, x, residual_shape, residual_scale, residual_var,
     iterations, burnin, thin, store_samples, store_coefficient_cov,
-    compute_pve, pve_type, effective_n, fit_intercept,
+    compute_pve, pve_type, effective_n, likelihood_df, fit_intercept,
     intercept_x_mean, intercept_y_mean, center_observations = FALSE,
     residual_sse_offset = 0) {
   c(
@@ -89,6 +89,7 @@
       compute_pve = compute_pve,
       pve_type = pve_type,
       effective_n = effective_n,
+      likelihood_df = likelihood_df,
       fit_intercept = fit_intercept,
       intercept_x_mean = intercept_x_mean,
       intercept_y_mean = intercept_y_mean,

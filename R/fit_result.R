@@ -9,6 +9,7 @@
                                  expected_pve_total = NULL,
                                  reference_response_var = NULL,
                                  reference_residual_var = NULL,
+                                 likelihood_df = NULL,
                                  sampler_block_id = NULL) {
   block_models <- vapply(blocks, `[[`, character(1), "model")
   model_names <- c(
@@ -39,19 +40,14 @@
         coefficient_cov <- stats::cov(coefficient_samples)
       }
     } else {
-      coefficient_mean <- samples$coefficient_sum[indices] /
-        samples$number_of_draws / block$predictor_scale
-      coefficient_var <- vapply(indices, function(index) {
-        .variance_from_sums(
-          samples$coefficient_sum[index],
-          samples$coefficient_sum_sq[index],
-          samples$number_of_draws
-        )
-      }, numeric(1)) / block$predictor_scale^2
+      coefficient_mean <- samples$coefficient_mean[indices] /
+        block$predictor_scale
+      coefficient_var <- .variance_from_m2(
+        samples$coefficient_m2[indices], samples$number_of_draws
+      ) / block$predictor_scale^2
       if (store_coefficient_cov) {
-        coefficient_cov <- .covariance_from_sums(
-          samples$coefficient_sum[indices],
-          samples$coefficient_crossprod[[block_index]][
+        coefficient_cov <- .covariance_from_m2(
+          samples$coefficient_cov_m2[[block_index]][
             block_local_order, block_local_order, drop = FALSE
           ],
           samples$number_of_draws
@@ -80,11 +76,9 @@
         result$pve_var <- stats::var(pve_samples)
         result$pve_samples <- pve_samples
       } else {
-        result$pve_mean <- samples$block_pve_sum[block_index] /
-          samples$number_of_draws
-        result$pve_var <- .variance_from_sums(
-          samples$block_pve_sum[block_index],
-          samples$block_pve_sum_sq[block_index],
+        result$pve_mean <- samples$block_pve_mean[block_index]
+        result$pve_var <- .variance_from_m2(
+          samples$block_pve_m2[block_index],
           samples$number_of_draws
         )
       }
@@ -96,11 +90,9 @@
         result$normal_var_var <- stats::var(normal_var_samples)
         result$normal_var_samples <- normal_var_samples
       } else {
-        result$normal_var_mean <- samples$normal_var_sum[block_index] /
-          samples$number_of_draws
-        result$normal_var_var <- .variance_from_sums(
-          samples$normal_var_sum[block_index],
-          samples$normal_var_sum_sq[block_index],
+        result$normal_var_mean <- samples$normal_var_mean[block_index]
+        result$normal_var_var <- .variance_from_m2(
+          samples$normal_var_m2[block_index],
           samples$number_of_draws
         )
       }
@@ -140,16 +132,14 @@
         result$inclusion_probability <- samples$inclusion_sum[local_indices] /
           samples$number_of_draws
         names(result$inclusion_probability) <- block$predictor_names
-        result$pi_mean <- samples$pi_sum[block_index] / samples$number_of_draws
-        result$pi_var <- .variance_from_sums(
-          samples$pi_sum[block_index], samples$pi_sum_sq[block_index],
+        result$pi_mean <- samples$pi_mean[block_index]
+        result$pi_var <- .variance_from_m2(
+          samples$pi_m2[block_index],
           samples$number_of_draws
         )
-        result$slab_var_mean <- samples$slab_var_sum[block_index] /
-          samples$number_of_draws
-        result$slab_var_var <- .variance_from_sums(
-          samples$slab_var_sum[block_index],
-          samples$slab_var_sum_sq[block_index], samples$number_of_draws
+        result$slab_var_mean <- samples$slab_var_mean[block_index]
+        result$slab_var_var <- .variance_from_m2(
+          samples$slab_var_m2[block_index], samples$number_of_draws
         )
       }
       if (!is.na(block$fixed_var)) {
@@ -183,21 +173,15 @@
         result$local_var_samples <- local_var_samples
         result$tau_sq_samples <- tau_sq_samples
       } else {
-        result$local_var_mean <- samples$local_var_sum[local_indices] /
-          samples$number_of_draws
-        result$local_var_var <- vapply(local_indices, function(index) {
-          .variance_from_sums(
-            samples$local_var_sum[index], samples$local_var_sum_sq[index],
-            samples$number_of_draws
-          )
-        }, numeric(1))
+        result$local_var_mean <- samples$local_var_mean[local_indices]
+        result$local_var_var <- .variance_from_m2(
+          samples$local_var_m2[local_indices], samples$number_of_draws
+        )
         names(result$local_var_mean) <- block$predictor_names
         names(result$local_var_var) <- block$predictor_names
-        result$tau_sq_mean <- samples$tau_sq_sum[block_index] /
-          samples$number_of_draws
-        result$tau_sq_var <- .variance_from_sums(
-          samples$tau_sq_sum[block_index],
-          samples$tau_sq_sum_sq[block_index], samples$number_of_draws
+        result$tau_sq_mean <- samples$tau_sq_mean[block_index]
+        result$tau_sq_var <- .variance_from_m2(
+          samples$tau_sq_m2[block_index], samples$number_of_draws
         )
       }
       if (!is.na(block$fixed_global_var)) {
@@ -261,21 +245,14 @@
         dimnames(component_probability) <- list(
           block$predictor_names, component_names
         )
-        result$pi_mean <- samples$multi_pi_sum[[block_index]] /
-          samples$number_of_draws
-        result$pi_var <- vapply(seq_along(block$multi_gamma), function(index) {
-          .variance_from_sums(
-            samples$multi_pi_sum[[block_index]][index],
-            samples$multi_pi_sum_sq[[block_index]][index],
-            samples$number_of_draws
-          )
-        }, numeric(1))
+        result$pi_mean <- samples$multi_pi_mean[[block_index]]
+        result$pi_var <- .variance_from_m2(
+          samples$multi_pi_m2[[block_index]], samples$number_of_draws
+        )
         names(result$pi_mean) <- names(result$pi_var) <- component_names
-        result$var_mean <- samples$multi_var_sum[block_index] /
-          samples$number_of_draws
-        result$var_var <- .variance_from_sums(
-          samples$multi_var_sum[block_index],
-          samples$multi_var_sum_sq[block_index], samples$number_of_draws
+        result$var_mean <- samples$multi_var_mean[block_index]
+        result$var_var <- .variance_from_m2(
+          samples$multi_var_m2[block_index], samples$number_of_draws
         )
       }
       if (!is.na(block$fixed_var)) {
@@ -306,10 +283,9 @@
     residual_var_mean <- mean(samples$residual_var_samples)
     residual_var_var <- stats::var(samples$residual_var_samples)
   } else {
-    residual_var_mean <- samples$residual_var_sum / samples$number_of_draws
-    residual_var_var <- .variance_from_sums(
-      samples$residual_var_sum, samples$residual_var_sum_sq,
-      samples$number_of_draws
+    residual_var_mean <- samples$residual_var_mean
+    residual_var_var <- .variance_from_m2(
+      samples$residual_var_m2, samples$number_of_draws
     )
   }
   result <- list(ETA = eta_result)
@@ -319,10 +295,9 @@
       result$intercept_var <- stats::var(samples$intercept_samples)
       result$intercept_samples <- samples$intercept_samples
     } else {
-      result$intercept_mean <- samples$intercept_sum / samples$number_of_draws
-      result$intercept_var <- .variance_from_sums(
-        samples$intercept_sum, samples$intercept_sum_sq,
-        samples$number_of_draws
+      result$intercept_mean <- samples$intercept_mean
+      result$intercept_var <- .variance_from_m2(
+        samples$intercept_m2, samples$number_of_draws
       )
     }
   }
@@ -337,16 +312,14 @@
       result$total_pve_samples <- samples$total_pve_samples
       result$cross_block_pve_samples <- samples$cross_block_pve_samples
     } else {
-      result$total_pve_mean <- samples$total_pve_sum /
-        samples$number_of_draws
-      result$total_pve_var <- .variance_from_sums(
-        samples$total_pve_sum, samples$total_pve_sum_sq,
+      result$total_pve_mean <- samples$total_pve_mean
+      result$total_pve_var <- .variance_from_m2(
+        samples$total_pve_m2,
         samples$number_of_draws
       )
-      result$cross_block_pve_mean <- samples$cross_block_pve_sum /
-        samples$number_of_draws
-      result$cross_block_pve_var <- .variance_from_sums(
-        samples$cross_block_pve_sum, samples$cross_block_pve_sum_sq,
+      result$cross_block_pve_mean <- samples$cross_block_pve_mean
+      result$cross_block_pve_var <- .variance_from_m2(
+        samples$cross_block_pve_m2,
         samples$number_of_draws
       )
     }
@@ -364,6 +337,7 @@
   }
   result$store_samples <- store_samples
   result$store_coefficient_cov <- store_coefficient_cov
+  if (!is.null(likelihood_df)) result$likelihood_df <- likelihood_df
   if (store_samples) {
     result$residual_var_samples <- samples$residual_var_samples
   }

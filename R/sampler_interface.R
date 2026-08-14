@@ -16,7 +16,8 @@
                             fixed_var = NULL,
                             store_samples = TRUE,
                             store_coefficient_cov = TRUE,
-                            effective_n = NULL, fit_intercept = TRUE,
+                            effective_n = NULL, likelihood_df = NULL,
+                            fit_intercept = TRUE,
                             intercept_x_mean = NULL,
                             intercept_y_mean = NULL,
                             XtX = NULL, XtX_center = NULL,
@@ -48,6 +49,9 @@
     progress_callback <- function(amount, iteration) invisible(NULL)
   }
   if (is.null(effective_n)) effective_n <- length(y)
+  likelihood_df <- .resolve_likelihood_df(
+    effective_n, fit_intercept, likelihood_df
+  )
   if (is.null(intercept_x_mean)) intercept_x_mean <- colMeans(x)
   if (is.null(intercept_y_mean)) intercept_y_mean <- mean(y)
   common_arguments <- list(
@@ -81,6 +85,7 @@
     store_samples = store_samples,
     store_coefficient_cov = store_coefficient_cov,
     effective_n = effective_n,
+    likelihood_df = likelihood_df,
     fit_intercept = fit_intercept,
     intercept_x_mean = intercept_x_mean,
     intercept_y_mean = intercept_y_mean,
@@ -105,6 +110,7 @@
           "multi_gamma_list", "multi_pi_alpha_list", "multi_var_shape",
           "multi_var_scale", "fixed_var", "learn_residual_var", "fixed_residual_var",
           "store_samples", "store_coefficient_cov", "effective_n",
+          "likelihood_df",
           "fit_intercept", "intercept_x_mean", "intercept_y_mean",
           "compute_pve", "pve_type_code"
         )],
@@ -132,6 +138,7 @@
           "multi_gamma_list", "multi_pi_alpha_list", "multi_var_shape",
           "multi_var_scale", "fixed_var", "learn_residual_var", "fixed_residual_var",
           "store_samples", "store_coefficient_cov", "effective_n",
+          "likelihood_df",
           "fit_intercept", "intercept_x_mean", "intercept_y_mean",
           "compute_pve", "pve_type_code"
         )],
@@ -158,6 +165,7 @@
           "multi_gamma_list", "multi_pi_alpha_list", "multi_var_shape",
           "multi_var_scale", "fixed_var", "learn_residual_var", "fixed_residual_var",
           "store_samples", "store_coefficient_cov", "effective_n",
+          "likelihood_df",
           "fit_intercept", "intercept_x_mean", "intercept_y_mean",
           "compute_pve", "pve_type_code"
         )],
@@ -185,6 +193,7 @@
           "multi_gamma_list", "multi_pi_alpha_list", "multi_var_shape",
           "multi_var_scale", "fixed_var", "learn_residual_var", "fixed_residual_var",
           "store_samples", "store_coefficient_cov", "effective_n",
+          "likelihood_df",
           "fit_intercept", "intercept_x_mean", "intercept_y_mean",
           "compute_pve", "pve_type_code"
         )],
@@ -309,73 +318,120 @@
   .combine_blm_chains(
     chain_samples,
     block_model = block_model,
+    block_id = sampler_arguments$block_id,
     store_samples = sampler_arguments$store_samples,
     store_coefficient_cov = sampler_arguments$store_coefficient_cov,
     compute_pve = sampler_arguments$compute_pve
   )
 }
 
+.merge_online_moment <- function(mean_left, m2_left, n_left,
+                                 mean_right, m2_right, n_right) {
+  total <- as.double(n_left) + as.double(n_right)
+  delta <- mean_right - mean_left
+  between_weight <- as.double(n_left) * as.double(n_right) / total
+  list(
+    mean = mean_left + delta * (n_right / total),
+    m2 = m2_left + m2_right + delta^2 * between_weight
+  )
+}
+
 .combine_blm_chains <- function(chain_samples, block_model = 0L,
+                                block_id = NULL,
                                 store_samples = TRUE,
                                 store_coefficient_cov = TRUE,
                                 compute_pve = FALSE) {
   if (!store_samples) {
-    summary_names <- c(
-      "number_of_draws", "coefficient_sum", "coefficient_sum_sq",
-      "intercept_sum", "intercept_sum_sq", "residual_var_sum",
-      "residual_var_sum_sq"
+    combined <- chain_samples[[1L]]
+    moment_names <- c(
+      "coefficient", "intercept", "residual_var"
     )
     if (compute_pve) {
-      summary_names <- c(
-        summary_names, "block_pve_sum", "block_pve_sum_sq",
-        "total_pve_sum", "total_pve_sum_sq", "cross_block_pve_sum",
-        "cross_block_pve_sum_sq"
+      moment_names <- c(
+        moment_names, "block_pve", "total_pve", "cross_block_pve"
       )
     }
     if (any(block_model == 0L)) {
-      summary_names <- c(summary_names, "normal_var_sum", "normal_var_sum_sq")
+      moment_names <- c(moment_names, "normal_var")
     }
     if (any(block_model == 1L)) {
-      summary_names <- c(
-        summary_names, "inclusion_sum", "pi_sum", "pi_sum_sq",
-        "slab_var_sum", "slab_var_sum_sq"
-      )
+      moment_names <- c(moment_names, "pi", "slab_var")
     }
     if (any(block_model == 2L)) {
-      summary_names <- c(
-        summary_names, "local_var_sum", "local_var_sum_sq",
-        "tau_sq_sum", "tau_sq_sum_sq"
-      )
+      moment_names <- c(moment_names, "local_var", "tau_sq")
     }
     if (any(block_model == 3L)) {
-      summary_names <- c(
-        summary_names, "multi_var_sum", "multi_var_sum_sq"
+      moment_names <- c(moment_names, "multi_var")
+    }
+
+    if (store_coefficient_cov && is.null(block_id)) {
+      stop(
+        "`block_id` is required to combine online coefficient covariances.",
+        call. = FALSE
       )
     }
-    combined <- stats::setNames(lapply(summary_names, function(name) {
-      Reduce(`+`, lapply(chain_samples, `[[`, name))
-    }), summary_names)
-    if (store_coefficient_cov) {
-      combined$coefficient_crossprod <- lapply(
-        seq_along(block_model),
-        function(block) {
-          Reduce(`+`, lapply(chain_samples, function(samples) {
-            samples$coefficient_crossprod[[block]]
-          }))
+
+    if (length(chain_samples) > 1L) {
+      for (chain in seq.int(2L, length(chain_samples))) {
+        current <- chain_samples[[chain]]
+        n_left <- combined$number_of_draws
+        n_right <- current$number_of_draws
+        total <- as.double(n_left) + as.double(n_right)
+        coefficient_delta <- current$coefficient_mean -
+          combined$coefficient_mean
+
+        if (store_coefficient_cov) {
+          covariance_factor <- as.double(n_left) *
+            as.double(n_right) / total
+          for (block in seq_along(block_model)) {
+            indices <- which(block_id == block)
+            delta <- coefficient_delta[indices]
+            combined$coefficient_cov_m2[[block]] <-
+              combined$coefficient_cov_m2[[block]] +
+              current$coefficient_cov_m2[[block]] +
+              covariance_factor * tcrossprod(delta)
+          }
         }
-      )
-    }
-    if (any(block_model == 3L)) {
-      list_names <- c(
-        "multi_component_sum", "multi_pi_sum", "multi_pi_sum_sq"
-      )
-      for (name in list_names) {
-        combined[[name]] <- lapply(seq_along(block_model), function(block) {
-          values <- lapply(chain_samples, function(samples) {
-            samples[[name]][[block]]
-          })
-          if (all(vapply(values, is.null, logical(1)))) NULL else Reduce(`+`, values)
-        })
+
+        for (name in moment_names) {
+          merged <- .merge_online_moment(
+            combined[[paste0(name, "_mean")]],
+            combined[[paste0(name, "_m2")]],
+            n_left,
+            current[[paste0(name, "_mean")]],
+            current[[paste0(name, "_m2")]],
+            n_right
+          )
+          combined[[paste0(name, "_mean")]] <- merged$mean
+          combined[[paste0(name, "_m2")]] <- merged$m2
+        }
+
+        if (any(block_model == 1L)) {
+          combined$inclusion_sum <- combined$inclusion_sum +
+            current$inclusion_sum
+        }
+        if (any(block_model == 3L)) {
+          combined$multi_component_sum <- Map(
+            function(left, right) {
+              if (is.null(left)) NULL else left + right
+            },
+            combined$multi_component_sum,
+            current$multi_component_sum
+          )
+          for (block in which(block_model == 3L)) {
+            merged <- .merge_online_moment(
+              combined$multi_pi_mean[[block]],
+              combined$multi_pi_m2[[block]],
+              n_left,
+              current$multi_pi_mean[[block]],
+              current$multi_pi_m2[[block]],
+              n_right
+            )
+            combined$multi_pi_mean[[block]] <- merged$mean
+            combined$multi_pi_m2[[block]] <- merged$m2
+          }
+        }
+        combined$number_of_draws <- total
       }
     }
     return(combined)

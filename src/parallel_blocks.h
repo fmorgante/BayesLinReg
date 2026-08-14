@@ -439,7 +439,9 @@ class BlockLocalVarianceWorker : public RcppParallel::Worker {
         local_var_[local_index] = sample_gig(
           local_a_[prior_block] - 0.5,
           std::max(raw_chi, std::numeric_limits<double>::min()),
-          2.0 * local_aux_[local_index],
+          2.0 * std::max(
+            local_aux_[local_index], std::numeric_limits<double>::min()
+          ),
           generator
         );
       }

@@ -37,7 +37,9 @@
 #'
 #' @return An object of class `blm_fit`. Coefficients are oriented to the input
 #'   GWAS `A1` alleles. No intercept is fitted because centered GWAS summary
-#'   statistics do not identify the phenotype mean. When `ld` was created by
+#'   statistics do not identify the phenotype mean. Nevertheless, their
+#'   centered likelihood has `likelihood_df = N - 1`; this value is recorded
+#'   in the result and is separate from `residual_df_gwas`. When `ld` was created by
 #'   [regularize_blm_ld()], `ld_regularization_report` preserves that object's
 #'   original regularization audit report unchanged, while
 #'   `ld_regularization_block_map` maps fitted post-harmonization blocks to the
@@ -63,6 +65,9 @@
 #'   `residual_df_gwas`, and `reference_response_var`. Reference-panel LD and
 #'   GWAS results not obtained by common-sample ordinary least squares define
 #'   approximate working sufficient statistics.
+#'   The centered working likelihood uses `N - 1` degrees of freedom for the
+#'   residual inverse-gamma update and PVE normalization even though no
+#'   intercept can be returned from the summary statistics.
 #'
 #'   When LD was estimated outside the GWAS sample, fixing `residual_var` is
 #'   recommended. Learning it requires the reconstructed `XtX`, `Xty`, and
@@ -151,6 +156,7 @@ blm_gwas <- function(
          call. = FALSE)
   }
   n <- n_values[[1L]]
+  likelihood_df <- .resolve_likelihood_df(n, FALSE, n - 1)
   if (is.null(residual_df_gwas)) residual_df_gwas <- n - 2
   if (!is.numeric(residual_df_gwas) || length(residual_df_gwas) != 1L ||
       is.na(residual_df_gwas) || !is.finite(residual_df_gwas) ||
@@ -265,6 +271,7 @@ blm_gwas <- function(
     compute_pve = compute_pve,
     pve_type = pve_type,
     effective_n = n,
+    likelihood_df = likelihood_df,
     fit_intercept = FALSE,
     intercept_x_mean = numeric(length(working_Xty)),
     intercept_y_mean = 0
@@ -294,6 +301,7 @@ blm_gwas <- function(
     expected_pve_total = residual_prior$expected_pve_total,
     reference_response_var = components$reference_response_var,
     reference_residual_var = residual_prior$reference_residual_var,
+    likelihood_df = likelihood_df,
     sampler_block_id = sampler_block_id
   )
   result <- .orient_gwas_coefficients(

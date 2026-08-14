@@ -252,10 +252,10 @@ for (sampler in list(
     identical(dim(compact_stored$local_var_samples), c(10L, 1L)),
     identical(dim(compact_stored$multi_component_samples), c(10L, 3L)),
     length(compact_online$inclusion_sum) == 1L,
-    length(compact_online$local_var_sum) == 1L,
+    length(compact_online$local_var_mean) == 1L,
     identical(dim(compact_online$multi_component_sum[[4L]]), c(3L, 3L)),
     identical(
-      lapply(compact_covariance$coefficient_crossprod, dim),
+      lapply(compact_covariance$coefficient_cov_m2, dim),
       list(c(1L, 1L), c(1L, 1L), c(1L, 1L), c(3L, 3L))
     )
   )

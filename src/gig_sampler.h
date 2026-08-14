@@ -54,58 +54,69 @@ double sample_gig_small_parameter(
   const double mode = gig_mode(lambda, beta);
   const double log_mode = gig_log_kernel(mode, lambda, beta);
   const double x0 = beta / one_minus_lambda;
-  const double x_star = std::max(x0, 2.0 / beta);
+  const double upper = 2.0 / beta;
+  const double x_star = std::max(x0, upper);
+  const double log_x0 = std::log(x0);
+  const double log_upper = std::log(upper);
 
-  const double k1 = 1.0;
-  const double area1 = x0;
-
-  double k2 = 0.0;
-  double area2 = 0.0;
-  if (x0 < 2.0 / beta) {
-    k2 = std::exp(-beta - log_mode);
-    const double log_ratio = std::log((2.0 / beta) / x0);
+  const double log_area1 = log_x0;
+  const double log_k2 = -beta - log_mode;
+  double log_area2 = -std::numeric_limits<double>::infinity();
+  if (x0 < upper) {
+    const double log_ratio = log_upper - log_x0;
     if (std::abs(lambda) < 1e-8) {
-      area2 = k2 * log_ratio;
+      log_area2 = log_k2 + std::log(log_ratio);
     } else {
-      area2 = k2 * std::pow(x0, lambda) *
-        std::expm1(lambda * log_ratio) / lambda;
+      const double log_power_difference = lambda * log_upper +
+        std::log1p(-std::exp(lambda * (log_x0 - log_upper)));
+      log_area2 = log_k2 + log_power_difference - std::log(lambda);
     }
   }
 
   const double log_k3 = (lambda - 1.0) * std::log(x_star) - log_mode;
   const double log_area3 = std::log(2.0 / beta) + log_k3 -
     0.5 * beta * x_star;
-  const double area3 = std::exp(log_area3);
+  const double maximum_log_area = std::max({
+    log_area1, log_area2, log_area3
+  });
+  const double area1 = std::exp(log_area1 - maximum_log_area);
+  const double area2 = std::exp(log_area2 - maximum_log_area);
+  const double area3 = std::exp(log_area3 - maximum_log_area);
   const double total_area = area1 + area2 + area3;
 
   for (int attempt = 0; attempt < 1000000; ++attempt) {
-    const double accept_uniform = rng.uniform();
-    double selector = total_area * rng.uniform();
+    const double log_accept_uniform = std::log(rng.uniform());
+    const double selector = total_area * rng.uniform();
     double x = 0.0;
-    double hat = 0.0;
+    double log_hat = 0.0;
 
     if (selector <= area1) {
-      x = x0 * selector / area1;
-      hat = k1;
+      x = x0 * rng.uniform();
     } else if (selector <= area1 + area2) {
-      selector -= area1;
+      const double mixture_uniform = rng.uniform();
       if (std::abs(lambda) < 1e-8) {
-        x = x0 * std::exp(selector / k2);
+        x = std::exp(log_x0 + mixture_uniform * (log_upper - log_x0));
       } else {
-        const double base = std::pow(x0, lambda) +
-          selector * lambda / k2;
-        x = std::pow(base, 1.0 / lambda);
+        const double lower_term = std::log1p(-mixture_uniform) +
+          lambda * log_x0;
+        const double upper_term = std::log(mixture_uniform) +
+          lambda * log_upper;
+        const double maximum_term = std::max(lower_term, upper_term);
+        const double log_power = maximum_term + std::log(
+          std::exp(lower_term - maximum_term) +
+            std::exp(upper_term - maximum_term)
+        );
+        x = std::exp(log_power / lambda);
       }
-      hat = k2 * std::pow(x, lambda - 1.0);
+      log_hat = log_k2 + (lambda - 1.0) * std::log(x);
     } else {
-      selector -= area1 + area2;
-      x = x_star - 2.0 / beta * std::log1p(-selector / area3);
-      hat = std::exp(log_k3 - 0.5 * beta * x);
+      x = x_star - 2.0 / beta * std::log(rng.uniform());
+      log_hat = log_k3 - 0.5 * beta * x;
     }
 
-    if (std::isfinite(x) && x > 0.0 &&
-        accept_uniform * hat <=
-          gig_scaled_kernel(x, lambda, beta, log_mode)) {
+    const double target_log = gig_log_kernel(x, lambda, beta) - log_mode;
+    if (std::isfinite(x) && x > 0.0 && std::isfinite(target_log) &&
+        log_accept_uniform + log_hat <= std::min(0.0, target_log)) {
       return x;
     }
   }
