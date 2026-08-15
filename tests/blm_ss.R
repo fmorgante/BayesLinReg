@@ -20,6 +20,15 @@ XtX <- crossprod(X)
 Xty <- crossprod(X, y)
 yty <- sum(y^2)
 
+stopifnot(inherits(try(
+  blm_ss(
+    .Machine$integer.max + 1, XtX, Xty,
+    ETA = list(model = "Normal", var = 1), residual_var = 1,
+    iterations = 10, burnin = 5
+  ),
+  silent = TRUE
+), "try-error"))
+
 # Sufficient-statistics fits reproduce raw-data fits for every prior and engine.
 for (sampler_version in c("Rcpp", "R")) {
   for (model in c(

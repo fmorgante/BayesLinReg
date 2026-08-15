@@ -523,10 +523,13 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
 
 .validate_sufficient_statistics <- function(n, XtX, Xty, yty, X_means,
                                             y_mean) {
-  if (!is.numeric(n) || length(n) != 1L || is.na(n) || !is.finite(n) ||
-      n != floor(n) || n < 2) {
-    stop("`n` must be an integer of at least two.", call. = FALSE)
-  }
+  n <- .validate_bounded_integer(
+    n, "n", minimum = 2,
+    message = paste0(
+      "`n` must be an integer of at least two and no larger than ",
+      "`.Machine$integer.max`."
+    )
+  )
   list_input <- is.list(XtX) && !is.matrix(XtX)
   if (list_input) {
     if (length(XtX) < 1L) {

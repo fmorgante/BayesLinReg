@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <limits>
 #include <vector>
+#include "coefficient_updates.h"
 #include "parallel_blocks.h"
 
 namespace bayeslinreg {

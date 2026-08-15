@@ -15,17 +15,18 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - {os: ubuntu-latest, eigen_blas: "no"}
-          - {os: ubuntu-latest, eigen_blas: "yes"}
-          - {os: macos-latest, eigen_blas: "no"}
-          - {os: macos-latest, eigen_blas: "yes"}
-          - {os: windows-latest, eigen_blas: "no"}
-          - {os: windows-latest, eigen_blas: "yes"}
+          - {os: ubuntu-latest, eigen_blas: "no", test_future: "true"}
+          - {os: ubuntu-latest, eigen_blas: "yes", test_future: "false"}
+          - {os: macos-latest, eigen_blas: "no", test_future: "false"}
+          - {os: macos-latest, eigen_blas: "yes", test_future: "false"}
+          - {os: windows-latest, eigen_blas: "no", test_future: "false"}
+          - {os: windows-latest, eigen_blas: "yes", test_future: "false"}
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
       BAYESLINREG_USE_EIGEN_BLAS: ${{ matrix.config.eigen_blas }}
       BAYESLINREG_EXPECT_EIGEN_BLAS: ${{ matrix.config.eigen_blas }}
+      BAYESLINREG_TEST_FUTURE: ${{ matrix.config.test_future }}
 
     steps:
       - uses: actions/checkout@v4

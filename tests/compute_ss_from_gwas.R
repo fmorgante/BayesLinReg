@@ -19,6 +19,14 @@ se <- sqrt((yty - beta^2 * diagonal) / ((n - 2) * diagonal))
 names(beta) <- names(se) <- predictor_names
 LD <- stats::cov2cor(XtX)
 
+stopifnot(inherits(try(
+  compute_ss_from_gwas(
+    beta, se, LD, .Machine$integer.max + 1,
+    response_var = stats::var(y)
+  ),
+  silent = TRUE
+), "try-error"))
+
 # With in-sample LD and response variance, the SuSiE-RSS conversion recovers
 # the original centered cross-products and coefficient scale.
 original <- compute_ss_from_gwas(

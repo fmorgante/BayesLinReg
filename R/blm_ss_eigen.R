@@ -631,10 +631,13 @@ blm_ss_eigen <- function(
       block_input = TRUE
     ))
   }
-  if (!is.numeric(n) || length(n) != 1L || is.na(n) || !is.finite(n) ||
-      n != floor(n) || n < 2) {
-    stop("`n` must be an integer of at least two.", call. = FALSE)
-  }
+  n <- .validate_bounded_integer(
+    n, "n", minimum = 2,
+    message = paste0(
+      "`n` must be an integer of at least two and no larger than ",
+      "`.Machine$integer.max`."
+    )
+  )
   if (!is.matrix(eigenvectors) || !is.numeric(eigenvectors) ||
       nrow(eigenvectors) < 1L || ncol(eigenvectors) < 1L ||
       ncol(eigenvectors) > nrow(eigenvectors) || anyNA(eigenvectors) ||

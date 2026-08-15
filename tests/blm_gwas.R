@@ -63,9 +63,16 @@ stopifnot(
 unassessed_diagnostics <- diagnose_blm_ld(
   indefinite_ld, max_block_size = 2L
 )
+oversized_control_error <- try(
+  diagnose_blm_ld(
+    indefinite_ld, max_block_size = .Machine$integer.max + 1
+  ),
+  silent = TRUE
+)
 stopifnot(
   identical(unassessed_diagnostics$status, "not_assessed"),
-  is.na(unassessed_diagnostics$minimum_eigenvalue)
+  is.na(unassessed_diagnostics$minimum_eigenvalue),
+  inherits(oversized_control_error, "try-error")
 )
 eigen_repaired_ld <- regularize_blm_ld(
   indefinite_ld, method = "eigen", eigen_floor = 1e-6

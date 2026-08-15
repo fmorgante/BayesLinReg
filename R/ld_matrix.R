@@ -359,11 +359,13 @@ regularize_blm_ld <- function(
 
 .validate_ld_regularization_controls <- function(
     max_block_size, memory_limit_mb, tolerance) {
-  if (!is.numeric(max_block_size) || length(max_block_size) != 1L ||
-      is.na(max_block_size) || !is.finite(max_block_size) ||
-      max_block_size != floor(max_block_size) || max_block_size < 1) {
-    stop("`max_block_size` must be a positive integer.", call. = FALSE)
-  }
+  max_block_size <- .validate_bounded_integer(
+    max_block_size, "max_block_size", minimum = 1,
+    message = paste0(
+      "`max_block_size` must be a positive integer no larger than ",
+      "`.Machine$integer.max`."
+    )
+  )
   if (!is.numeric(memory_limit_mb) || length(memory_limit_mb) != 1L ||
       is.na(memory_limit_mb) || !is.finite(memory_limit_mb) ||
       memory_limit_mb <= 0) {
@@ -374,7 +376,7 @@ regularize_blm_ld <- function(
     stop("`tolerance` must be nonnegative and finite.", call. = FALSE)
   }
   list(
-    max_block_size = as.integer(max_block_size),
+    max_block_size = max_block_size,
     memory_limit_mb = as.numeric(memory_limit_mb),
     tolerance = as.numeric(tolerance)
   )

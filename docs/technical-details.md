@@ -864,17 +864,20 @@ The main implementations are located in:
   execution used by all fitting interfaces.
 - `R/prior_specification.R`: prior validation, normalization, calibration, and
   predictor preparation.
-- `R/mcmc_validation.R`: MCMC, chain, thread, and PVE control validation.
+- `R/mcmc_validation.R`: shared bounded-integer, MCMC, chain, thread, and PVE
+  control validation.
 - `R/gibbs_r.R`: reference R Gibbs sampler.
 - `R/sampler_interface.R`: Rcpp dispatch, progress handling, and chain
   combination.
 - `R/posterior_conversion.R`: retained-draw conversion and convergence helper
   calculations.
 - `src/sampler_types.h`: validated internal prior, Gram-storage, and PVE enums.
+- `src/coefficient_updates.h`: shared coefficient conditional draws, mixture
+  workspace, and serial R-session RNG adapter.
 - `src/summary_matrices.h`: dense, sparse, block, eigen, and LD-native matrix
   backends.
 - `src/parallel_blocks.h`: independent-block workers and per-block random-number
-  streams.
+  streams that use the shared coefficient-update kernel.
 - `src/gibbs_core.h`: templated coefficient, hyperparameter, PVE, and posterior
   accumulation kernel.
 - `src/gibbs.cpp`: exported Rcpp entry points and backend dispatch.

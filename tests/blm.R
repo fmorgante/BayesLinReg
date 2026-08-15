@@ -849,6 +849,34 @@ for (case in seq_len(nrow(native_gig_cases))) {
   )
 }
 
+# Exercise both sides of the Hörmann-Leydold regime-selection boundaries.
+# Setting chi = psi makes the transformed sampler parameter equal to beta.
+native_gig_boundary_cases <- expand.grid(
+  lambda = c(0.2, -0.2),
+  beta = c(0.49, 0.51)
+)
+native_gig_boundary_cases <- rbind(
+  native_gig_boundary_cases,
+  data.frame(
+    lambda = c(0.99, 0.99, 1.00, 1.99, 1.99, 2.01, -2.01),
+    beta = c(0.06, 0.07, 0.06, 2.99, 3.01, 2.99, 3.01)
+  )
+)
+for (case in seq_len(nrow(native_gig_boundary_cases))) {
+  parameters <- native_gig_boundary_cases[case, ]
+  expected_mean <- besselK(
+    parameters$beta, parameters$lambda + 1
+  ) / besselK(parameters$beta, parameters$lambda)
+  set.seed(1303 + case)
+  draws <- BayesLinReg:::draw_gig_native_rcpp_cpp(
+    20000L, parameters$lambda, parameters$beta, parameters$beta
+  )
+  stopifnot(
+    all(is.finite(draws)), all(draws > 0),
+    abs(mean(draws) - expected_mean) / expected_mean < 0.06
+  )
+}
+
 # Both low-level implementations report progress at 10-percent intervals.
 for (sampler_version in c("Rcpp", "R")) {
   progress_amounts <- integer()
@@ -1015,7 +1043,8 @@ integer_bound_calls <- list(
   function() BayesLinReg:::.validate_mcmc(integer_limit, 0, 1),
   function() BayesLinReg:::.validate_mcmc(100, 20, integer_limit),
   function() BayesLinReg:::.validate_nchains(integer_limit),
-  function() BayesLinReg:::.validate_nthreads(integer_limit)
+  function() BayesLinReg:::.validate_nthreads(integer_limit),
+  function() BayesLinReg:::.validate_bounded_integer(integer_limit, "value")
 )
 stopifnot(all(vapply(integer_bound_calls, function(call) {
   inherits(try(call(), silent = TRUE), "try-error")

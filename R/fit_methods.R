@@ -245,12 +245,13 @@ summary.blm_fit <- function(
   probs <- .validate_summary_probs(probs)
   coefficients <- match.arg(coefficients)
   rank_by <- match.arg(rank_by)
-  if (!is.numeric(max_coefficients) || length(max_coefficients) != 1L ||
-      is.na(max_coefficients) || !is.finite(max_coefficients) ||
-      max_coefficients != floor(max_coefficients) || max_coefficients < 0) {
-    stop("`max_coefficients` must be a nonnegative integer.", call. = FALSE)
-  }
-  max_coefficients <- as.integer(max_coefficients)
+  max_coefficients <- .validate_bounded_integer(
+    max_coefficients, "max_coefficients",
+    message = paste0(
+      "`max_coefficients` must be a nonnegative integer no larger than ",
+      "`.Machine$integer.max`."
+    )
+  )
   stored <- isTRUE(object$store_samples)
 
   intercept <- if (is.null(object$intercept_mean)) {

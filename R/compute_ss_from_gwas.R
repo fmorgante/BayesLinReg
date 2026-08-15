@@ -111,10 +111,13 @@ compute_ss_from_gwas <- function(
     stop("`se` must be a positive finite numeric vector matching `beta`.",
          call. = FALSE)
   }
-  if (!is.numeric(n) || length(n) != 1L || is.na(n) || !is.finite(n) ||
-      n != floor(n) || n < 2) {
-    stop("`n` must be an integer of at least two.", call. = FALSE)
-  }
+  n <- .validate_bounded_integer(
+    n, "n", minimum = 2,
+    message = paste0(
+      "`n` must be an integer of at least two and no larger than ",
+      "`.Machine$integer.max`."
+    )
+  )
   if (!is.numeric(residual_df) || length(residual_df) != 1L ||
       is.na(residual_df) || !is.finite(residual_df) || residual_df <= 0 ||
       residual_df > n - 1) {

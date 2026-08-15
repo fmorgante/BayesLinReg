@@ -223,6 +223,9 @@ invalid_summaries <- list(
   function() summary(single_fit, probs = c(0.5, 0.5)),
   function() summary(single_fit, max_coefficients = -1),
   function() summary(
+    single_fit, max_coefficients = .Machine$integer.max + 1
+  ),
+  function() summary(
     single_fit, coefficients = "top", max_coefficients = 1,
     rank_by = "inclusion_probability"
   )

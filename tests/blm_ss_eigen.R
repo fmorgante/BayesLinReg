@@ -39,6 +39,15 @@ eigenvectors <- decomposition$vectors[, keep, drop = FALSE]
 eigenvalues <- decomposition$values[keep]
 rownames(eigenvectors) <- colnames(X)
 
+stopifnot(inherits(try(
+  blm_ss_eigen(
+    .Machine$integer.max + 1, eigenvectors, eigenvalues, Xty,
+    ETA = list(model = "Normal", var = 1), residual_var = 1,
+    iterations = 10, burnin = 5
+  ),
+  silent = TRUE
+), "try-error"))
+
 # Internal preprocessing matches the original matrix expressions without
 # creating squared, transposed, or swept p-by-q intermediates.
 centered_Xty <- Xty - n * X_means * y_mean
