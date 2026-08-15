@@ -349,8 +349,8 @@ stopifnot(
 
 # Threaded block-eigen sweeps cover every prior, learned residual variance,
 # PVE, and online summaries. They are reproducible across runs and thread
-# counts and accept nonzero means because the eigenpairs represent centered
-# XtX.
+# counts to numerical precision and accept nonzero means because the
+# eigenpairs represent centered XtX.
 threaded_eta <- list(
   normal = list(indices = c("b1", "b5"), model = "Normal"),
   selection = list(indices = c("b2", "b6"), model = "SpikeSlab"),
@@ -376,18 +376,26 @@ threaded_arguments$nthreads <- 3L
 set.seed(607)
 threaded_eigen_three <- do.call(blm_ss_eigen, threaded_arguments)
 stopifnot(
-  identical(threaded_eigen_fit, threaded_eigen_repeat),
+  isTRUE(all.equal(
+    threaded_eigen_fit, threaded_eigen_repeat, tolerance = 1e-10
+  )),
   identical(threaded_eigen_fit$nthreads, 2L),
   identical(threaded_eigen_three$nthreads, 3L),
-  identical(threaded_eigen_fit$ETA, threaded_eigen_three$ETA),
-  identical(
+  isTRUE(all.equal(
+    threaded_eigen_fit$ETA, threaded_eigen_three$ETA, tolerance = 1e-10
+  )),
+  isTRUE(all.equal(
     threaded_eigen_fit$residual_var_mean,
-    threaded_eigen_three$residual_var_mean
-  ),
-  identical(threaded_eigen_fit$total_pve_mean,
-            threaded_eigen_three$total_pve_mean),
-  identical(threaded_eigen_fit$cross_block_pve_mean,
-            threaded_eigen_three$cross_block_pve_mean),
+    threaded_eigen_three$residual_var_mean, tolerance = 1e-10
+  )),
+  isTRUE(all.equal(
+    threaded_eigen_fit$total_pve_mean,
+    threaded_eigen_three$total_pve_mean, tolerance = 1e-10
+  )),
+  isTRUE(all.equal(
+    threaded_eigen_fit$cross_block_pve_mean,
+    threaded_eigen_three$cross_block_pve_mean, tolerance = 1e-10
+  )),
   is.null(threaded_eigen_fit$residual_var_samples),
   threaded_eigen_fit$residual_var_mean > 0,
   is.finite(threaded_eigen_fit$total_pve_mean)

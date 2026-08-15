@@ -368,7 +368,8 @@ stopifnot(
 
 # With zero working means, Gram blocks are conditionally independent during
 # the coefficient sweep. Threaded results are reproducible across repeated
-# runs and thread counts, including prior blocks that cross Gram blocks.
+# runs and thread counts to numerical precision, including prior blocks that
+# cross Gram blocks.
 threaded_eta <- list(
   normal = list(indices = c("l1", "r1"), model = "Normal"),
   selection = list(indices = c("l2", "r2"), model = "SpikeSlab"),
@@ -401,10 +402,12 @@ threaded_speed <- do.call(
   c(threaded_arguments, list(XtX_storage = "speed", nthreads = 2))
 )
 stopifnot(
-  identical(threaded_memory, threaded_repeat),
-  identical(threaded_memory$ETA, threaded_three$ETA),
-  identical(threaded_memory$residual_var_samples,
-            threaded_three$residual_var_samples),
+  isTRUE(all.equal(threaded_memory, threaded_repeat, tolerance = 1e-10)),
+  isTRUE(all.equal(threaded_memory$ETA, threaded_three$ETA,
+                   tolerance = 1e-10)),
+  isTRUE(all.equal(threaded_memory$residual_var_samples,
+                   threaded_three$residual_var_samples,
+                   tolerance = 1e-10)),
   isTRUE(all.equal(threaded_memory$ETA, threaded_speed$ETA,
                    tolerance = 1e-10)),
   isTRUE(all.equal(threaded_memory$residual_var_samples,

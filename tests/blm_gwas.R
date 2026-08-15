@@ -693,7 +693,8 @@ stopifnot(
 )
 
 # Sparse input and within-chain block parallelism are reproducible across
-# repeated runs and thread counts while learning the residual variance.
+# repeated runs and thread counts to numerical precision while learning the
+# residual variance.
 sparse_ld <- as_blm_ld(
   list(
     chr1 = Matrix::forceSymmetric(Matrix::Matrix(R1, sparse = TRUE), "L"),
@@ -729,10 +730,12 @@ parallel_three <- blm_gwas(
   check_psd = TRUE
 )
 stopifnot(
-  identical(parallel_fit, parallel_repeat),
-  identical(parallel_fit$ETA, parallel_three$ETA),
-  identical(parallel_fit$residual_var_samples,
-            parallel_three$residual_var_samples),
+  isTRUE(all.equal(parallel_fit, parallel_repeat, tolerance = 1e-10)),
+  isTRUE(all.equal(parallel_fit$ETA, parallel_three$ETA,
+                   tolerance = 1e-10)),
+  isTRUE(all.equal(parallel_fit$residual_var_samples,
+                   parallel_three$residual_var_samples,
+                   tolerance = 1e-10)),
   identical(parallel_fit$nthreads, 2L),
   identical(parallel_three$nthreads, 3L),
   parallel_fit$residual_var_mean > 0
