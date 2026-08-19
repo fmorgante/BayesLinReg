@@ -43,10 +43,12 @@
 #'   means. The default preserves the serial sampler and its RNG sequence.
 #' @param likelihood_df Optional positive integer no greater than `n`, giving
 #'   the likelihood dimension used in residual-variance, PVE, and
-#'   `expected_pve` calibration calculations.
+#'   moment-based `expected_pve` calibration calculations.
 #'   The default is `n - 1` when `X_means` and `y_mean` identify an intercept,
 #'   and `n` otherwise. For centered sufficient statistics supplied without
-#'   means, set `likelihood_df = n - 1` explicitly.
+#'   means, set `likelihood_df = n - 1` explicitly. The GlobalLocal
+#'   expected-sparsity heuristic instead uses `n`; see the package technical
+#'   details for its rationale.
 #' @inheritParams blm
 #'
 #' @return A fitted object with the same block-specific posterior summaries as

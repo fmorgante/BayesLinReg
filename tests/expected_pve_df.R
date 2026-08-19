@@ -108,3 +108,33 @@ stopifnot(
   isTRUE(all.equal(default_fit$ETA$ETA1$var_scale, default_expected_scale,
                    tolerance = 1e-14))
 )
+
+# The GlobalLocal expected-sparsity heuristic deliberately retains n, rather
+# than likelihood_df, in its prior scale. This is distinct from the
+# moment-based expected-PVE calibrations above.
+global_local_specification <- list(
+  model = "GlobalLocal", expected_nonzero = 1, expected_pve = expected_pve
+)
+expected_global_scale <- 1 / (length(gram_diagonal) - 1) * sqrt(
+  (1 - expected_pve) * reference_response_var / n
+)
+set.seed(1903)
+global_local_direct <- fit_direct(global_local_specification)
+set.seed(1903)
+global_local_eigen <- fit_eigen(global_local_specification)
+stopifnot(
+  isTRUE(all.equal(
+    global_local_direct$ETA$ETA1$global_scale, expected_global_scale,
+    tolerance = 1e-14
+  )),
+  isTRUE(all.equal(
+    global_local_eigen$ETA$ETA1$global_scale, expected_global_scale,
+    tolerance = 1e-14
+  )),
+  identical(
+    global_local_direct$ETA$ETA1$global_scale_calibration, "expected_pve"
+  ),
+  identical(
+    global_local_eigen$ETA$ETA1$global_scale_calibration, "expected_pve"
+  )
+)

@@ -54,6 +54,21 @@ stopifnot(isTRUE(all.equal(
   unname(diag(near_unit$XtX)), rep(n - 1, ncol(near_unit$XtX)), tolerance = 1e-12
 )))
 
+# The same accepted deviations are normalized without expanding a symmetric
+# sparse LD matrix to both triangles.
+near_unit_sparse_LD <- methods::as(
+  Matrix::forceSymmetric(Matrix::Matrix(near_unit_LD, sparse = TRUE), "L"),
+  "dsCMatrix"
+)
+near_unit_sparse <- compute_ss_from_gwas(beta, se, near_unit_sparse_LD, n)
+stopifnot(
+  inherits(near_unit_sparse$XtX, "dsCMatrix"),
+  isTRUE(all.equal(
+    unname(Matrix::diag(near_unit_sparse$XtX)),
+    rep(n - 1, ncol(near_unit_sparse$XtX)), tolerance = 1e-12
+  ))
+)
+
 # The default sufficient-statistics result feeds directly into a model that
 # does not use expected-PVE calibration without passing the unused reference
 # response variance.
