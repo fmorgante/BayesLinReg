@@ -54,8 +54,8 @@ for (sampler_version in c("Rcpp", "R")) {
     identical(block$var_scale, 2),
     identical(dim(block$component_samples), c(300L, 6L)),
     identical(dim(block$pi_samples), c(300L, 4L)),
-    length(block$var_samples) == 300L,
-    all(block$var_samples > 0),
+    length(block$sampled_slab_var_samples) == 300L,
+    all(block$sampled_slab_var_samples > 0),
     all(block$component_samples %in% 1:4),
     isTRUE(all.equal(unname(rowSums(block$component_probability)), rep(1, 6))),
     isTRUE(all.equal(
@@ -69,8 +69,17 @@ for (sampler_version in c("Rcpp", "R")) {
                      summary_fit$ETA$ETA1$component_probability)),
     isTRUE(all.equal(block$pi_mean, summary_fit$ETA$ETA1$pi_mean)),
     isTRUE(all.equal(block$pi_var, summary_fit$ETA$ETA1$pi_var)),
-    isTRUE(all.equal(block$var_mean, summary_fit$ETA$ETA1$var_mean)),
-    isTRUE(all.equal(block$var_var, summary_fit$ETA$ETA1$var_var))
+    isTRUE(all.equal(
+      block$sampled_slab_var_mean,
+      summary_fit$ETA$ETA1$sampled_slab_var_mean
+    )),
+    isTRUE(all.equal(
+      block$sampled_slab_var_var,
+      summary_fit$ETA$ETA1$sampled_slab_var_var
+    )),
+    is.null(block$var_samples),
+    is.null(block$var_mean),
+    is.null(block$var_var)
   )
 
   set.seed(702)

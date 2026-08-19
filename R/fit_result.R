@@ -231,11 +231,11 @@
         multi_var_samples <- samples$multi_var_samples[, block_index]
         result$component_samples <- component_samples
         result$pi_samples <- multi_pi_samples
-        result$var_samples <- multi_var_samples
+        result$sampled_slab_var_samples <- multi_var_samples
         result$pi_mean <- colMeans(multi_pi_samples)
         result$pi_var <- apply(multi_pi_samples, 2L, stats::var)
-        result$var_mean <- mean(multi_var_samples)
-        result$var_var <- stats::var(multi_var_samples)
+        result$sampled_slab_var_mean <- mean(multi_var_samples)
+        result$sampled_slab_var_var <- stats::var(multi_var_samples)
       } else {
         component_probability <-
           samples$multi_component_sum[[block_index]][
@@ -250,14 +250,14 @@
           samples$multi_pi_m2[[block_index]], samples$number_of_draws
         )
         names(result$pi_mean) <- names(result$pi_var) <- component_names
-        result$var_mean <- samples$multi_var_mean[block_index]
-        result$var_var <- .variance_from_m2(
+        result$sampled_slab_var_mean <- samples$multi_var_mean[block_index]
+        result$sampled_slab_var_var <- .variance_from_m2(
           samples$multi_var_m2[block_index], samples$number_of_draws
         )
       }
       if (!is.na(block$fixed_var)) {
-        result$var_mean <- block$fixed_var
-        result$var_var <- 0
+        result$sampled_slab_var_mean <- block$fixed_var
+        result$sampled_slab_var_var <- 0
       }
       result$component_probability <- component_probability
       result$inclusion_probability <- 1 - component_probability[, "spike"]

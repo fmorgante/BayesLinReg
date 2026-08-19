@@ -486,7 +486,8 @@ summary.blm_fit <- function(
               block$tau_sq_samples)
     } else if (block$model == "SpikeMultiSlab") {
       add_row(paste0(block_name, "::shared_var"),
-              block$var_mean, block$var_var, block$var_samples)
+              block$sampled_slab_var_mean, block$sampled_slab_var_var,
+              block$sampled_slab_var_samples)
       for (component in names(block$pi_mean)) {
         add_row(
           paste0(block_name, "::pi::", component),

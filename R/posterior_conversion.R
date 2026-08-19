@@ -120,12 +120,12 @@
         "pi_", block_name, "_", component_names
       )
       if (is.null(block$var)) {
-        if (is.null(block$var_samples) ||
-            length(block$var_samples) != number_of_draws) {
+        if (is.null(block$sampled_slab_var_samples) ||
+            length(block$sampled_slab_var_samples) != number_of_draws) {
           stop("`fit` contains incompatible multi-slab variance samples.",
                call. = FALSE)
         }
-        sample_matrix <- cbind(sample_matrix, block$var_samples)
+        sample_matrix <- cbind(sample_matrix, block$sampled_slab_var_samples)
         colnames(sample_matrix)[ncol(sample_matrix)] <- paste0(
           "var_", block_name
         )

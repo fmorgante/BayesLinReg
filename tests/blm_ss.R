@@ -144,21 +144,21 @@ for (sampler_version in c("Rcpp", "R")) {
       Normal = stored_block$normal_var_samples,
       SpikeSlab = stored_block$slab_var_samples,
       GlobalLocal = stored_block$tau_sq_samples,
-      SpikeMultiSlab = stored_block$var_samples
+      SpikeMultiSlab = stored_block$sampled_slab_var_samples
     )
     variance_mean <- switch(
       model,
       Normal = online_block$normal_var_mean,
       SpikeSlab = online_block$slab_var_mean,
       GlobalLocal = online_block$tau_sq_mean,
-      SpikeMultiSlab = online_block$var_mean
+      SpikeMultiSlab = online_block$sampled_slab_var_mean
     )
     variance_var <- switch(
       model,
       Normal = online_block$normal_var_var,
       SpikeSlab = online_block$slab_var_var,
       GlobalLocal = online_block$tau_sq_var,
-      SpikeMultiSlab = online_block$var_var
+      SpikeMultiSlab = online_block$sampled_slab_var_var
     )
     fixed_value <- if (model == "GlobalLocal") {
       specification$global_var
