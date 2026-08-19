@@ -720,6 +720,15 @@ sweep. Independent exact LD sub-blocks may be processed concurrently, while
 updates remain sequential inside a connected block. For $m_b$ stored values
 in block $b$, a sweep costs $O(p+\sum_b m_b)$.
 
+For posterior PVE, one fused pass over each compressed LD block accumulates the
+total quadratic form, every `ETA` block's standalone quadratic form, and its
+allocated contribution. Independent LD blocks are processed concurrently and
+then reduced in fixed LD-block order, so results do not depend on thread
+scheduling. Reusable workspace costs $O(BK)$ doubles for $B$ LD blocks and $K$
+`ETA` blocks; with the usual one or two `ETA` blocks this is small. The PVE
+pass remains $O(p+\sum_b m_b)$ per retained draw and is never run during
+burn-in or skipped iterations.
+
 Sampler coordinates always retain LD order. Prior-block membership, predictor
 scaling, and posterior extraction are stored as separate mappings, so `ETA`
 blocks can cross LD blocks or request a different output order without

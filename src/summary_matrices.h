@@ -631,6 +631,19 @@ class LDSummaryMatrix {
     return result;
   }
 
+  // Accumulate all PVE quadratic forms contributed by one independent LD
+  // block. The definition is in parallel_blocks.h, where LD blocks can be
+  // dispatched concurrently without sharing writable output.
+  void pve_block_quadratics(
+      const int ld_block,
+      const std::vector<double>& coefficient,
+      const int* prior_block,
+      const int number_of_prior_blocks,
+      double& total,
+      double& contribution_scale,
+      double* standalone,
+      double* allocated) const;
+
  private:
   struct Block {
     int type = 0;

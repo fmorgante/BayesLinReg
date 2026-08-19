@@ -120,6 +120,162 @@ inline void LDSummaryMatrix::multiply(
   RcppParallel::parallelFor(0, blocks_.size(), worker, 1, nthreads_);
 }
 
+// Reusable retained-draw PVE storage. Each LD block owns one output row, so
+// workers never contend for writes. Reduction is deliberately performed later
+// in LD-block order to keep results independent of thread scheduling.
+struct LDPveWorkspace {
+  int ld_blocks = 0;
+  int prior_blocks = 0;
+  std::vector<double> total;
+  std::vector<double> contribution_scale;
+  std::vector<double> standalone;
+  std::vector<double> allocated;
+
+  void ensure_size(const int new_ld_blocks, const int new_prior_blocks) {
+    if (ld_blocks == new_ld_blocks && prior_blocks == new_prior_blocks) return;
+    ld_blocks = new_ld_blocks;
+    prior_blocks = new_prior_blocks;
+    total.resize(ld_blocks);
+    contribution_scale.resize(ld_blocks);
+    const std::size_t block_entries =
+      static_cast<std::size_t>(ld_blocks) * prior_blocks;
+    standalone.resize(block_entries);
+    allocated.resize(block_entries);
+  }
+};
+
+inline void LDSummaryMatrix::pve_block_quadratics(
+    const int ld_block,
+    const std::vector<double>& coefficient,
+    const int* prior_block,
+    const int number_of_prior_blocks,
+    double& total,
+    double& contribution_scale,
+    double* standalone,
+    double* allocated) const {
+  total = 0.0;
+  contribution_scale = 0.0;
+  std::fill(standalone, standalone + number_of_prior_blocks, 0.0);
+  std::fill(allocated, allocated + number_of_prior_blocks, 0.0);
+
+  const Block& block = blocks_[ld_block];
+  const bool single_prior_block = number_of_prior_blocks == 1;
+  for (int column = 0; column < block.size; ++column) {
+    const int global_column = block.global[column];
+    const double column_coefficient = coefficient[global_column];
+    const double diagonal_contribution =
+      column_coefficient * diagonal(global_column) * column_coefficient;
+    total += diagonal_contribution;
+    contribution_scale += std::abs(diagonal_contribution);
+
+    if (!single_prior_block) {
+      const int column_prior_block = prior_block[global_column] - 1;
+      standalone[column_prior_block] += diagonal_contribution;
+      allocated[column_prior_block] += diagonal_contribution;
+    }
+
+    for (int position = block.indptr[column];
+         position < block.indptr[column + 1]; ++position) {
+      const int row = block.type == 0
+        ? column + 1 + position - block.indptr[column]
+        : block.row_index[position];
+      const int global_row = block.global[row];
+      const double edge_contribution = column_coefficient *
+        scale_[global_column] * off_diagonal_scale_ * block.data[position] *
+        scale_[global_row] * coefficient[global_row];
+      total += 2.0 * edge_contribution;
+      contribution_scale += 2.0 * std::abs(edge_contribution);
+
+      if (!single_prior_block) {
+        const int column_prior_block = prior_block[global_column] - 1;
+        const int row_prior_block = prior_block[global_row] - 1;
+        if (column_prior_block == row_prior_block) {
+          standalone[column_prior_block] += 2.0 * edge_contribution;
+          allocated[column_prior_block] += 2.0 * edge_contribution;
+        } else {
+          allocated[column_prior_block] += edge_contribution;
+          allocated[row_prior_block] += edge_contribution;
+        }
+      }
+    }
+  }
+
+  if (single_prior_block) {
+    standalone[0] = total;
+    allocated[0] = total;
+  }
+}
+
+class LDPveWorker : public RcppParallel::Worker {
+ public:
+  LDPveWorker(
+      const LDSummaryMatrix& matrix,
+      const std::vector<double>& coefficient,
+      const int* prior_block,
+      const int number_of_prior_blocks,
+      LDPveWorkspace& workspace)
+    : matrix_(matrix), coefficient_(coefficient), prior_block_(prior_block),
+      number_of_prior_blocks_(number_of_prior_blocks), workspace_(workspace) {}
+
+  void operator()(const std::size_t begin, const std::size_t end) {
+    for (std::size_t ld_block = begin; ld_block < end; ++ld_block) {
+      const std::size_t offset = ld_block * number_of_prior_blocks_;
+      matrix_.pve_block_quadratics(
+        static_cast<int>(ld_block), coefficient_, prior_block_,
+        number_of_prior_blocks_, workspace_.total[ld_block],
+        workspace_.contribution_scale[ld_block],
+        workspace_.standalone.data() + offset,
+        workspace_.allocated.data() + offset
+      );
+    }
+  }
+
+ private:
+  const LDSummaryMatrix& matrix_;
+  const std::vector<double>& coefficient_;
+  const int* prior_block_;
+  int number_of_prior_blocks_;
+  LDPveWorkspace& workspace_;
+};
+
+inline void parallel_ld_pve_quadratics(
+    const LDSummaryMatrix& matrix,
+    const std::vector<double>& coefficient,
+    const Rcpp::IntegerVector& prior_block,
+    const int number_of_prior_blocks,
+    LDPveWorkspace& workspace,
+    std::vector<double>& standalone,
+    std::vector<double>& allocated,
+    double& total,
+    double& contribution_scale,
+    const int nthreads) {
+  const int ld_blocks = matrix.block_count();
+  workspace.ensure_size(ld_blocks, number_of_prior_blocks);
+  LDPveWorker worker(
+    matrix, coefficient, prior_block.begin(), number_of_prior_blocks, workspace
+  );
+  if (nthreads > 1 && ld_blocks > 1) {
+    RcppParallel::parallelFor(0, ld_blocks, worker, 1, nthreads);
+  } else {
+    worker(0, ld_blocks);
+  }
+
+  total = 0.0;
+  contribution_scale = 0.0;
+  std::fill(standalone.begin(), standalone.end(), 0.0);
+  std::fill(allocated.begin(), allocated.end(), 0.0);
+  for (int ld_block = 0; ld_block < ld_blocks; ++ld_block) {
+    total += workspace.total[ld_block];
+    contribution_scale += workspace.contribution_scale[ld_block];
+    const std::size_t offset =
+      static_cast<std::size_t>(ld_block) * number_of_prior_blocks;
+    for (int block = 0; block < number_of_prior_blocks; ++block) {
+      standalone[block] += workspace.standalone[offset + block];
+      allocated[block] += workspace.allocated[offset + block];
+    }
+  }
+}
+
 inline std::uint64_t splitmix64(std::uint64_t value) {
   value += UINT64_C(0x9e3779b97f4a7c15);
   value = (value ^ (value >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
@@ -421,6 +577,12 @@ struct has_streaming_serial_sweep_order : std::false_type {};
 
 template <>
 struct has_streaming_serial_sweep_order<BlockSummaryMatrix> : std::true_type {};
+
+template <typename SummaryMatrix>
+struct has_parallel_ld_pve : std::false_type {};
+
+template <>
+struct has_parallel_ld_pve<LDSummaryMatrix> : std::true_type {};
 
 }  // namespace bayeslinreg
 

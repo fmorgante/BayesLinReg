@@ -707,7 +707,7 @@ parallel_fit <- blm_gwas(
   gwas, sparse_ld, ETA,
   residual_shape = 2, residual_scale = 1,
   iterations = 60L, burnin = 20L,
-  store_samples = TRUE,
+  store_samples = TRUE, compute_pve = TRUE, pve_type = "allocated",
   nthreads = 2L,
   check_psd = TRUE
 )
@@ -716,7 +716,7 @@ parallel_repeat <- blm_gwas(
   gwas, sparse_ld, ETA,
   residual_shape = 2, residual_scale = 1,
   iterations = 60L, burnin = 20L,
-  store_samples = TRUE,
+  store_samples = TRUE, compute_pve = TRUE, pve_type = "allocated",
   nthreads = 2L,
   check_psd = TRUE
 )
@@ -725,7 +725,7 @@ parallel_three <- blm_gwas(
   gwas, sparse_ld, ETA,
   residual_shape = 2, residual_scale = 1,
   iterations = 60L, burnin = 20L,
-  store_samples = TRUE,
+  store_samples = TRUE, compute_pve = TRUE, pve_type = "allocated",
   nthreads = 3L,
   check_psd = TRUE
 )
@@ -736,9 +736,41 @@ stopifnot(
   isTRUE(all.equal(parallel_fit$residual_var_samples,
                    parallel_three$residual_var_samples,
                    tolerance = 1e-10)),
+  isTRUE(all.equal(parallel_fit$total_pve_samples,
+                   parallel_three$total_pve_samples,
+                   tolerance = 1e-10)),
+  isTRUE(all.equal(parallel_fit$cross_block_pve_samples,
+                   parallel_three$cross_block_pve_samples,
+                   tolerance = 1e-10)),
+  isTRUE(all.equal(
+    vapply(
+      parallel_fit$ETA, `[[`,
+      numeric(length(parallel_fit$total_pve_samples)), "pve_samples"
+    ),
+    vapply(parallel_three$ETA, `[[`,
+           numeric(length(parallel_three$total_pve_samples)), "pve_samples"),
+    tolerance = 1e-10
+  )),
   identical(parallel_fit$nthreads, 2L),
   identical(parallel_three$nthreads, 3L),
   parallel_fit$residual_var_mean > 0
+)
+
+# The one-ETA fast path uses the same total quadratic for total, standalone,
+# and allocated signal, so cross-block PVE is exactly zero.
+set.seed(1110)
+parallel_single_eta <- blm_gwas(
+  gwas, sparse_ld, single_eta,
+  residual_var = 1, iterations = 40L, burnin = 10L,
+  store_samples = TRUE, compute_pve = TRUE, nthreads = 2L
+)
+stopifnot(
+  isTRUE(all.equal(
+    parallel_single_eta$ETA$ETA1$pve_samples,
+    parallel_single_eta$total_pve_samples,
+    tolerance = 1e-12
+  )),
+  all(parallel_single_eta$cross_block_pve_samples == 0)
 )
 
 # Every prior family, expected-PVE calibration, fixed effects, both PVE

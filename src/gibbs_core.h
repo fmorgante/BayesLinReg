@@ -227,6 +227,16 @@ Rcpp::List blm_gibbs_core(
   double total_pve_m2 = 0.0;
   double cross_block_pve_mean = 0.0;
   double cross_block_pve_m2 = 0.0;
+  // The LD specialization reuses per-LD-block output across retained draws.
+  // Other summary-matrix backends leave this empty and use the generic path.
+  LDPveWorkspace ld_pve_workspace;
+  if constexpr (has_parallel_ld_pve<SummaryMatrix>::value) {
+    if (compute_pve) {
+      ld_pve_workspace.ensure_size(
+        summary_XtX.block_count(), number_of_blocks
+      );
+    }
+  }
   Rcpp::NumericVector normal_var_mean(
     has_normal ? number_of_blocks : 0
   );
@@ -780,33 +790,47 @@ Rcpp::List blm_gibbs_core(
           return std::max(0.0, quadratic);
         };
         if (use_sufficient_statistics) {
-          std::vector<double> centered_fitted(p, 0.0);
           double total_contribution_scale = 0.0;
-          for (int j = 0; j < p; ++j) {
-            centered_fitted[j] = summary_Xty[j] -
-              summary_XtX.corrected_value(corrected_rhs, j, center_dot);
-            const double contribution = coefficient[j] * centered_fitted[j];
-            total_sum_squares += contribution;
-            total_contribution_scale += std::abs(contribution);
+          if constexpr (has_parallel_ld_pve<SummaryMatrix>::value) {
+            parallel_ld_pve_quadratics(
+              summary_XtX, coefficient, block_id, number_of_blocks,
+              ld_pve_workspace, standalone_sum_squares,
+              allocated_sum_squares, total_sum_squares,
+              total_contribution_scale, nthreads
+            );
+          } else {
+            std::vector<double> centered_fitted(p, 0.0);
+            for (int j = 0; j < p; ++j) {
+              centered_fitted[j] = summary_Xty[j] -
+                summary_XtX.corrected_value(corrected_rhs, j, center_dot);
+              const double contribution = coefficient[j] * centered_fitted[j];
+              total_sum_squares += contribution;
+              total_contribution_scale += std::abs(contribution);
+            }
+            for (int block = 0; block < number_of_blocks; ++block) {
+              const double standalone_quadratic = summary_XtX.block_quadratic(
+                coefficient, block_predictors[block], block_id, block
+              );
+              standalone_sum_squares[block] = standalone_quadratic;
+              const std::vector<int>& predictors = block_predictors[block];
+              for (std::size_t index = 0; index < predictors.size(); ++index) {
+                const int j = predictors[index];
+                allocated_sum_squares[block] +=
+                  coefficient[j] * centered_fitted[j];
+              }
+            }
           }
           total_sum_squares = guard_pve_quadratic(
             total_sum_squares, total_contribution_scale, "total"
           );
           for (int block = 0; block < number_of_blocks; ++block) {
-            const double standalone_quadratic = summary_XtX.block_quadratic(
-              coefficient, block_predictors[block], block_id, block
-            );
+            const double standalone_quadratic =
+              standalone_sum_squares[block];
             standalone_sum_squares[block] = guard_pve_quadratic(
               standalone_quadratic,
               std::max(total_contribution_scale, std::abs(standalone_quadratic)),
               "standalone"
             );
-            const std::vector<int>& predictors = block_predictors[block];
-            for (std::size_t index = 0; index < predictors.size(); ++index) {
-              const int j = predictors[index];
-              allocated_sum_squares[block] +=
-                coefficient[j] * centered_fitted[j];
-            }
           }
         } else {
           std::vector<double> total_fitted(n, 0.0);
