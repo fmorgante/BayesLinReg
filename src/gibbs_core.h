@@ -434,6 +434,13 @@ Rcpp::List blm_gibbs_core(
     }
   }
 
+  std::vector<int> serial_sweep_order;
+  if constexpr (has_streaming_serial_sweep_order<SummaryMatrix>::value) {
+    if (use_sufficient_statistics && summary_XtX.has_streaming_blocks()) {
+      serial_sweep_order = summary_XtX.serial_sweep_order();
+    }
+  }
+
   for (int iteration = 1; iteration <= iterations; ++iteration) {
     // Update each coefficient from its univariate conditional normal.
     bool parallel_sweep = false;
@@ -450,7 +457,10 @@ Rcpp::List blm_gibbs_core(
       }
     }
     if (!parallel_sweep) {
-      for (int j = 0; j < p; ++j) {
+      for (int scan_index = 0; scan_index < p; ++scan_index) {
+        const int j = serial_sweep_order.empty()
+          ? scan_index
+          : serial_sweep_order[scan_index];
         const int block = block_id[j] - 1;
         const PriorModel model = prior_models[block];
         const int local_index = model_local_index[j];
@@ -505,9 +515,9 @@ Rcpp::List blm_gibbs_core(
       }
     }
 
-    // Streaming triangular blocks update only coordinates that remain in the
-    // ascending scan. Reconstruct the full state once after every sweep so it
-    // is ready for retained-draw summaries and the next iteration.
+    // Streaming triangular blocks update only coordinates that remain in their
+    // block-local scan. Reconstruct the full state once after every sweep so
+    // it is ready for retained-draw summaries and the next iteration.
     bool streaming_state_reconstructed = false;
     if constexpr (has_streaming_triangular_blocks<SummaryMatrix>::value) {
       if (summary_XtX.has_streaming_blocks()) {
@@ -750,20 +760,46 @@ Rcpp::List blm_gibbs_core(
         std::vector<double> standalone_sum_squares(number_of_blocks, 0.0);
         std::vector<double> allocated_sum_squares(number_of_blocks, 0.0);
         double total_sum_squares = 0.0;
+        auto guard_pve_quadratic = [](const double quadratic,
+                                      const double contribution_scale,
+                                      const char* label) {
+          const double tolerance = std::sqrt(
+            std::numeric_limits<double>::epsilon()
+          ) * std::max(1.0, contribution_scale);
+          if (!std::isfinite(quadratic)) {
+            Rcpp::stop("The %s PVE quadratic is non-finite.", label);
+          }
+          if (quadratic < -tolerance) {
+            Rcpp::stop(
+              "The %s PVE quadratic is materially negative "
+              "(quadratic %.6g; tolerance %.6g). The supplied sufficient "
+              "statistics are incompatible.",
+              label, quadratic, tolerance
+            );
+          }
+          return std::max(0.0, quadratic);
+        };
         if (use_sufficient_statistics) {
           std::vector<double> centered_fitted(p, 0.0);
+          double total_contribution_scale = 0.0;
           for (int j = 0; j < p; ++j) {
             centered_fitted[j] = summary_Xty[j] -
               summary_XtX.corrected_value(corrected_rhs, j, center_dot);
-            total_sum_squares += coefficient[j] * centered_fitted[j];
+            const double contribution = coefficient[j] * centered_fitted[j];
+            total_sum_squares += contribution;
+            total_contribution_scale += std::abs(contribution);
           }
-          total_sum_squares = std::max(0.0, total_sum_squares);
+          total_sum_squares = guard_pve_quadratic(
+            total_sum_squares, total_contribution_scale, "total"
+          );
           for (int block = 0; block < number_of_blocks; ++block) {
-            standalone_sum_squares[block] = std::max(
-              0.0,
-              summary_XtX.block_quadratic(
-                coefficient, block_predictors[block], block_id, block
-              )
+            const double standalone_quadratic = summary_XtX.block_quadratic(
+              coefficient, block_predictors[block], block_id, block
+            );
+            standalone_sum_squares[block] = guard_pve_quadratic(
+              standalone_quadratic,
+              std::max(total_contribution_scale, std::abs(standalone_quadratic)),
+              "standalone"
             );
             const std::vector<int>& predictors = block_predictors[block];
             for (std::size_t index = 0; index < predictors.size(); ++index) {

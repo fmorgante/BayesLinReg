@@ -42,7 +42,8 @@
 #'   Values greater than one require `nchains = 1` and zero working predictor
 #'   means. The default preserves the serial sampler and its RNG sequence.
 #' @param likelihood_df Optional positive integer no greater than `n`, giving
-#'   the likelihood dimension used in residual-variance and PVE calculations.
+#'   the likelihood dimension used in residual-variance, PVE, and
+#'   `expected_pve` calibration calculations.
 #'   The default is `n - 1` when `X_means` and `y_mean` identify an intercept,
 #'   and `n` otherwise. For centered sufficient statistics supplied without
 #'   means, set `likelihood_df = n - 1` explicitly.
@@ -266,6 +267,12 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
   } else {
     yty
   }
+  yty_tolerance <- sqrt(.Machine$double.eps) *
+    max(1, if (is.null(yty)) 0 else abs(yty))
+  if (!is.null(centered_yty) && centered_yty < 0 &&
+      centered_yty >= -yty_tolerance) {
+    centered_yty <- 0
+  }
 
   variance_reference <- if (fit_intercept) {
     pmax(1, abs(XtX_diagonal), abs(n * X_means^2))
@@ -325,7 +332,7 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
         indices <- source_indices[[block_index]]
         sum(
           centered_diagonal[indices] /
-            predictor_scales[[block_index]]^2 / (n - 1)
+            predictor_scales[[block_index]]^2 / likelihood_df
         )
       },
       numeric(1)

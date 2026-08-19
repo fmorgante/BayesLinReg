@@ -92,7 +92,9 @@ triangular representation for \code{\link[=blm_ss]{blm_ss()}} storage planning.
 
 The function performs only basic input validation. It does not diagnose
 allele flips or broader incompatibility between the GWAS statistics and
-LD. Eigen output uses a complete dense eigendecomposition. Matrix input
+LD. Diagonal deviations within the unit-diagonal validation tolerance are
+normalized to exactly one before reconstruction. Eigen output uses a complete
+dense eigendecomposition. Matrix input
 requires \eqn{O(p^2)} memory and \eqn{O(p^3)} time; list input processes
 one scaled block at a time and requires peak eigendecomposition storage
 for the largest block. Every eigenpair is returned, including zero and

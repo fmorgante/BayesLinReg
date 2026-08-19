@@ -50,6 +50,30 @@
   max(0, sse)
 }
 
+.guard_pve_quadratic <- function(quadratic, contribution_scale, label) {
+  tolerance <- sqrt(.Machine$double.eps) * max(1, contribution_scale)
+  if (!is.finite(quadratic)) {
+    stop(
+      sprintf("The %s PVE quadratic is non-finite.", label),
+      call. = FALSE
+    )
+  }
+  if (quadratic < -tolerance) {
+    stop(
+      sprintf(
+        paste0(
+          "The %s PVE quadratic is materially negative ",
+          "(quadratic %.6g; tolerance %.6g). The supplied sufficient ",
+          "statistics are incompatible."
+        ),
+        label, quadratic, tolerance
+      ),
+      call. = FALSE
+    )
+  }
+  max(0, quadratic)
+}
+
 .blm_gibbs <- function(y, x, residual_shape, residual_scale,
                        iterations, burnin, thin,
                        progress_callback = NULL,
@@ -550,18 +574,21 @@
       if (compute_pve) {
         if (use_sufficient_statistics) {
           fitted_crossproducts <- Xty - corrected_rhs
-          total_sum_squares <- max(
-            0, sum(coefficient * fitted_crossproducts)
+          total_contributions <- coefficient * fitted_crossproducts
+          total_sum_squares <- .guard_pve_quadratic(
+            sum(total_contributions), sum(abs(total_contributions)), "total"
           )
           standalone_sum_squares <- vapply(
             seq_along(block_predictors),
             function(block) {
               predictors <- block_predictors[[block]]
               block_coefficient <- coefficient[predictors]
-              max(0, sum(
-                block_coefficient *
-                  drop(block_XtX[[block]] %*% block_coefficient)
-              ))
+              block_contributions <- block_coefficient *
+                drop(block_XtX[[block]] %*% block_coefficient)
+              .guard_pve_quadratic(
+                sum(block_contributions), sum(abs(block_contributions)),
+                "standalone"
+              )
             },
             numeric(1)
           )
@@ -575,7 +602,10 @@
           )
         } else {
           total_fitted <- y_centered - residuals
-          total_sum_squares <- max(0, sum(total_fitted^2))
+          total_contributions <- total_fitted^2
+          total_sum_squares <- .guard_pve_quadratic(
+            sum(total_contributions), sum(abs(total_contributions)), "total"
+          )
           standalone_sum_squares <- allocated_sum_squares <-
             numeric(number_of_blocks)
           for (block in seq_len(number_of_blocks)) {
@@ -584,7 +614,11 @@
               x_centered[, predictors, drop = FALSE] %*%
                 coefficient[predictors]
             )
-            standalone_sum_squares[block] <- max(0, sum(block_fitted^2))
+            block_contributions <- block_fitted^2
+            standalone_sum_squares[block] <- .guard_pve_quadratic(
+              sum(block_contributions), sum(abs(block_contributions)),
+              "standalone"
+            )
             allocated_sum_squares[block] <- sum(block_fitted * total_fitted)
           }
         }

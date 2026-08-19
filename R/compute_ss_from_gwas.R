@@ -66,7 +66,9 @@
 #'
 #'   The function performs only basic input validation. It does not diagnose
 #'   allele flips or broader incompatibility between the GWAS statistics and
-#'   LD. Eigen output uses a complete dense eigendecomposition. Matrix input
+#'   LD. Diagonal deviations within the unit-diagonal validation tolerance are
+#'   normalized to exactly one before reconstruction. Eigen output uses a
+#'   complete dense eigendecomposition. Matrix input
 #'   requires \eqn{O(p^2)} memory and \eqn{O(p^3)} time; list input processes
 #'   one scaled block at a time and requires peak eigendecomposition storage
 #'   for the largest block. Every eigenpair is returned, including zero and
@@ -360,6 +362,11 @@ compute_ss_from_gwas <- function(
   }
   if (any(abs(diagonal - 1) > 1e-6)) {
     stop(sprintf("The diagonal of %s must equal one.", label), call. = FALSE)
+  }
+  if (inherits(matrix, "sparseMatrix")) {
+    Matrix::diag(matrix) <- 1
+  } else {
+    diag(matrix) <- 1
   }
   maximum <- if (inherits(matrix, "sparseMatrix")) {
     if (length(matrix@x)) max(abs(matrix@x)) else 0

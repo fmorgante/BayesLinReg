@@ -416,6 +416,12 @@ struct has_streaming_triangular_blocks<BlockSummaryMatrix> : std::true_type {};
 template <>
 struct has_streaming_triangular_blocks<LDSummaryMatrix> : std::true_type {};
 
+template <typename SummaryMatrix>
+struct has_streaming_serial_sweep_order : std::false_type {};
+
+template <>
+struct has_streaming_serial_sweep_order<BlockSummaryMatrix> : std::true_type {};
+
 }  // namespace bayeslinreg
 
 #endif

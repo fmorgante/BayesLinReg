@@ -259,6 +259,24 @@ class BlockSummaryMatrix {
 
   bool has_streaming_blocks() const { return has_streaming_blocks_; }
 
+  // Lower-triangular sparse blocks can update only block-local coordinates
+  // that have not yet been visited.  When ETA order differs from the source
+  // Gram order, retain the global scan slots but place each streaming block's
+  // predictors in its local triangular order within those slots.
+  std::vector<int> serial_sweep_order() const {
+    std::vector<int> order(p_);
+    for (int j = 0; j < p_; ++j) order[j] = j;
+    for (const Block& block : blocks_) {
+      if (block.type != GramStorage::SparseLowerTriangular) continue;
+      std::vector<int> slots = block.global;
+      std::sort(slots.begin(), slots.end());
+      for (int local = 0; local < block.size; ++local) {
+        order[slots[local]] = block.global[local];
+      }
+    }
+    return order;
+  }
+
   double diagonal(const int j) const {
     return diagonal_[j] - center_[j] * center_[j];
   }

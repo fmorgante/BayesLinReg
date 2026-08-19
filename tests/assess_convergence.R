@@ -112,6 +112,19 @@ stopifnot(
   !any(grepl("coefficient|inclusion|local_var|::", expected_parameters))
 )
 
+# A single assessed parameter must retain a parameter-by-chain Geweke matrix.
+one_parameter_fit <- combined_fit
+one_parameter_fit$intercept_samples <- NULL
+one_parameter_fit$residual_shape <- NULL
+one_parameter_fit$ETA <- one_parameter_fit$ETA["normal"]
+one_parameter_diagnostics <- assess_convergence(one_parameter_fit, plot = FALSE)
+stopifnot(
+  identical(names(one_parameter_diagnostics$rhat), "normal_var_normal"),
+  identical(dim(one_parameter_diagnostics$geweke), c(1L, 2L)),
+  identical(rownames(one_parameter_diagnostics$geweke), "normal_var_normal"),
+  identical(colnames(one_parameter_diagnostics$geweke), c("chain_1", "chain_2"))
+)
+
 # Trace plotting covers every assessed parameter.
 trace_file <- tempfile(fileext = ".pdf")
 grDevices::pdf(trace_file)

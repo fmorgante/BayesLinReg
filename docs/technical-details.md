@@ -344,16 +344,22 @@ the stored orthogonal offset described in Section 2.4.
 ### 1.8 Prior calibration with `expected_pve`
 
 Let $V_y$ be `reference_response_var`, let $h_b$ be a block's
-`expected_pve`, and define
+`expected_pve`, let $G_b=Z_b'Z_b$ be its working-scale Gram block, and
+define
 
 $$
 V_{g,b}=h_bV_y,\qquad
-D_b=\sum_{j\in b}\mathrm{Var}(Z_j).
+D_b=\frac{\mathrm{tr}(G_b)}{d_L}
+   =\sum_{j\in b}\frac{Z_j'Z_j}{d_L}.
 $$
 
-With default standardization, $D_b=p_b$. The calibration matches the prior
-mean block signal variance under independent, zero-mean coefficient priors; it
-does not claim that the prior mean of the random PVE ratio equals $h_b$.
+Thus the calibration uses the same `likelihood_df` denominator as posterior
+PVE. Predictor standardization itself continues to use sample standard
+deviations: each standardized column has $Z_j'Z_j=n-1$, so
+$D_b=p_b(n-1)/d_L$, reducing to $p_b$ when $d_L=n-1$. The calibration matches
+the prior mean block signal variance $E(f_b'f_b/d_L)$ under independent,
+zero-mean coefficient priors; it does not claim that the prior mean of the
+random PVE ratio equals $h_b$.
 
 For `Normal`,
 
@@ -411,8 +417,11 @@ At a retained draw, let
 
 $$
 f_b=Z_b\theta_b,\qquad f=\sum_bf_b,
-\qquad d=n-1\ \text{with an intercept, or }n\ \text{without one}.
+\qquad d=d_L=\texttt{likelihood\_df}.
 $$
+
+By default, $d=n-1$ with an intercept and $d=n$ without one; summary-data
+interfaces can instead supply an explicit likelihood dimension.
 
 The total signal variance and total PVE are
 
@@ -793,7 +802,8 @@ where $D=\mathrm{diag}(G_{11},\ldots,G_{pp})$. These are working
 sufficient statistics when LD and the marginal statistics are not derived from
 the same individual-level sample. The function performs structural validation
 but intentionally does not perform general summary-statistic/LD mismatch
-diagnostics.
+diagnostics. Diagonal deviations within the unit-diagonal validation tolerance
+are normalized to exactly one before reconstruction.
 
 ### 2.7 Numerical safeguards
 

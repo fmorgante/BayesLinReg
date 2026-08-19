@@ -105,6 +105,24 @@ fixed_variance_specs <- list(
     model = "SpikeMultiSlab", var = 0.2, gamma = c(0, 0.1, 1)
   )
 )
+
+# Centering a large uncentered response sum of squares may leave a tiny
+# negative rounding remainder; treat it as zero on the scale of `yty`.
+large_y_mean <- 1e8
+rounding_safe_fit <- blm_ss(
+  n = 100,
+  XtX = matrix(200, 1, 1),
+  Xty = 1e10,
+  yty = 1e18 - 128,
+  X_means = 1,
+  y_mean = large_y_mean,
+  ETA = list(model = "Normal", var = 1, standardize = FALSE),
+  residual_shape = 2,
+  residual_scale = 1,
+  iterations = 10,
+  burnin = 5
+)
+stopifnot(inherits(rounding_safe_fit, "blm_fit"))
 for (sampler_version in c("Rcpp", "R")) {
   for (model in names(fixed_variance_specs)) {
     specification <- fixed_variance_specs[[model]]

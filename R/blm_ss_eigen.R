@@ -314,7 +314,7 @@ blm_ss_eigen <- function(
         indices <- source_indices[[block_index]]
         sum(
           approximate_diagonal[indices] /
-            predictor_scales[[block_index]]^2 / (n - 1)
+            predictor_scales[[block_index]]^2 / likelihood_df
         )
       },
       numeric(1)

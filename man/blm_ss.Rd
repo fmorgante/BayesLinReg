@@ -127,7 +127,8 @@ that block PVE values sum to total PVE. It is used only when
 \code{compute_pve = TRUE}.}
 
 \item{likelihood_df}{Optional positive integer no greater than \code{n}, giving
-the likelihood dimension used in residual-variance and PVE calculations.
+the likelihood dimension used in residual-variance, PVE, and
+\code{expected_pve} calibration calculations.
 The default is \code{n - 1} when \code{X_means} and \code{y_mean} identify an intercept,
 and \code{n} otherwise. For centered sufficient statistics supplied without
 means, set \code{likelihood_df = n - 1} explicitly.}

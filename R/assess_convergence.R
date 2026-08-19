@@ -65,16 +65,11 @@ assess_convergence <- function(fit, plot = TRUE) {
     ))
     stats::setNames(z_scores, parameter_names)
   }, numeric(length(parameter_names)))
-  if (is.null(dim(geweke))) {
-    geweke <- matrix(
-      geweke,
-      ncol = 1L,
-      dimnames = list(parameter_names, "chain_1")
-    )
-  } else {
-    rownames(geweke) <- parameter_names
-    colnames(geweke) <- paste0("chain_", seq_len(number_of_chains))
-  }
+  geweke <- matrix(
+    geweke,
+    nrow = length(parameter_names), ncol = number_of_chains,
+    dimnames = list(parameter_names, paste0("chain_", seq_len(number_of_chains)))
+  )
 
   effective_sample_size <- suppressWarnings(tryCatch(
     coda::effectiveSize(chains),

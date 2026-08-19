@@ -176,3 +176,24 @@ stopifnot(all(vapply(
   function(call) inherits(try(call(), silent = TRUE), "try-error"),
   logical(1)
 )))
+
+# Indefinite sufficient statistics must not be silently reported as zero PVE.
+for (sampler_version in c("Rcpp", "R")) {
+  set.seed(804)
+  pve_error <- try(blm_ss(
+    n = 20,
+    XtX = matrix(c(1, 2, 2, 1), 2, 2),
+    Xty = c(1, -1),
+    ETA = list(model = "Normal", var = 1, standardize = FALSE),
+    residual_var = 1,
+    iterations = 20,
+    burnin = 10,
+    check_psd = FALSE,
+    compute_pve = TRUE,
+    version = sampler_version
+  ), silent = TRUE)
+  stopifnot(
+    inherits(pve_error, "try-error"),
+    grepl("PVE quadratic is materially negative", as.character(pve_error), fixed = TRUE)
+  )
+}

@@ -46,6 +46,14 @@ stopifnot(
   identical(original$reference_response_var, stats::var(y))
 )
 
+# Small accepted unit-diagonal deviations are normalized before reconstruction.
+near_unit_LD <- LD
+diag(near_unit_LD) <- 1 + rep(c(-5e-7, 5e-7), length.out = ncol(near_unit_LD))
+near_unit <- compute_ss_from_gwas(beta, se, near_unit_LD, n)
+stopifnot(isTRUE(all.equal(
+  unname(diag(near_unit$XtX)), rep(n - 1, ncol(near_unit$XtX)), tolerance = 1e-12
+)))
+
 # The default sufficient-statistics result feeds directly into a model that
 # does not use expected-PVE calibration without passing the unused reference
 # response variance.
