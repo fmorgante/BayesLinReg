@@ -663,6 +663,73 @@ reporting group, while maximal exact sub-blocks become independent
 computational blocks. Correlations omitted between list elements or detected
 sub-blocks are treated as exactly zero.
 
+#### Native LD representation
+
+A `blm_ld` object separates descriptive information from the arrays consumed
+by the sampler. `variants` is one data frame in global LD order, `parents`
+records the names of the matrices supplied by the user, and `block_table`
+summarizes the derived computational blocks. Each element of `blocks` contains
+`name`, `parent`, `size`, `type`, `storage`, `data`, `indptr`, and `row_index`.
+The format has an integer `format_version`; because the arrays are an internal
+interface rather than a user API, incompatible serialized objects are rejected
+and should be recreated with the current `as_blm_ld()`.
+
+Only finite, nonzero correlations below the diagonal are candidates for
+storage. The diagonal is not placed in `data`: it is known to be one after
+input validation. `data` is an R numeric vector and therefore stores
+double-precision values. `indptr` and `row_index` are R integer vectors using
+zero-based native offsets and row indices. For a block of size $p_b$,
+`indptr` has length $p_b+1$ and the entries belonging to zero-based column $j$
+occupy the half-open range
+`indptr[j]` through `indptr[j + 1]` in native code.
+
+Two strict-lower layouts are available, selected independently for every
+computational block:
+
+| Layout | `type` | Stored row information | Approximate array bytes |
+|---|---:|---|---:|
+| `interval_triangular` | 0 | Rows are implicit and consecutive, from $j+1$ through the last stored row in column $j$ | $8m_{\mathrm{interval}}+4(p_b+1)$ |
+| `indexed_triangular` | 1 | `row_index` stores one zero-based row for every value | $12m_{\mathrm{nz}}+4(p_b+1)$ |
+
+Here $m_{\mathrm{nz}}$ is the number of nonzero strict-lower correlations.
+For interval storage, $m_{\mathrm{interval}}$ is the sum of the per-column
+spans. Positions between the first possible row and the last nonzero row are
+present in `data`, including zero fillers. The constructor estimates the two
+array sizes and chooses interval storage only when omitting row indices more
+than compensates for those fillers. These estimates describe the principal
+arrays and intentionally exclude R object and per-block list overhead.
+
+Exact computational blocks are found by sweeping the ordered variants and
+counting nonzero edges that cross each possible cut. A cut becomes a boundary
+only when no stored edge crosses it. Thus the decomposition changes neither
+the matrix nor its Gibbs transition, but very small nonzero correlations still
+connect a block because no numerical threshold is applied. A highly fragmented
+matrix can consequently create many small block objects; in that setting,
+per-block R and native metadata may matter even when very few correlations are
+stored.
+
+At the R-to-C++ boundary, `LDSummaryMatrix` borrows pointers to the existing
+`data`, `indptr`, and `row_index` vectors rather than copying their values. A
+separate index vector maps each block-local coordinate to the sampler's global
+coordinate; inverse `global_block` and `global_local` arrays make coordinate
+lookup constant time. Predictor scales are also held separately, so the native
+working Gram matrix is
+
+$$
+G=\operatorname{diag}(s)R_\lambda\operatorname{diag}(s),\qquad
+R_\lambda=(1-\lambda)R+\lambda I.
+$$
+
+Consequently, a diagonal access returns $s_j^2$, while an off-diagonal access
+returns $s_js_k(1-\lambda)R_{jk}$. Changing `ld_shrink` or the working scale
+does not rewrite the compressed correlations. During an ascending Gibbs sweep,
+column $j$ contains only strict-lower rows $k>j$, so a coefficient change
+updates the current diagonal and only not-yet-visited coordinates. Symmetric
+matrix-vector products and PVE quadratics traverse every stored edge once and
+apply its contribution to both endpoints. Independent computational blocks can
+be dispatched to separate threads because their global coordinate sets do not
+overlap.
+
 `blm_gwas()` accepts an in-memory table with columns `CHR`, `ID`, `POS`, `A1`,
 `A0`, `N`, `BETA`, and `SE`. It matches variants to the LD object, validates
 position and alleles, changes the sign of marginal effects when allele dosage
