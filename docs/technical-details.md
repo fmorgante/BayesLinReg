@@ -417,11 +417,12 @@ At a retained draw, let
 
 $$
 f_b=Z_b\theta_b,\qquad f=\sum_bf_b,
-\qquad d=d_L=\texttt{likelihood\_df}.
+\qquad d=d_L.
 $$
 
-By default, $d=n-1$ with an intercept and $d=n$ without one; summary-data
-interfaces can instead supply an explicit likelihood dimension.
+Here $d_L$ is recorded as `likelihood_df`. By default, $d=n-1$ with an
+intercept and $d=n$ without one; summary-data interfaces can instead supply an
+explicit likelihood dimension.
 
 The total signal variance and total PVE are
 
@@ -584,7 +585,7 @@ sequential. Prior blocks need not coincide with Gram blocks; shared prior
 hyperparameters are updated after the coefficient sweep.
 
 The optional `check_psd = TRUE` validation eigendecomposes list input one Gram
-block at a time. If $A=\operatorname{blockdiag}(A_1,\ldots,A_B)$ is the
+block at a time. If $A=\mathrm{blockdiag}(A_1,\ldots,A_B)$ is the
 uncentered Gram matrix and $c=\sqrt n\,\bar x$, the centered matrix is the
 rank-one downdate $A-cc'$. Positive semidefiniteness, range compatibility of
 $X'y$, and the minimum compatible $y'y$ are recovered from blockwise
@@ -716,7 +717,7 @@ lookup constant time. Predictor scales are also held separately, so the native
 working Gram matrix is
 
 $$
-G=\operatorname{diag}(s)R_\lambda\operatorname{diag}(s),\qquad
+G=\mathrm{diag}(s)R_\lambda\mathrm{diag}(s),\qquad
 R_\lambda=(1-\lambda)R+\lambda I.
 $$
 
