@@ -66,7 +66,7 @@ parallelism controls; see \code{\link[=blm_ss]{blm_ss()}}.}
 \item{store_samples, store_coefficient_cov}{Posterior-storage controls; see
 \code{\link[=blm_ss]{blm_ss()}}.}
 
-\item{check_psd}{Whether to perform the optional full PSD and joint
+\item{check_psd}{Whether to perform the optional blockwise PSD and joint
 compatibility validation; see \code{\link[=blm_ss]{blm_ss()}}.}
 
 \item{compute_pve, pve_type}{Posterior PVE controls; see \code{\link[=blm_ss]{blm_ss()}}.}

@@ -266,6 +266,41 @@ stopifnot(
   identical(list_gram_fit$XtX_storage$representation, c("dense", "dense"))
 )
 
+# Blockwise PSD validation handles the global rank-one centering correction
+# without assembling the complete Gram matrix. The boundary case creates one
+# additional centered null direction, which Xty must also respect.
+validate_blocks <- BayesLinReg:::.validate_block_working_crossproducts
+validation_blocks <- list(diag(2), diag(2))
+validation_indices <- list(1:2, 3:4)
+validation_center <- rep(0.5, 4)
+validation_Xty <- c(1, -1, 2, -2)
+minimum_validation_yty <- sum(validation_Xty^2)
+stopifnot(is.null(validate_blocks(
+  validation_blocks, validation_indices, validation_Xty,
+  minimum_validation_yty, validation_center
+)))
+centered_Xty_error <- try(validate_blocks(
+  validation_blocks, validation_indices, c(1, 0, 0, 0),
+  yty = 10, center = validation_center
+), silent = TRUE)
+centered_psd_error <- try(validate_blocks(
+  validation_blocks, validation_indices, validation_Xty,
+  yty = 10, center = 1.01 * validation_center
+), silent = TRUE)
+block_yty_error <- try(validate_blocks(
+  validation_blocks, validation_indices, validation_Xty,
+  yty = minimum_validation_yty - 0.01,
+  center = validation_center
+), silent = TRUE)
+stopifnot(
+  inherits(centered_Xty_error, "try-error"),
+  grepl("`Xty` is incompatible", centered_Xty_error),
+  inherits(centered_psd_error, "try-error"),
+  grepl("positive semidefinite", centered_psd_error),
+  inherits(block_yty_error, "try-error"),
+  grepl("`yty` is incompatible", block_yty_error)
+)
+
 # Symmetric sparse blocks can stream one lower triangle or be expanded for
 # speed. Both representations produce the same chain up to numerical drift.
 set.seed(513)

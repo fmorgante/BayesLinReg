@@ -21,7 +21,7 @@
 #'   parallelism controls; see [blm_ss()].
 #' @param store_samples,store_coefficient_cov Posterior-storage controls; see
 #'   [blm_ss()].
-#' @param check_psd Whether to perform the optional full PSD and joint
+#' @param check_psd Whether to perform the optional blockwise PSD and joint
 #'   compatibility validation; see [blm_ss()].
 #' @param compute_pve,pve_type Posterior PVE controls; see [blm_ss()].
 #' @param scale Working scale. `"auto"` uses the original response scale when
@@ -233,6 +233,10 @@ blm_gwas <- function(
   sampler_scale <- source_scale / sampler_predictor_scale
   working_Xty <- components$Xty / sampler_predictor_scale
   names(working_Xty) <- sampler_internal_names
+  ld_block_ends <- cumsum(vapply(ld$blocks, `[[`, integer(1), "size"))
+  ld_block_starts <- ld_block_ends -
+    vapply(ld$blocks, `[[`, integer(1), "size") + 1L
+  ld_indices <- Map(seq.int, ld_block_starts, ld_block_ends)
 
   fixed_blocks <- vapply(
     blocks, function(block) block$model == "Fixed", logical(1)
@@ -248,10 +252,16 @@ blm_gwas <- function(
     )
   }
   if (check_psd) {
-    source_R <- .materialize_blm_ld(ld, ld_shrink = ld_shrink)
-    validation_XtX <- source_R * tcrossprod(sampler_scale)
-    .validate_working_crossproducts(
-      validation_XtX, working_Xty, components$yty
+    .validate_block_working_crossproducts(
+      ld$blocks, ld_indices, working_Xty, components$yty,
+      transform = function(block, block_indices) {
+        matrix <- .materialize_ld_block(block)
+        if (ld_shrink > 0) {
+          matrix <- (1 - ld_shrink) * matrix
+          diag(matrix) <- 1
+        }
+        matrix * tcrossprod(sampler_scale[block_indices])
+      }
     )
   }
 
@@ -279,9 +289,7 @@ blm_gwas <- function(
   sampler_arguments$ld_blocks <- lapply(ld$blocks, function(block) {
     block[c("type", "size", "data", "indptr", "row_index")]
   })
-  block_ends <- cumsum(vapply(ld$blocks, `[[`, integer(1), "size"))
-  block_starts <- block_ends - vapply(ld$blocks, `[[`, integer(1), "size") + 1L
-  sampler_arguments$ld_indices <- Map(seq.int, block_starts, block_ends)
+  sampler_arguments$ld_indices <- ld_indices
   sampler_arguments$ld_scale <- sampler_scale
   sampler_arguments$ld_shrink <- ld_shrink
   sampler_arguments$Xty <- working_Xty

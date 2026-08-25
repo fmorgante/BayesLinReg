@@ -277,9 +277,10 @@ blocks, each `ETA` block uses `indices` to select a disjoint set of columns from
 `XtX`.
 
 `XtX` may also be a compressed sparse `dgCMatrix` or `dsCMatrix`. Sparse input
-requires `version = "Rcpp"`. Full eigenvalue-based validation is optional through
-`check_psd = TRUE` and is disabled by default to avoid its cubic initialization
-cost; requesting it for sparse input temporarily constructs a dense matrix.
+requires `version = "Rcpp"`. Eigenvalue-based validation is optional through
+`check_psd = TRUE` and is disabled by default. List input is validated one Gram
+block at a time, including the global centering correction; a single sparse
+matrix remains one validation block and is temporarily converted to dense.
 
 For exactly block-diagonal cross-products, `XtX` may instead be a list of
 dense or sparse Gram matrices. Predictor order is their concatenated order,

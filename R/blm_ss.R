@@ -32,12 +32,14 @@
 #'   used to calibrate blocks that specify `expected_pve`. When omitted, it is
 #'   recovered from `yty` and `y_mean`; if that is not possible, it must be
 #'   supplied explicitly.
-#' @param check_psd If `TRUE`, use a full eigendecomposition to verify that the
+#' @param check_psd If `TRUE`, use eigendecompositions to verify that the
 #'   centered `XtX` is positive semidefinite and that `Xty` and `yty` are
-#'   jointly compatible with it. The default, `FALSE`, avoids this
-#'   \eqn{O(p^3)} validation cost. Symmetry and basic input checks are always
-#'   performed. Sparse or list `XtX` is materialized as one dense matrix for
-#'   this optional validation.
+#'   jointly compatible with it. List `XtX` is checked one Gram block at a time,
+#'   including the global rank-one centering correction, so the validation cost
+#'   is \eqn{O(\sum_b p_b^3)} with peak dense storage proportional to the
+#'   largest block. A single dense or sparse `XtX` remains one validation block.
+#'   The default is `FALSE`; symmetry and basic input checks are always
+#'   performed.
 #' @param nthreads Number of threads used within one Rcpp chain for list `XtX`.
 #'   Values greater than one require `nchains = 1` and zero working predictor
 #'   means. The default preserves the serial sampler and its RNG sequence.
@@ -77,7 +79,7 @@
 #'   A `"Fixed"` block uses a flat prior and is jointly rank-checked with every
 #'   other fixed block using the centered and standardized fixed-predictor
 #'   submatrix of `XtX`. This check is always performed and is separate from
-#'   the optional full-matrix `check_psd` validation.
+#'   the optional `check_psd` validation.
 #'   Optional posterior PVE calculations use the centered cross-products and
 #'   the definitions in [blm()]. Their cost is quadratic in block size for a
 #'   dense `XtX` and proportional to the relevant stored entries for sparse
@@ -441,17 +443,20 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
     internal_names[fixed_indices]
   )
   if (check_psd) {
-    validation_XtX <- if (list_XtX) {
-      .materialize_gram_blocks(
-        working_XtX, gram_indices, working_center
-      )
-    } else if (sparse_XtX) {
-      as.matrix(working_XtX) - tcrossprod(working_center)
+    validation_blocks <- if (list_XtX) working_XtX else list(working_XtX)
+    validation_indices <- if (list_XtX) {
+      gram_indices
     } else {
-      working_XtX
+      list(seq_along(working_Xty))
     }
-    .validate_working_crossproducts(
-      validation_XtX, working_Xty, centered_yty
+    validation_center <- if (list_XtX || sparse_XtX) {
+      working_center
+    } else {
+      numeric(length(working_Xty))
+    }
+    .validate_block_working_crossproducts(
+      validation_blocks, validation_indices, working_Xty, centered_yty,
+      validation_center
     )
   }
 
@@ -885,23 +890,87 @@ blm_ss <- function(n, XtX, Xty, ETA, yty = NULL, X_means = NULL,
 }
 
 .validate_working_crossproducts <- function(XtX, Xty, yty = NULL) {
-  decomposition <- eigen(XtX, symmetric = TRUE)
-  tolerance <- sqrt(.Machine$double.eps) *
-    max(1, max(abs(decomposition$values)))
-  if (min(decomposition$values) < -tolerance) {
+  .validate_block_working_crossproducts(
+    list(XtX), list(seq_along(Xty)), Xty, yty
+  )
+}
+
+.validate_block_working_crossproducts <- function(
+    blocks, indices, Xty, yty = NULL, center = numeric(length(Xty)),
+    transform = function(block, block_indices) block) {
+  block_results <- vector("list", length(blocks))
+  spectral_scale <- max(1, sum(center^2))
+  for (block_index in seq_along(blocks)) {
+    block_indices <- indices[[block_index]]
+    matrix <- as.matrix(transform(blocks[[block_index]], block_indices))
+    decomposition <- eigen(matrix, symmetric = TRUE)
+    spectral_scale <- max(spectral_scale, abs(decomposition$values))
+    block_results[[block_index]] <- list(
+      values = decomposition$values,
+      Xty = drop(crossprod(decomposition$vectors, Xty[block_indices])),
+      center = drop(crossprod(
+        decomposition$vectors, center[block_indices]
+      ))
+    )
+  }
+
+  tolerance <- sqrt(.Machine$double.eps) * spectral_scale
+  if (any(vapply(block_results, function(result) {
+    min(result$values) < -tolerance
+  }, logical(1)))) {
     stop("The centered `XtX` must be positive semidefinite.", call. = FALSE)
   }
-  positive <- decomposition$values > tolerance
-  coordinates <- drop(crossprod(decomposition$vectors, Xty))
-  if (any(abs(coordinates[!positive]) >
-          sqrt(tolerance) * max(1, sqrt(sum(Xty^2))))) {
-    stop("`Xty` is incompatible with `XtX`.", call. = FALSE)
+
+  Xty_norm <- sqrt(sum(Xty^2))
+  center_norm <- sqrt(sum(center^2))
+  Xty_null_tolerance <- sqrt(tolerance) * max(1, Xty_norm)
+  center_null_tolerance <- sqrt(tolerance) * max(1, center_norm)
+  minimum_uncentered_yty <- 0
+  center_quadratic <- 0
+  center_Xty_crossproduct <- 0
+  center_inverse_norm_squared <- 0
+  for (result in block_results) {
+    positive <- result$values > tolerance
+    if (any(abs(result$Xty[!positive]) > Xty_null_tolerance)) {
+      stop("`Xty` is incompatible with `XtX`.", call. = FALSE)
+    }
+    if (any(abs(result$center[!positive]) > center_null_tolerance)) {
+      stop("The centered `XtX` must be positive semidefinite.", call. = FALSE)
+    }
+    if (any(positive)) {
+      inverse_values <- 1 / result$values[positive]
+      Xty_coordinates <- result$Xty[positive]
+      center_coordinates <- result$center[positive]
+      minimum_uncentered_yty <- minimum_uncentered_yty +
+        sum(Xty_coordinates^2 * inverse_values)
+      center_quadratic <- center_quadratic +
+        sum(center_coordinates^2 * inverse_values)
+      center_Xty_crossproduct <- center_Xty_crossproduct +
+        sum(center_coordinates * Xty_coordinates * inverse_values)
+      center_inverse_norm_squared <- center_inverse_norm_squared +
+        sum(center_coordinates^2 * inverse_values^2)
+    }
   }
-  minimum_yty <- if (any(positive)) {
-    sum(coordinates[positive]^2 / decomposition$values[positive])
+
+  rank_one_tolerance <- sqrt(.Machine$double.eps) *
+    max(1, center_quadratic)
+  remaining_rank <- 1 - center_quadratic
+  if (remaining_rank < -rank_one_tolerance) {
+    stop("The centered `XtX` must be positive semidefinite.", call. = FALSE)
+  }
+  if (remaining_rank <= rank_one_tolerance) {
+    centered_null_norm <- sqrt(center_inverse_norm_squared)
+    centered_null_tolerance <- sqrt(tolerance) * max(1, Xty_norm) *
+      max(1, centered_null_norm)
+    if (abs(center_Xty_crossproduct) > centered_null_tolerance) {
+      stop("`Xty` is incompatible with `XtX`.", call. = FALSE)
+    }
+    minimum_yty <- minimum_uncentered_yty
   } else {
-    0
+    minimum_yty <- minimum_uncentered_yty +
+      center_Xty_crossproduct^2 / remaining_rank
   }
+
   joint_tolerance <- sqrt(.Machine$double.eps) * max(1, minimum_yty)
   if (!is.null(yty) && yty < minimum_yty - joint_tolerance) {
     stop("`yty` is incompatible with `XtX` and `Xty`.", call. = FALSE)

@@ -583,9 +583,14 @@ sampled concurrently through `RcppParallel`. Updates within a Gram block remain
 sequential. Prior blocks need not coincide with Gram blocks; shared prior
 hyperparameters are updated after the coefficient sweep.
 
-The optional `check_psd = TRUE` validation materializes the centered Gram
-matrix and performs a full eigendecomposition, costing $O(p^3)$ time and
-$O(p^2)$ memory. Its default is `FALSE`.
+The optional `check_psd = TRUE` validation eigendecomposes list input one Gram
+block at a time. If $A=\operatorname{blockdiag}(A_1,\ldots,A_B)$ is the
+uncentered Gram matrix and $c=\sqrt n\,\bar x$, the centered matrix is the
+rank-one downdate $A-cc'$. Positive semidefiniteness, range compatibility of
+$X'y$, and the minimum compatible $y'y$ are recovered from blockwise
+pseudoinverse quadratics. Validation therefore costs
+$O(\sum_b p_b^3)$ time and $O(\max_b p_b^2+p)$ peak memory. A single dense or
+sparse `XtX` remains one validation block. The default is `FALSE`.
 
 ### 2.4 Low-rank sufficient-statistic fitting with `blm_ss_eigen()`
 

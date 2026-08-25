@@ -99,12 +99,14 @@ covariance matrix for each \code{ETA} block. The default, \code{FALSE}, returns 
 the named vector of marginal coefficient variances and avoids blockwise
 quadratic-size covariance accumulators when samples are not stored.}
 
-\item{check_psd}{If \code{TRUE}, use a full eigendecomposition to verify that the
+\item{check_psd}{If \code{TRUE}, use eigendecompositions to verify that the
 centered \code{XtX} is positive semidefinite and that \code{Xty} and \code{yty} are
-jointly compatible with it. The default, \code{FALSE}, avoids this
-\eqn{O(p^3)} validation cost. Symmetry and basic input checks are always
-performed. Sparse or list \code{XtX} is materialized as one dense matrix for
-this optional validation.}
+jointly compatible with it. List \code{XtX} is checked one Gram block at a time,
+including the global rank-one centering correction, so the validation cost
+is \eqn{O(\sum_b p_b^3)} with peak dense storage proportional to the
+largest block. A single dense or sparse \code{XtX} remains one validation block.
+The default is \code{FALSE}; symmetry and basic input checks are always
+performed.}
 
 \item{XtX_storage}{Storage policy for symmetric sparse matrices, supplied
 either directly or within list input. \code{"speed"} expands them to general
@@ -167,7 +169,7 @@ calibrates it from their total expected PVE exactly as in \code{\link[=blm]{blm(
 A \code{"Fixed"} block uses a flat prior and is jointly rank-checked with every
 other fixed block using the centered and standardized fixed-predictor
 submatrix of \code{XtX}. This check is always performed and is separate from
-the optional full-matrix \code{check_psd} validation.
+the optional \code{check_psd} validation.
 Optional posterior PVE calculations use the centered cross-products and
 the definitions in \code{\link[=blm]{blm()}}. Their cost is quadratic in block size for a
 dense \code{XtX} and proportional to the relevant stored entries for sparse
