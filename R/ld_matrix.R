@@ -114,6 +114,176 @@ as_blm_ld <- function(R, variants) {
   )
 }
 
+#' Combine LD matrix objects
+#'
+#' Combines independently constructed [blm_ld][as_blm_ld()] objects without
+#' materializing or recompressing their LD matrices. Cross-object LD is assumed
+#' to be exactly zero, just as it is between matrices supplied in a list to
+#' [as_blm_ld()].
+#'
+#' @param ... One or more `blm_ld` objects, or one nonempty list of `blm_ld`
+#'   objects. A single `blm_ld` object is returned unchanged.
+#'
+#' @return A `blm_ld` object containing all input variants and computational
+#'   blocks in input order. If any input carries a `regularization_report`, the
+#'   combined report contains all blocks; unregularized inputs receive
+#'   `method = "none"` with unavailable numerical diagnostics.
+#'
+#' @details Parent names, computational block names, and variant IDs must be
+#'   unique across inputs. Variant metadata tables must have identical column
+#'   names. The compressed numerical vectors are reused through R's copy-on-
+#'   modify semantics; the function allocates combined list metadata, a
+#'   combined variant table, and a block table, but does not reconstruct any
+#'   correlation matrix.
+#' @export
+combine_blm_ld <- function(...) {
+  objects <- list(...)
+  if (length(objects) == 1L && is.list(objects[[1L]]) &&
+      !inherits(objects[[1L]], "blm_ld")) {
+    objects <- objects[[1L]]
+  }
+  if (!length(objects)) {
+    stop("At least one `blm_ld` object is required.", call. = FALSE)
+  }
+  for (index in seq_along(objects)) {
+    tryCatch(
+      .validate_blm_ld_object(objects[[index]]),
+      error = function(condition) {
+        stop(
+          sprintf(
+            "Input LD object %d is invalid: %s",
+            index, conditionMessage(condition)
+          ),
+          call. = FALSE
+        )
+      }
+    )
+  }
+  if (length(objects) == 1L) return(objects[[1L]])
+
+  parents <- unlist(lapply(objects, `[[`, "parents"), use.names = FALSE)
+  if (anyDuplicated(parents)) {
+    duplicates <- unique(parents[duplicated(parents)])
+    stop(
+      sprintf(
+        "LD parent names must be unique across inputs; duplicated name(s): %s.",
+        paste(utils::head(duplicates, 10L), collapse = ", ")
+      ),
+      call. = FALSE
+    )
+  }
+
+  blocks <- unlist(
+    unname(lapply(objects, `[[`, "blocks")),
+    recursive = FALSE
+  )
+  block_names <- names(blocks)
+  if (is.null(block_names) || anyDuplicated(block_names)) {
+    duplicates <- if (is.null(block_names)) {
+      character()
+    } else {
+      unique(block_names[duplicated(block_names)])
+    }
+    detail <- if (length(duplicates)) {
+      paste0(": ", paste(utils::head(duplicates, 10L), collapse = ", "))
+    } else {
+      ""
+    }
+    stop(
+      paste0(
+        "LD computational block names must be unique across inputs", detail,
+        "."
+      ),
+      call. = FALSE
+    )
+  }
+
+  variant_columns <- lapply(objects, function(object) names(object$variants))
+  same_columns <- vapply(
+    variant_columns,
+    identical,
+    logical(1),
+    variant_columns[[1L]]
+  )
+  if (!all(same_columns)) {
+    stop(
+      "LD variant metadata must have identical columns across inputs.",
+      call. = FALSE
+    )
+  }
+  variants <- do.call(rbind, lapply(objects, `[[`, "variants"))
+  rownames(variants) <- NULL
+  if (anyDuplicated(variants$ID)) {
+    duplicates <- unique(variants$ID[duplicated(variants$ID)])
+    stop(
+      sprintf(
+        "Variant IDs must be unique across inputs; duplicated ID(s): %s.",
+        paste(utils::head(duplicates, 10L), collapse = ", ")
+      ),
+      call. = FALSE
+    )
+  }
+
+  result <- structure(
+    list(
+      blocks = blocks,
+      variants = variants,
+      parents = parents,
+      block_table = .ld_block_table(blocks),
+      format_version = .blm_ld_format_version,
+      cross_block_assumption = "zero"
+    ),
+    class = "blm_ld"
+  )
+
+  has_report <- vapply(
+    objects,
+    function(object) !is.null(object$regularization_report),
+    logical(1)
+  )
+  if (any(has_report)) {
+    reports <- lapply(objects, function(object) {
+      report <- object$regularization_report
+      if (is.null(report)) {
+        object_blocks <- object$blocks
+        return(data.frame(
+          block = names(object_blocks),
+          source_block = names(object_blocks),
+          parent = vapply(object_blocks, `[[`, character(1), "parent"),
+          predictors = as.numeric(vapply(
+            object_blocks, `[[`, integer(1), "size"
+          )),
+          method = "none",
+          shrink = 0,
+          floor_shrink = 0,
+          minimum_eigenvalue_before = NA_real_,
+          minimum_eigenvalue_after = NA_real_,
+          positive_definite_after = NA,
+          stringsAsFactors = FALSE
+        ))
+      }
+      if (!"source_block" %in% names(report)) {
+        report$source_block <- report$block
+      }
+      if (!"floor_shrink" %in% names(report)) {
+        report$floor_shrink <- 0
+      }
+      report[c(
+        "block", "source_block", "parent", "predictors", "method",
+        "shrink", "floor_shrink", "minimum_eigenvalue_before",
+        "minimum_eigenvalue_after", "positive_definite_after"
+      )]
+    })
+    result$regularization_report <- do.call(rbind, reports)
+    rownames(result$regularization_report) <- NULL
+  }
+  # The input blocks were validated above and are reused unchanged. Validate
+  # only the newly assembled cross-object metadata here, avoiding a second
+  # full scan of every compressed numerical vector.
+  .validate_ld_regularization_report(result)
+  result
+}
+
 #' @export
 print.blm_ld <- function(x, ...) {
   if (length(list(...))) {

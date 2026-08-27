@@ -44,6 +44,83 @@ stopifnot(
   ))
 )
 
+# Independently compressed objects combine without materializing their LD
+# matrices, including when supplied as one named list.
+ld_chr1 <- as_blm_ld(
+  list(chr1 = R1), list(chr1 = variants1)
+)
+ld_chr2 <- as_blm_ld(
+  list(chr2 = R2), list(chr2 = variants2)
+)
+combined_ld <- combine_blm_ld(list(first = ld_chr1, second = ld_chr2))
+combined_variadic <- combine_blm_ld(ld_chr1, ld_chr2)
+combined_variants <- rbind(ld_chr1$variants, ld_chr2$variants)
+rownames(combined_variants) <- NULL
+stopifnot(
+  identical(combined_ld, combined_variadic),
+  identical(combine_blm_ld(ld_chr1), ld_chr1),
+  identical(combined_ld$parents, c("chr1", "chr2")),
+  identical(names(combined_ld$blocks), c("chr1", "chr2")),
+  identical(combined_ld$variants, combined_variants),
+  identical(combined_ld$cross_block_assumption, "zero"),
+  isTRUE(all.equal(
+    BayesLinReg:::.materialize_blm_ld(combined_ld),
+    as.matrix(Matrix::bdiag(R1, R2)),
+    check.attributes = FALSE
+  )),
+  inherits(
+    BayesLinReg:::.validate_blm_ld_object(combined_ld), "blm_ld"
+  )
+)
+
+# Mixed regularization histories produce a complete, valid audit report.
+regularized_chr1 <- regularize_blm_ld(
+  ld_chr1, method = "shrink", shrink = 0.05
+)
+combined_mixed <- combine_blm_ld(regularized_chr1, ld_chr2)
+stopifnot(
+  identical(
+    combined_mixed$regularization_report$method, c("shrink", "none")
+  ),
+  identical(combined_mixed$regularization_report$shrink, c(0.05, 0)),
+  identical(
+    combined_mixed$regularization_report$source_block, c("chr1", "chr2")
+  ),
+  is.na(combined_mixed$regularization_report$minimum_eigenvalue_before[2L]),
+  inherits(
+    BayesLinReg:::.validate_blm_ld_object(combined_mixed), "blm_ld"
+  )
+)
+
+duplicate_parent_error <- try(
+  combine_blm_ld(ld_chr1, ld_chr1), silent = TRUE
+)
+duplicate_id_ld <- as_blm_ld(
+  list(chr3 = R1), list(chr3 = variants1)
+)
+duplicate_id_error <- try(
+  combine_blm_ld(ld_chr1, duplicate_id_ld), silent = TRUE
+)
+extra_metadata <- variants2
+extra_metadata$INFO <- 1
+different_columns_ld <- as_blm_ld(
+  list(chr2 = R2), list(chr2 = extra_metadata)
+)
+different_columns_error <- try(
+  combine_blm_ld(ld_chr1, different_columns_ld), silent = TRUE
+)
+empty_combine_error <- try(combine_blm_ld(), silent = TRUE)
+stopifnot(
+  inherits(duplicate_parent_error, "try-error"),
+  grepl("parent names must be unique", duplicate_parent_error),
+  inherits(duplicate_id_error, "try-error"),
+  grepl("Variant IDs must be unique", duplicate_id_error),
+  inherits(different_columns_error, "try-error"),
+  grepl("identical columns", different_columns_error),
+  inherits(empty_combine_error, "try-error"),
+  grepl("At least one", empty_combine_error)
+)
+
 # LD diagnostics are read-only. Exact repair is limited to manageable blocks,
 # while shrinkage preserves the compressed representation.
 indefinite_R <- matrix(c(

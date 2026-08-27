@@ -821,6 +821,15 @@ variants. These categories are mutually exclusive. Its aggregate `excluded`
 count is measured in input-table entries: an unmatched entry contributes one,
 whereas a matched variant pair rejected from both inputs contributes two.
 
+Large LD collections can be converted in batches and joined with
+`combine_blm_ld()`. Combining reuses the compressed block vectors without
+materializing or recompressing correlations, concatenates variants and block
+metadata in input order, and assumes exact zero LD between input objects.
+Parent names, computational block names, and variant IDs must therefore be
+globally unique. If only some inputs were regularized, the combined audit
+report marks blocks from the other inputs as unregularized with unavailable
+eigenvalue diagnostics.
+
 GWAS summary statistics do not identify a phenotype mean, so this interface
 fits no intercept. Reference-panel LD, meta-analysis statistics, mixed-model
 statistics, or covariate-adjusted marginal estimates generally define an
