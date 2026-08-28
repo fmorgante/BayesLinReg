@@ -664,6 +664,17 @@ reporting group, while maximal exact sub-blocks become independent
 computational blocks. Correlations omitted between list elements or detected
 sub-blocks are treated as exactly zero.
 
+Dense inputs are validated, split, and compressed with a native column scan.
+The scan does not construct a full logical lower triangle, a transposed copy,
+a coordinate table, or dense copies of detected child blocks. It therefore
+uses $O(p)$ temporary memory, in addition to the compressed output, while
+retaining the unavoidable $O(p^2)$ time needed to inspect a dense $p$ by $p$
+matrix. Compression is allocated separately after each maximal exact child is
+known. A connected child whose smaller available representation would exceed
+R's per-vector integer indexing limit is rejected with an explicit request to
+split or sparsify that child; the sum of stored values across distinct children
+is not subject to that per-vector limit.
+
 #### Native LD representation
 
 A `blm_ld` object separates descriptive information from the arrays consumed

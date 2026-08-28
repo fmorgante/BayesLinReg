@@ -26,4 +26,15 @@ Constructs the block-aware linkage-disequilibrium representation used by
 \code{\link[=blm_gwas]{blm_gwas()}}. Exact contiguous block-diagonal structure is detected within
 every supplied matrix. The matrices contain signed correlations, not
 squared correlations.
+Dense matrices are validated and compressed by scanning their columns in
+native code; full logical triangles, transposes, coordinate tables, and
+child-matrix copies are not constructed.
+}
+\details{
+A dense input still requires quadratic time to inspect every matrix
+entry, but preprocessing uses only linear temporary storage in addition to
+the compressed result. Exact zero-LD boundaries are used to split a parent
+matrix before compressed storage is allocated. Each resulting connected
+child must fit within R's per-vector integer indexing limit; an informative
+error recommends splitting or sparsifying a child that does not.
 }

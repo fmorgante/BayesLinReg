@@ -4,6 +4,9 @@
 #' [blm_gwas()]. Exact contiguous block-diagonal structure is detected within
 #' every supplied matrix. The matrices contain signed correlations, not
 #' squared correlations.
+#' Dense matrices are validated and compressed by scanning their columns in
+#' native code; full logical triangles, transposes, coordinate tables, and
+#' child-matrix copies are not constructed.
 #'
 #' @param R A finite symmetric correlation matrix, or a nonempty named list of
 #'   such matrices representing exactly zero cross-block LD. Dense base-R
@@ -16,6 +19,13 @@
 #'
 #' @return An object of class `blm_ld`. Its internal representation is an
 #'   implementation detail; use it as the `ld` argument of [blm_gwas()].
+#'
+#' @details A dense input still requires quadratic time to inspect every matrix
+#'   entry, but preprocessing uses only linear temporary storage in addition to
+#'   the compressed result. Exact zero-LD boundaries are used to split a parent
+#'   matrix before compressed storage is allocated. Each resulting connected
+#'   child must fit within R's per-vector integer indexing limit; an informative
+#'   error recommends splitting or sparsifying a child that does not.
 #' @export
 as_blm_ld <- function(R, variants) {
   list_input <- is.list(R) && !is.matrix(R) &&
@@ -60,19 +70,44 @@ as_blm_ld <- function(R, variants) {
       )
     }
     parent_tables[[parent_index]] <- table
-    ranges <- .exact_contiguous_ld_blocks(matrix)
-    child_count <- length(ranges)
-    children <- lapply(seq_along(ranges), function(child_index) {
-      indices <- ranges[[child_index]]
-      child_name <- if (child_count == 1L) {
-        parent
-      } else {
-        paste0(parent, ".", child_index)
-      }
-      .compress_ld_block(
-        matrix[indices, indices, drop = FALSE], parent, child_name
+    if (is.matrix(matrix)) {
+      children <- compress_dense_ld_blocks_cpp(
+        matrix, parent, .Machine$integer.max
       )
-    })
+      child_count <- length(children)
+      children <- lapply(seq_along(children), function(child_index) {
+        child <- children[[child_index]]
+        child_name <- if (child_count == 1L) {
+          parent
+        } else {
+          paste0(parent, ".", child_index)
+        }
+        list(
+          name = child_name,
+          parent = parent,
+          size = child$size,
+          type = child$type,
+          storage = child$storage,
+          data = child$data,
+          indptr = child$indptr,
+          row_index = child$row_index
+        )
+      })
+    } else {
+      ranges <- .exact_contiguous_ld_blocks(matrix)
+      child_count <- length(ranges)
+      children <- lapply(seq_along(ranges), function(child_index) {
+        indices <- ranges[[child_index]]
+        child_name <- if (child_count == 1L) {
+          parent
+        } else {
+          paste0(parent, ".", child_index)
+        }
+        .compress_ld_block(
+          matrix[indices, indices, drop = FALSE], parent, child_name
+        )
+      })
+    }
     names(children) <- vapply(children, `[[`, character(1), "name")
     computational_blocks <- c(computational_blocks, children)
   }
@@ -567,6 +602,24 @@ regularize_blm_ld <- function(
 }
 
 .validate_ld_correlation <- function(matrix, label) {
+  if (is.matrix(matrix) && is.numeric(matrix)) {
+    if (nrow(matrix) < 1L || nrow(matrix) != ncol(matrix)) {
+      stop(sprintf("`R[[\"%s\"]]` must be a finite numeric square matrix.",
+                   label), call. = FALSE)
+    }
+    row_names <- rownames(matrix)
+    column_names <- colnames(matrix)
+    if (!is.null(row_names)) row_names <- as.character(row_names)
+    if (!is.null(column_names)) column_names <- as.character(column_names)
+    if (xor(is.null(row_names), is.null(column_names)) ||
+        (!is.null(row_names) &&
+         !identical(row_names, column_names))) {
+      stop(sprintf(
+        "The row and column names of `R[[\"%s\"]]` must match.", label
+      ), call. = FALSE)
+    }
+    return(matrix)
+  }
   matrix <- .validate_gram_block(
     matrix, sprintf("`R[[\"%s\"]]`", label), TRUE
   )

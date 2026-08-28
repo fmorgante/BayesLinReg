@@ -326,7 +326,69 @@ internal_ld <- as_blm_ld(internally_blocked, internal_variants)
 stopifnot(
   nrow(internal_ld$block_table) == 2L,
   identical(internal_ld$block_table$predictors, c(3L, 2L)),
-  identical(internal_ld$block_table$parent, c("LD", "LD"))
+  identical(internal_ld$block_table$parent, c("LD", "LD")),
+  isTRUE(all.equal(
+    BayesLinReg:::.materialize_blm_ld(internal_ld),
+    internally_blocked,
+    check.attributes = FALSE
+  ))
+)
+
+# Dense preprocessing averages harmless numerical asymmetry, can choose the
+# indexed representation when interval storage would exceed the limit, and
+# reports an oversized connected child before allocating compressed vectors.
+nearly_symmetric <- R1
+nearly_symmetric[2L, 1L] <- nearly_symmetric[2L, 1L] + 1e-10
+nearly_symmetric_ld <- as_blm_ld(nearly_symmetric, variants1)
+expected_symmetric <- (nearly_symmetric + t(nearly_symmetric)) / 2
+diag(expected_symmetric) <- 1
+
+indexed_candidate <- diag(5L)
+indexed_candidate[5L, 1L] <- indexed_candidate[1L, 5L] <- 0.1
+indexed_children <- BayesLinReg:::compress_dense_ld_blocks_cpp(
+  indexed_candidate, "indexed", 2
+)
+
+oversized_candidate <- matrix(0.1, 4L, 4L)
+diag(oversized_candidate) <- 1
+oversized_storage_error <- try(
+  BayesLinReg:::compress_dense_ld_blocks_cpp(
+    oversized_candidate, "oversized", 5
+  ),
+  silent = TRUE
+)
+nonfinite_dense <- R1
+nonfinite_dense[1L, 2L] <- nonfinite_dense[2L, 1L] <- NA_real_
+asymmetric_dense <- R1
+asymmetric_dense[1L, 2L] <- asymmetric_dense[1L, 2L] + 0.01
+bad_diagonal_dense <- R1
+bad_diagonal_dense[1L, 1L] <- 1.01
+out_of_range_dense <- R1
+out_of_range_dense[1L, 2L] <- out_of_range_dense[2L, 1L] <- 1.01
+dense_validation_errors <- lapply(
+  list(
+    nonfinite_dense, asymmetric_dense, bad_diagonal_dense,
+    out_of_range_dense
+  ),
+  function(candidate) try(as_blm_ld(candidate, variants1), silent = TRUE)
+)
+stopifnot(
+  isTRUE(all.equal(
+    BayesLinReg:::.materialize_blm_ld(nearly_symmetric_ld),
+    expected_symmetric,
+    check.attributes = FALSE
+  )),
+  length(indexed_children) == 1L,
+  identical(indexed_children[[1L]]$storage, "indexed_triangular"),
+  identical(indexed_children[[1L]]$data, 0.1),
+  inherits(oversized_storage_error, "try-error"),
+  grepl("connected range 1-4", oversized_storage_error),
+  grepl("Split or sparsify", oversized_storage_error),
+  all(vapply(dense_validation_errors, inherits, logical(1), "try-error")),
+  grepl("finite numeric square matrix", dense_validation_errors[[1L]]),
+  grepl("must be symmetric", dense_validation_errors[[2L]]),
+  grepl("unit diagonal", dense_validation_errors[[3L]]),
+  grepl("outside \\[-1, 1\\]", dense_validation_errors[[4L]])
 )
 
 # Generated computational names remain unique when parent names overlap them.

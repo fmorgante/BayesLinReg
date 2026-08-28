@@ -328,6 +328,19 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// compress_dense_ld_blocks_cpp
+Rcpp::List compress_dense_ld_blocks_cpp(const Rcpp::NumericMatrix& matrix, const std::string& label, const double max_stored_values);
+RcppExport SEXP _BayesLinReg_compress_dense_ld_blocks_cpp(SEXP matrixSEXP, SEXP labelSEXP, SEXP max_stored_valuesSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const Rcpp::NumericMatrix& >::type matrix(matrixSEXP);
+    Rcpp::traits::input_parameter< const std::string& >::type label(labelSEXP);
+    Rcpp::traits::input_parameter< const double >::type max_stored_values(max_stored_valuesSEXP);
+    rcpp_result_gen = Rcpp::wrap(compress_dense_ld_blocks_cpp(matrix, label, max_stored_values));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_BayesLinReg_prepare_eigen_statistics_cpp", (DL_FUNC) &_BayesLinReg_prepare_eigen_statistics_cpp, 3},
@@ -340,6 +353,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_BayesLinReg_blm_gibbs_block_rcpp_cpp", (DL_FUNC) &_BayesLinReg_blm_gibbs_block_rcpp_cpp, 41},
     {"_BayesLinReg_blm_gibbs_ld_rcpp_cpp", (DL_FUNC) &_BayesLinReg_blm_gibbs_ld_rcpp_cpp, 41},
     {"_BayesLinReg_blm_gibbs_eigen_block_rcpp_cpp", (DL_FUNC) &_BayesLinReg_blm_gibbs_eigen_block_rcpp_cpp, 40},
+    {"_BayesLinReg_compress_dense_ld_blocks_cpp", (DL_FUNC) &_BayesLinReg_compress_dense_ld_blocks_cpp, 3},
     {NULL, NULL, 0}
 };
 
