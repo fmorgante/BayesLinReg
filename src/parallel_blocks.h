@@ -76,6 +76,29 @@ class LDBlockMultiplyWorker : public RcppParallel::Worker {
   std::vector<double>& fitted_;
 };
 
+template <typename BlockMatrix>
+class StreamingRepairWorker : public RcppParallel::Worker {
+ public:
+  StreamingRepairWorker(
+      const BlockMatrix& matrix,
+      const std::vector<double>& coefficient_change,
+      std::vector<double>& rhs)
+    : matrix_(matrix), coefficient_change_(coefficient_change), rhs_(rhs) {}
+
+  void operator()(const std::size_t begin, const std::size_t end) {
+    for (std::size_t block = begin; block < end; ++block) {
+      matrix_.repair_streaming_block(
+        static_cast<int>(block), coefficient_change_, rhs_
+      );
+    }
+  }
+
+ private:
+  const BlockMatrix& matrix_;
+  const std::vector<double>& coefficient_change_;
+  std::vector<double>& rhs_;
+};
+
 inline void BlockSummaryMatrix::multiply(
     const std::vector<double>& coefficient,
     std::vector<double>& fitted) const {
@@ -117,6 +140,33 @@ inline void LDSummaryMatrix::multiply(
     return;
   }
   LDBlockMultiplyWorker worker(*this, coefficient, fitted);
+  RcppParallel::parallelFor(0, blocks_.size(), worker, 1, nthreads_);
+}
+
+inline void BlockSummaryMatrix::repair_streaming_state(
+    const std::vector<double>& coefficient_change,
+    std::vector<double>& rhs) const {
+  if (!has_streaming_blocks_) return;
+  StreamingRepairWorker<BlockSummaryMatrix> worker(
+    *this, coefficient_change, rhs
+  );
+  if (nthreads_ <= 1 || blocks_.size() <= 1) {
+    worker(0, blocks_.size());
+    return;
+  }
+  RcppParallel::parallelFor(0, blocks_.size(), worker, 1, nthreads_);
+}
+
+inline void LDSummaryMatrix::repair_streaming_state(
+    const std::vector<double>& coefficient_change,
+    std::vector<double>& rhs) const {
+  StreamingRepairWorker<LDSummaryMatrix> worker(
+    *this, coefficient_change, rhs
+  );
+  if (nthreads_ <= 1 || blocks_.size() <= 1) {
+    worker(0, blocks_.size());
+    return;
+  }
   RcppParallel::parallelFor(0, blocks_.size(), worker, 1, nthreads_);
 }
 
@@ -356,6 +406,7 @@ class BlockCoefficientWorker : public RcppParallel::Worker {
       std::vector<double>& corrected_rhs,
       std::vector<int>& inclusion,
       std::vector<int>& multi_component,
+      std::vector<double>& coefficient_change,
       std::vector<BlockRng>& rng,
       std::vector<MixtureWorkspace>& mixture_workspace,
       std::vector<double>& residual_sse_change)
@@ -366,7 +417,9 @@ class BlockCoefficientWorker : public RcppParallel::Worker {
       multi_gamma_(multi_gamma), multi_pi_(multi_pi), multi_var_(multi_var),
       learn_residual_var_(learn_residual_var), coefficient_(coefficient),
       corrected_rhs_(corrected_rhs), inclusion_(inclusion),
-      multi_component_(multi_component), rng_(rng),
+      multi_component_(multi_component),
+      coefficient_change_(coefficient_change),
+      rng_(rng),
       mixture_workspace_(mixture_workspace),
       residual_sse_change_(residual_sse_change) {}
 
@@ -395,6 +448,7 @@ class BlockCoefficientWorker : public RcppParallel::Worker {
         );
 
         const double coefficient_change = coefficient_[j] - old_coefficient;
+        coefficient_change_[j] = coefficient_change;
         if (coefficient_change != 0.0) {
           matrix_.update(corrected_rhs_, j, coefficient_change);
           if (learn_residual_var_) {
@@ -428,6 +482,7 @@ class BlockCoefficientWorker : public RcppParallel::Worker {
   std::vector<double>& corrected_rhs_;
   std::vector<int>& inclusion_;
   std::vector<int>& multi_component_;
+  std::vector<double>& coefficient_change_;
   std::vector<BlockRng>& rng_;
   std::vector<MixtureWorkspace>& mixture_workspace_;
   std::vector<double>& residual_sse_change_;
@@ -454,6 +509,7 @@ void parallel_coefficient_sweep(
     std::vector<double>& corrected_rhs,
     std::vector<int>& inclusion,
     std::vector<int>& multi_component,
+    std::vector<double>& coefficient_change,
     std::vector<BlockRng>& rng,
     std::vector<MixtureWorkspace>& mixture_workspace,
     double& residual_sse,
@@ -463,8 +519,8 @@ void parallel_coefficient_sweep(
     matrix, block_id.begin(), block_model, model_local_index,
     x_squared, residual_var, normal_var, pi, slab_var, tau_sq, local_var,
     multi_gamma, multi_pi, multi_var, learn_residual_var, coefficient,
-    corrected_rhs, inclusion, multi_component, rng, mixture_workspace,
-    residual_sse_change
+    corrected_rhs, inclusion, multi_component, coefficient_change, rng,
+    mixture_workspace, residual_sse_change
   );
   RcppParallel::parallelFor(
     0, matrix.block_count(), worker, 1, nthreads

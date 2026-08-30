@@ -575,9 +575,11 @@ Supported Gram representations are:
 - A symmetric sparse `dsCMatrix`, supplied directly or within list input. The
   speed representation expands both triangles. The memory representation uses
   the block kernel with one or more blocks, keeps a lower triangle, updates only
-  not-yet-visited coordinates during the ascending Gibbs scan, and reconstructs
-  the complete $q$ vector once per sweep. It therefore avoids a reverse
-  adjacency index while preserving an exact serial Gibbs transition.
+  not-yet-visited coordinates during the ascending Gibbs scan, and records each
+  coefficient change. A one-sided strict-triangle pass then applies the missing
+  effects of later changes to previously visited coordinates. The complete $q$
+  vector is reconstructed every 100 iterations to control floating-point drift.
+  This avoids a reverse adjacency index while preserving the Gibbs transition.
 
 With zero working predictor means, exactly independent Gram blocks can be
 sampled concurrently through `RcppParallel`. Updates within a Gram block remain
@@ -799,10 +801,16 @@ $$
 The LD kernel applies $D^{1/2}RD^{1/2}\theta$ directly and never constructs
 the full Gram matrix. During an ascending Gibbs sweep, strict-lower entries
 propagate coefficient changes only to coordinates that have not yet been
-visited. The complete right-hand-side state is reconstructed once after each
-sweep. Independent exact LD sub-blocks may be processed concurrently, while
-updates remain sequential inside a connected block. For $m_b$ stored values
-in block $b$, a sweep costs $O(p+\sum_b m_b)$.
+visited. After the sweep, a one-sided pass over the same strict-lower entries
+applies each later coefficient change to earlier coordinates. Blocks with no
+relevant changes skip this repair, and the last changed local coordinate bounds
+the columns that need scanning. A complete matrix-vector reconstruction every
+100 iterations controls accumulated floating-point drift and retains the
+runtime sufficient-statistic validity guard. Independent exact LD sub-blocks
+may be processed concurrently, while updates remain sequential inside a
+connected block. For $m_b$ stored values in block $b$, a sweep remains
+$O(p+\sum_b m_b)$ but avoids the two-endpoint full reconstruction normally
+required after every sweep.
 
 For posterior PVE, one fused pass over each compressed LD block accumulates the
 total quadratic form, every `ETA` block's standalone quadratic form, and its

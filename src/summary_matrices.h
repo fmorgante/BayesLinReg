@@ -313,6 +313,41 @@ class BlockSummaryMatrix {
       const std::vector<double>& coefficient,
       std::vector<double>& fitted) const;
 
+  void repair_streaming_state(
+      const std::vector<double>& coefficient_change,
+      std::vector<double>& rhs) const;
+
+  void repair_streaming_block(
+      const int block_index,
+      const std::vector<double>& coefficient_change,
+      std::vector<double>& rhs) const {
+    const Block& block = blocks_[block_index];
+    if (block.type != GramStorage::SparseLowerTriangular) return;
+
+    int last_changed = -1;
+    for (int local = block.size - 1; local > 0; --local) {
+      if (coefficient_change[block.global[local]] != 0.0) {
+        last_changed = local;
+        break;
+      }
+    }
+    if (last_changed < 1) return;
+
+    for (int column = 0; column < last_changed; ++column) {
+      double missing_upper_update = 0.0;
+      for (int position = block.column_pointer[column];
+           position < block.column_pointer[column + 1]; ++position) {
+        const int row = block.row_index[position];
+        if (row == column) continue;
+        const double change = coefficient_change[block.global[row]];
+        if (change != 0.0) {
+          missing_upper_update += block.values[position] * change;
+        }
+      }
+      rhs[block.global[column]] -= missing_upper_update;
+    }
+  }
+
   int block_count() const {
     return static_cast<int>(blocks_.size());
   }
@@ -570,6 +605,44 @@ class LDSummaryMatrix {
   void multiply(
       const std::vector<double>& coefficient,
       std::vector<double>& fitted) const;
+
+  void repair_streaming_state(
+      const std::vector<double>& coefficient_change,
+      std::vector<double>& rhs) const;
+
+  void repair_streaming_block(
+      const int block_index,
+      const std::vector<double>& coefficient_change,
+      std::vector<double>& rhs) const {
+    const Block& block = blocks_[block_index];
+    int last_changed = -1;
+    for (int local = block.size - 1; local > 0; --local) {
+      if (coefficient_change[block.global[local]] != 0.0) {
+        last_changed = local;
+        break;
+      }
+    }
+    if (last_changed < 1) return;
+
+    for (int column = 0; column < last_changed; ++column) {
+      const int global_column = block.global[column];
+      double missing_upper_update = 0.0;
+      for (int position = block.indptr[column];
+           position < block.indptr[column + 1]; ++position) {
+        const int row = block.type == 0
+          ? column + 1 + position - block.indptr[column]
+          : block.row_index[position];
+        const int global_row = block.global[row];
+        const double change = coefficient_change[global_row];
+        if (change != 0.0) {
+          missing_upper_update +=
+            block.data[position] * scale_[global_row] * change;
+        }
+      }
+      rhs[global_column] -= scale_[global_column] * off_diagonal_scale_ *
+        missing_upper_update;
+    }
+  }
 
   void multiply_block(
       const int block_index,

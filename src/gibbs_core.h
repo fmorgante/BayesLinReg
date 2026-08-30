@@ -5,6 +5,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <vector>
 #include "coefficient_updates.h"
@@ -378,6 +379,10 @@ Rcpp::List blm_gibbs_core(
   int next_progress_percent = 10;
   int last_reported_iteration = 0;
   const int residual_refresh_interval = 100;
+  // Internal diagnostic fallback used by differential tests and benchmarks.
+  // Normal execution uses the incremental one-sided repair.
+  const bool use_incremental_streaming_repair =
+    std::getenv("BAYESLINREG_FULL_STREAMING_REFRESH") == nullptr;
   const double residual_sse_relative_tolerance =
     std::sqrt(std::numeric_limits<double>::epsilon());
   auto reconstruct_sufficient_state = [&](const bool fitted_is_current,
@@ -460,8 +465,9 @@ Rcpp::List blm_gibbs_core(
           summary_XtX, block_id, prior_models, model_local_index, x_squared,
           residual_var, normal_var, pi, slab_var, tau_sq, local_var,
           multi_gamma, multi_pi, multi_var, learn_residual_var, coefficient,
-          corrected_rhs, inclusion, multi_component, block_rng,
-          parallel_mixture_workspace, residual_sse, nthreads
+          corrected_rhs, inclusion, multi_component, coefficient_delta,
+          block_rng, parallel_mixture_workspace, residual_sse,
+          nthreads
         );
         parallel_sweep = true;
       }
@@ -502,6 +508,7 @@ Rcpp::List blm_gibbs_core(
           serial_rng, serial_mixture_workspace
         );
         const double coefficient_change = coefficient[j] - old_coefficient;
+        coefficient_delta[j] = coefficient_change;
         if (use_sufficient_statistics) {
           if (coefficient_change != 0.0) {
             summary_XtX.update(corrected_rhs, j, coefficient_change);
@@ -526,17 +533,24 @@ Rcpp::List blm_gibbs_core(
     }
 
     // Streaming triangular blocks update only coordinates that remain in their
-    // block-local scan. Reconstruct the full state once after every sweep so
-    // it is ready for retained-draw summaries and the next iteration.
-    bool streaming_state_reconstructed = false;
+    // block-local scan. Apply the missing effect of later coefficient changes
+    // to earlier coordinates with one strict-triangle pass. A full multiply is
+    // still performed periodically below to limit floating-point drift.
+    bool fitted_crossproduct_is_current = false;
     if constexpr (has_streaming_triangular_blocks<SummaryMatrix>::value) {
       if (summary_XtX.has_streaming_blocks()) {
-        summary_XtX.multiply(coefficient, fitted_crossproduct);
-        center_dot = summary_XtX.center_dot(coefficient);
-        for (int j = 0; j < p; ++j) {
-          corrected_rhs[j] = summary_Xty[j] - fitted_crossproduct[j];
+        if (use_incremental_streaming_repair) {
+          summary_XtX.repair_streaming_state(
+            coefficient_delta, corrected_rhs
+          );
+        } else {
+          summary_XtX.multiply(coefficient, fitted_crossproduct);
+          center_dot = summary_XtX.center_dot(coefficient);
+          for (int j = 0; j < p; ++j) {
+            corrected_rhs[j] = summary_Xty[j] - fitted_crossproduct[j];
+          }
+          fitted_crossproduct_is_current = true;
         }
-        streaming_state_reconstructed = true;
       }
     }
 
@@ -545,14 +559,16 @@ Rcpp::List blm_gibbs_core(
       if (use_sufficient_statistics) {
         if (learn_residual_var) {
           reconstruct_sufficient_state(
-            streaming_state_reconstructed, iteration
+            fitted_crossproduct_is_current, iteration
           );
-        } else if (!streaming_state_reconstructed) {
+          fitted_crossproduct_is_current = true;
+        } else if (!fitted_crossproduct_is_current) {
           summary_XtX.multiply(coefficient, fitted_crossproduct);
           center_dot = summary_XtX.center_dot(coefficient);
           for (int j = 0; j < p; ++j) {
             corrected_rhs[j] = summary_Xty[j] - fitted_crossproduct[j];
           }
+          fitted_crossproduct_is_current = true;
         }
       } else {
         const double* design_begin = center_observations
@@ -742,8 +758,9 @@ Rcpp::List blm_gibbs_core(
           std::max(1.0, std::abs(summary_yty));
         if (residual_sse < -preliminary_tolerance) {
           reconstruct_sufficient_state(
-            streaming_state_reconstructed, iteration
+            fitted_crossproduct_is_current, iteration
           );
+          fitted_crossproduct_is_current = true;
         }
         sum_squared_residuals = residual_sse;
       } else {

@@ -306,9 +306,11 @@ The default `"auto"` uses `XtX_memory_limit` to retain triangular storage when
 expansion would exceed the requested internal-memory budget. The selected
 representation and estimated bytes are returned in `fit$XtX_storage`. The
 memory representation stores a lower triangle and
-streams updates to not-yet-visited coefficients, then reconstructs the complete
-right-hand-side state once per Gibbs sweep; it does not allocate a reverse
-adjacency index.
+streams updates to not-yet-visited coefficients. A one-sided pass then repairs
+the omitted effects on previously visited coordinates, and a complete state
+reconstruction every 100 iterations limits floating-point drift. This avoids a
+reverse adjacency index and the more expensive full reconstruction after every
+sweep.
 
 When the working predictor means are zero, separate Gram blocks can be updated
 within one chain using `nthreads`. This requires the Rcpp sampler and one chain:

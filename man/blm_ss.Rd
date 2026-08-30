@@ -181,9 +181,12 @@ For sparse \code{XtX}, the Rcpp sampler traverses only stored entries.
 \code{XtX_storage} can expand a symmetric \code{dsCMatrix} once to a general
 \code{dgCMatrix}, or retain a lower triangle and stream each ascending Gibbs
 sweep without a reverse adjacency index. This applies to both direct and
-list input. The full right-hand-side state is reconstructed once after
-each streaming sweep. The dense rank-one centering correction is
-maintained separately rather than materialized.
+list input. After each streaming sweep, one strict-triangle pass applies
+the effects of later coefficient changes that were intentionally omitted
+from earlier coordinates. A full right-hand-side reconstruction is still
+performed every 100 iterations to limit floating-point drift. The dense
+rank-one centering correction is maintained separately rather than
+materialized.
 With list input and zero working predictor means, \code{nthreads > 1} updates
 separate Gram blocks concurrently through \code{RcppParallel}. Updates remain
 sequential within each Gram block. Shared prior hyperparameters and the
