@@ -2,13 +2,14 @@
 #'
 #' Fits the same coefficient-prior models as [blm_ss()] from additive
 #' quantitative-trait GWAS results and a reusable LD object created by
-#' [as_blm_ld()]. The working Gram matrix is applied in LD-native form and is
-#' not materialized.
+#' [as_blm_ld()] or its truncated-eigen analogue [as_blm_ld_eigen()]. The
+#' working Gram matrix is applied without materializing a global dense matrix.
 #'
 #' @param gwas A data frame with columns `CHR`, `ID`, `POS`, `A1`, `A0`, `N`,
 #'   `BETA`, and `SE`. `BETA` is the additive marginal effect per `A1` allele.
 #'   All retained variants must have a common sample size `N`.
-#' @param ld A `blm_ld` object returned by the current [as_blm_ld()].
+#' @param ld A `blm_ld` object returned by [as_blm_ld()] or a
+#'   `blm_ld_eigen` object returned by [as_blm_ld_eigen()].
 #' @param ETA Prior specifications in the same format as [blm_ss()]. Character
 #'   `indices` refer to variant IDs.
 #' @param residual_var,residual_shape,residual_scale Residual-variance controls
@@ -33,7 +34,9 @@
 #' @param ld_shrink Numeric scalar in `[0, 1)`. Off-diagonal LD correlations
 #'   are multiplied by `1 - ld_shrink` while the unit diagonal is retained.
 #'   This is applied by the native LD operator without copying or modifying
-#'   `ld`. Positive values can stabilize analyses using external LD.
+#'   `ld`. Positive values can stabilize analyses using external LD. It is not
+#'   available for `blm_ld_eigen` input because the eigen object already
+#'   represents an explicit LD approximation.
 #'
 #' @return An object of class `blm_fit`. Coefficients are oriented to the input
 #'   GWAS `A1` alleles. No intercept is fitted because centered GWAS summary
@@ -48,6 +51,9 @@
 #'   LD-only, location-mismatched, allele-mismatched, and ambiguous variants.
 #'   Its `excluded` element counts excluded table entries: unmatched entries
 #'   contribute one and matched-but-incompatible variant pairs contribute two.
+#'   Eigen LD fits additionally report `ld_eigen_rank`, block-specific ranks
+#'   and retained trace fractions, aggregate `ld_prop_var`, and whether the
+#'   representation is approximate.
 #'
 #' @details Variants are matched by `ID` and checked against chromosome,
 #'   position, and alleles. Reversed alleles are handled by changing effect
@@ -58,6 +64,15 @@
 #'   numeric `ETA` indices are rejected because their intended position is
 #'   ambiguous; use character variant IDs instead. Gibbs coordinates retain
 #'   LD order, while `ETA` blocks remain independent of LD blocks.
+#'
+#'   A `blm_ld_eigen` object uses the pure truncated representation
+#'   \eqn{R_q=U_q\Lambda_qU_q'} stored in that object. The omitted eigenspace
+#'   is treated as having zero LD variance; no diagonal correction is added.
+#'   Harmonization that removes variants recomputes eigenpairs of each retained
+#'   principal submatrix of \eqn{R_q}, preserving the stored approximation.
+#'   Predictor standardization and expected-PVE prior calibration continue to
+#'   use the original unit-diagonal LD scale, so changing `prop_var` does not
+#'   silently redefine prior scales.
 #'
 #'   With `scale = "standardized"`, the working statistics use
 #'   `XtX = (N - 1) R` and response variance one. With `scale = "original"`,
@@ -99,7 +114,16 @@ blm_gwas <- function(
   pve_controls <- .validate_pve_controls(compute_pve, pve_type)
   compute_pve <- pve_controls$compute_pve
   pve_type <- pve_controls$pve_type
-  .validate_blm_ld_object(ld)
+  eigen_ld <- inherits(ld, "blm_ld_eigen")
+  if (eigen_ld) {
+    .validate_blm_ld_eigen_object(ld)
+    if (ld_shrink != 0) {
+      stop("`ld_shrink` must be zero for `blm_ld_eigen` input.",
+           call. = FALSE)
+    }
+  } else {
+    .validate_blm_ld_object(ld)
+  }
   input_ld_regularization_report <- ld$regularization_report
   controls <- list(
     verbose = verbose,
@@ -204,6 +228,7 @@ blm_gwas <- function(
       blocks, predictor_variance_sums, components$reference_response_var, n
     )
   }
+  learn_residual_var <- is.null(residual_var)
   residual_prior <- .prepare_residual_prior(
     residual_var, residual_shape, residual_scale, blocks,
     components$reference_response_var
@@ -242,7 +267,100 @@ blm_gwas <- function(
     blocks, function(block) block$model == "Fixed", logical(1)
   )
   fixed_source <- unlist(source_indices[fixed_blocks], use.names = FALSE)
-  if (length(fixed_source)) {
+  if (eigen_ld) {
+    transformed_X_blocks <- vector("list", length(ld$blocks))
+    transformed_y_blocks <- vector("list", length(ld$blocks))
+    projected_Xty <- numeric(p)
+    approximate_diagonal <- numeric(p)
+    for (block_index in seq_along(ld$blocks)) {
+      block <- ld$blocks[[block_index]]
+      indices <- ld_indices[[block_index]]
+      block_scale <- sampler_scale[indices]
+      scale_tolerance <- 100 * .Machine$double.eps *
+        max(1, max(abs(block_scale)))
+      common_scale <- max(abs(block_scale - block_scale[[1L]])) <=
+        scale_tolerance
+      factor_scale <- if (common_scale) {
+        rep(block_scale[[1L]], length(block_scale))
+      } else {
+        block_scale
+      }
+      factor <- build_scaled_eigen_factor_cpp(
+        block$eigenvectors, block$eigenvalues,
+        1 / factor_scale, integer()
+      )
+      prepared <- if (common_scale) {
+        prepare_eigen_statistics_cpp(
+          block$eigenvectors,
+          block$eigenvalues * block_scale[[1L]]^2,
+          working_Xty[indices]
+        )
+      } else {
+        prepare_eigen_factor_statistics_cpp(factor, working_Xty[indices])
+      }
+      transformed_X_blocks[[block_index]] <- factor
+      transformed_y_blocks[[block_index]] <- prepared$transformed_response
+      projected_Xty[indices] <- prepared$projected_crossproduct
+      approximate_diagonal[indices] <- prepared$diagonal
+      if (block$prop_var >= 1 - 1e-12) {
+        projection_error <- working_Xty[indices] -
+          prepared$projected_crossproduct
+        projection_tolerance <- sqrt(.Machine$double.eps) *
+          max(1, sqrt(sum(working_Xty[indices]^2)))
+        if (sqrt(sum(projection_error^2)) > projection_tolerance) {
+          stop(sprintf(
+            paste0(
+              "The GWAS cross-products have a component outside the exact ",
+              "eigenspace of LD block `%s`."
+            ),
+            block$name
+          ), call. = FALSE)
+        }
+      }
+    }
+    rm(factor, prepared)
+    diagonal_tolerance <- 100 * .Machine$double.eps *
+      pmax(1, approximate_diagonal)
+    constant_predictors <- approximate_diagonal <= diagonal_tolerance
+    if (any(constant_predictors)) {
+      stop(sprintf(
+        "The eigen LD representation contains constant predictor(s): %s.",
+        paste(predictor_names[constant_predictors], collapse = ", ")
+      ), call. = FALSE)
+    }
+    transformed_y_norm <- sum(vapply(
+      transformed_y_blocks, function(value) sum(value^2), numeric(1)
+    ))
+    compatibility_tolerance <- sqrt(.Machine$double.eps) *
+      max(1, components$yty)
+    if ((learn_residual_var || check_psd) &&
+        transformed_y_norm > components$yty + compatibility_tolerance) {
+      stop(
+        paste0(
+          "The GWAS cross-products and eigen LD representation are ",
+          "incompatible with the reconstructed response sum of squares."
+        ),
+        call. = FALSE
+      )
+    }
+    if (length(fixed_source)) {
+      fixed_design <- do.call(rbind, lapply(seq_along(ld$blocks), function(b) {
+        answer <- matrix(
+          0, nrow = nrow(transformed_X_blocks[[b]]),
+          ncol = length(fixed_source)
+        )
+        selected <- match(ld_indices[[b]], fixed_source, nomatch = 0L)
+        keep <- selected > 0L
+        answer[, selected[keep]] <-
+          transformed_X_blocks[[b]][, keep, drop = FALSE]
+        answer
+      }))
+      .validate_fixed_design(
+        fixed_design, seq_along(fixed_source),
+        sampler_internal_names[fixed_source]
+      )
+    }
+  } else if (length(fixed_source)) {
     fixed_R <- .materialize_blm_ld(ld, fixed_source, ld_shrink)
     fixed_scale <- sampler_scale[fixed_source]
     fixed_gram <- fixed_R * tcrossprod(fixed_scale)
@@ -251,7 +369,7 @@ blm_gwas <- function(
       sampler_internal_names[fixed_source]
     )
   }
-  if (check_psd) {
+  if (check_psd && !eigen_ld) {
     .validate_block_working_crossproducts(
       ld$blocks, ld_indices, working_Xty, components$yty,
       transform = function(block, block_indices) {
@@ -286,13 +404,20 @@ blm_gwas <- function(
     intercept_x_mean = numeric(length(working_Xty)),
     intercept_y_mean = 0
   )
-  sampler_arguments$ld_blocks <- lapply(ld$blocks, function(block) {
-    block[c("type", "size", "data", "indptr", "row_index")]
-  })
-  sampler_arguments$ld_indices <- ld_indices
-  sampler_arguments$ld_scale <- sampler_scale
-  sampler_arguments$ld_shrink <- ld_shrink
-  sampler_arguments$Xty <- working_Xty
+  if (eigen_ld) {
+    sampler_arguments$eigen_X <- transformed_X_blocks
+    sampler_arguments$eigen_y <- transformed_y_blocks
+    sampler_arguments$eigen_indices <- ld_indices
+    sampler_arguments$Xty <- projected_Xty
+  } else {
+    sampler_arguments$ld_blocks <- lapply(ld$blocks, function(block) {
+      block[c("type", "size", "data", "indptr", "row_index")]
+    })
+    sampler_arguments$ld_indices <- ld_indices
+    sampler_arguments$ld_scale <- sampler_scale
+    sampler_arguments$ld_shrink <- ld_shrink
+    sampler_arguments$Xty <- working_Xty
+  }
   sampler_arguments$yty <- components$yty
   sampler_arguments$nthreads <- nthreads
   samples <- .run_prepared_sampler(
@@ -322,6 +447,21 @@ blm_gwas <- function(
   result$reference_response_var <- components$reference_response_var
   result$ld_block_table <- ld$block_table
   result$ld_cross_block_assumption <- ld$cross_block_assumption
+  result$ld_representation <- if (eigen_ld) "truncated_eigen" else "explicit"
+  if (eigen_ld) {
+    block_rank <- vapply(ld$blocks, `[[`, integer(1), "rank")
+    block_prop_var <- vapply(ld$blocks, `[[`, numeric(1), "prop_var")
+    names(block_rank) <- names(ld$blocks)
+    names(block_prop_var) <- names(ld$blocks)
+    result$ld_eigen_rank <- sum(block_rank)
+    result$ld_eigen_rank_by_block <- block_rank
+    result$ld_prop_var <- sum(vapply(
+      ld$blocks, `[[`, numeric(1), "retained_trace"
+    )) / sum(vapply(ld$blocks, `[[`, integer(1), "size"))
+    result$ld_prop_var_by_block <- block_prop_var
+    result$ld_approximate <- any(block_prop_var < 1 - 1e-12)
+    result$ld_eigen_requested_prop_var <- ld$requested_prop_var
+  }
   if (!is.null(input_ld_regularization_report)) {
     result$ld_regularization_report <- input_ld_regularization_report
     result$ld_regularization_block_map <- .ld_regularization_block_map(
@@ -485,6 +625,8 @@ blm_gwas <- function(
   )
   subset_ld <- if (identical(retained_ld, seq_len(nrow(ld$variants)))) {
     ld
+  } else if (inherits(ld, "blm_ld_eigen")) {
+    .subset_blm_ld_eigen(ld, retained_ld)
   } else {
     .subset_blm_ld(ld, retained_ld)
   }

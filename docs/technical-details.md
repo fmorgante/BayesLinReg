@@ -647,8 +647,16 @@ $$
 \mathrm{SSE}=c+\|w-Q\theta\|^2.
 $$
 
-Block-level eigen PVE reuses allocated work vectors and clears only blocks
-touched by the requested prior block.
+Posterior PVE uses a fused block-parallel path. For each independent eigen
+block, one pass over its coefficients accumulates the transformed fitted vector
+for every `ETA` block. Total, standalone, and allocated quadratic forms are
+then calculated together, and the per-eigen-block results are reduced in fixed
+block order so results do not depend on thread scheduling. The transformed
+workspace is allocated only when `compute_pve = TRUE`, reused across retained
+draws, and requires $O(K\sum_b q_b)$ doubles for $K$ `ETA` blocks. With the
+usual one or two `ETA` blocks, this replaces approximately two full factor
+passes per retained draw with one and exposes the PVE work to block-level
+parallelism.
 
 ### 2.5 LD-native GWAS fitting with `blm_gwas()`
 
@@ -834,6 +842,72 @@ sizes, so incompatible serialized objects fail before entering compiled code.
 Reports created before the provenance and final-floor fields were introduced
 remain valid when their shared structural and numerical fields are consistent.
 
+#### Truncated-eigen LD representation
+
+`as_blm_ld_eigen()` constructs a `blm_ld_eigen` object either from correlation
+matrices, a `blm_ld` object, or precomputed `eigenvectors` and `eigenvalues`.
+Correlation input first passes through `as_blm_ld()`, including exact
+contiguous sub-block detection, and is then eigendecomposed one computational
+block at a time. The current internal path uses a complete dense symmetric
+eigendecomposition; it requires $O(p_b^2)$ peak memory and $O(p_b^3)$ work for
+block $b$. Precomputed eigenpairs avoid this construction cost and permit an
+external partial eigensolver.
+
+Within each block, the smallest leading set satisfying `prop_var` is retained:
+
+$$
+R_b \approx R_{b,q}=U_{b,q}\Lambda_{b,q}U_{b,q}',\qquad
+\frac{\sum_{k=1}^{q_b}\lambda_{bk}}{p_b}\geq \rho.
+$$
+
+Here $\rho$ is the requested `prop_var`.
+
+This is pure spectral truncation. The omitted eigenspace is assigned zero
+variance and no diagonal correction is added. The realized trace fraction,
+rank, requested fraction, and source-block metadata are stored per block. The
+principal arrays require approximately $8p_bq_b+8q_b$ bytes, excluding R object
+overhead. `combine_blm_ld_eigen()` concatenates independently constructed
+objects without reconstructing correlation matrices and assumes zero LD
+between them.
+
+Coefficient standardization and expected-PVE prior calibration retain the
+original unit-diagonal LD scale rather than using the generally smaller
+diagonal of $R_{b,q}$. Thus changing `prop_var` changes the likelihood
+approximation but does not silently redefine a block's prior scale. This is a
+deliberate distinction from generic `blm_ss_eigen()` input, where the retained
+Gram matrix is the only available definition of predictor variance.
+
+For the usual standardized GWAS likelihood, or original-scale fitting with
+internally standardized coefficients, the working scale is constant within an
+LD block. The existing eigen-block sampler therefore operates on
+
+$$
+Q_b=c_b\Lambda_{b,q}^{1/2}U_{b,q}',
+$$
+
+with $O(p_bq_b)$ work per coefficient sweep. Original-scale fitting with
+`standardize = FALSE` can have predictor-specific scales. In that case the
+factor is $Q_b=\Lambda_{b,q}^{1/2}U_{b,q}'D_b$, and preprocessing obtains the
+least-squares transformed response from
+
+$$
+(Q_bQ_b')w_b=Q_bg_b.
+$$
+
+This general path forms a $q_b$ by $q_b$ matrix and is consequently most useful
+when retained ranks are moderate; the default standardized path avoids it.
+Posterior PVE is computed in the retained representation and can run in
+parallel across eigen blocks.
+
+If GWAS harmonization removes variants, deleting eigenvector rows alone would
+not leave orthonormal eigenvectors. The implementation instead forms the
+corresponding principal submatrix of the stored approximation and recomputes
+its positive eigenpairs. Thus it preserves $R_{b,q}[S,S]$, not the unknown
+principal submatrix of the original untruncated $R_b$. `ld_shrink` is rejected
+for eigen input because shrinkage would define a different representation;
+regularization must occur before conversion or be reflected in the supplied
+eigenpairs.
+
 The returned `ld_harmonization` vector separates GWAS-only and LD-only entries
 from location-mismatched, allele-mismatched, and unresolved ambiguous matched
 variants. These categories are mutually exclusive. Its aggregate `excluded`
@@ -979,6 +1053,8 @@ The main implementations are located in:
 - `R/blm_gwas.R`: GWAS validation, harmonization, scaling, and fitting.
 - `R/ld_matrix.R`: LD construction, exact sub-block detection, and compressed
   storage.
+- `R/ld_eigen.R`: truncated-eigen LD construction, combination, validation,
+  and harmonized principal-submatrix restriction.
 - `R/compute_ss_from_gwas.R`: GWAS/LD reconstruction.
 - `R/fit_preparation.R`: shared block layouts, prior arguments, and sampler
   execution used by all fitting interfaces.

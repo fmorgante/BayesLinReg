@@ -33,7 +33,8 @@ blm_gwas(
 \code{BETA}, and \code{SE}. \code{BETA} is the additive marginal effect per \code{A1} allele.
 All retained variants must have a common sample size \code{N}.}
 
-\item{ld}{A \code{blm_ld} object returned by the current \code{\link[=as_blm_ld]{as_blm_ld()}}.}
+\item{ld}{A \code{blm_ld} object returned by \code{\link[=as_blm_ld]{as_blm_ld()}} or a
+\code{blm_ld_eigen} object returned by \code{\link[=as_blm_ld_eigen]{as_blm_ld_eigen()}}.}
 
 \item{ETA}{Prior specifications in the same format as \code{\link[=blm_ss]{blm_ss()}}. Character
 \code{indices} refer to variant IDs.}
@@ -56,7 +57,9 @@ marginal GWAS regressions. The default is \code{N - 2}.}
 \item{ld_shrink}{Numeric scalar in \verb{[0, 1)}. Off-diagonal LD correlations
 are multiplied by \code{1 - ld_shrink} while the unit diagonal is retained.
 This is applied by the native LD operator without copying or modifying
-\code{ld}. Positive values can stabilize analyses using external LD.}
+\code{ld}. Positive values can stabilize analyses using external LD. It is not
+available for \code{blm_ld_eigen} input because the eigen object already
+represents an explicit LD approximation.}
 
 \item{iterations, burnin, thin}{MCMC controls; see \code{\link[=blm_ss]{blm_ss()}}.}
 
@@ -85,12 +88,15 @@ retained and flipped variants together with separate counts for GWAS-only,
 LD-only, location-mismatched, allele-mismatched, and ambiguous variants.
 Its \code{excluded} element counts excluded table entries: unmatched entries
 contribute one and matched-but-incompatible variant pairs contribute two.
+Eigen LD fits additionally report \code{ld_eigen_rank}, block-specific ranks
+and retained trace fractions, aggregate \code{ld_prop_var}, and whether the
+representation is approximate.
 }
 \description{
 Fits the same coefficient-prior models as \code{\link[=blm_ss]{blm_ss()}} from additive
 quantitative-trait GWAS results and a reusable LD object created by
-\code{\link[=as_blm_ld]{as_blm_ld()}}. The working Gram matrix is applied in LD-native form and is
-not materialized.
+\code{\link[=as_blm_ld]{as_blm_ld()}} or its truncated-eigen analogue \code{\link[=as_blm_ld_eigen]{as_blm_ld_eigen()}}. The
+working Gram matrix is applied without materializing a global dense matrix.
 }
 \details{
 Variants are matched by \code{ID} and checked against chromosome,
@@ -102,6 +108,15 @@ that becomes empty is rejected. If harmonization excludes an LD variant,
 numeric \code{ETA} indices are rejected because their intended position is
 ambiguous; use character variant IDs instead. Gibbs coordinates retain
 LD order, while \code{ETA} blocks remain independent of LD blocks.
+
+A \code{blm_ld_eigen} object uses the pure truncated representation
+\eqn{R_q=U_q\Lambda_qU_q'} stored in that object. The omitted eigenspace
+is treated as having zero LD variance; no diagonal correction is added.
+Harmonization that removes variants recomputes eigenpairs of each retained
+principal submatrix of \eqn{R_q}, preserving the stored approximation.
+Predictor standardization and expected-PVE prior calibration continue to
+use the original unit-diagonal LD scale, so changing \code{prop_var} does not
+silently redefine prior scales.
 
 With \code{scale = "standardized"}, the working statistics use
 \verb{XtX = (N - 1) R} and response variance one. With \code{scale = "original"},

@@ -24,6 +24,18 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// prepare_eigen_factor_statistics_cpp
+Rcpp::List prepare_eigen_factor_statistics_cpp(const Rcpp::NumericMatrix& factor, const Rcpp::NumericVector& crossproduct);
+RcppExport SEXP _BayesLinReg_prepare_eigen_factor_statistics_cpp(SEXP factorSEXP, SEXP crossproductSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const Rcpp::NumericMatrix& >::type factor(factorSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::NumericVector& >::type crossproduct(crossproductSEXP);
+    rcpp_result_gen = Rcpp::wrap(prepare_eigen_factor_statistics_cpp(factor, crossproduct));
+    return rcpp_result_gen;
+END_RCPP
+}
 // build_scaled_eigen_factor_cpp
 Rcpp::NumericMatrix build_scaled_eigen_factor_cpp(const Rcpp::NumericMatrix& eigenvectors, const Rcpp::NumericVector& eigenvalues, const Rcpp::NumericVector& predictor_scale, const Rcpp::IntegerVector& source_order);
 RcppExport SEXP _BayesLinReg_build_scaled_eigen_factor_cpp(SEXP eigenvectorsSEXP, SEXP eigenvaluesSEXP, SEXP predictor_scaleSEXP, SEXP source_orderSEXP) {
@@ -344,6 +356,7 @@ END_RCPP
 
 static const R_CallMethodDef CallEntries[] = {
     {"_BayesLinReg_prepare_eigen_statistics_cpp", (DL_FUNC) &_BayesLinReg_prepare_eigen_statistics_cpp, 3},
+    {"_BayesLinReg_prepare_eigen_factor_statistics_cpp", (DL_FUNC) &_BayesLinReg_prepare_eigen_factor_statistics_cpp, 2},
     {"_BayesLinReg_build_scaled_eigen_factor_cpp", (DL_FUNC) &_BayesLinReg_build_scaled_eigen_factor_cpp, 4},
     {"_BayesLinReg_blm_build_info_cpp", (DL_FUNC) &_BayesLinReg_blm_build_info_cpp, 0},
     {"_BayesLinReg_draw_gig_rcpp_cpp", (DL_FUNC) &_BayesLinReg_draw_gig_rcpp_cpp, 4},

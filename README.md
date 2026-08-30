@@ -356,6 +356,31 @@ fit_gwas <- blm_gwas(
 )
 ```
 
+For blocks with substantially lower effective rank, the same interface accepts
+a reusable pure truncated-eigen LD object:
+
+```r
+ld_eigen <- as_blm_ld_eigen(
+  R = list(chr1 = R_chr1, chr2 = R_chr2),
+  variants = list(chr1 = variants_chr1, chr2 = variants_chr2),
+  prop_var = 0.995
+)
+
+fit_gwas_eigen <- blm_gwas(
+  gwas = gwas_results,
+  ld = ld_eigen,
+  ETA = list(model = "SpikeMultiSlab"),
+  scale = "standardized",
+  residual_var = 1
+)
+```
+
+`as_blm_ld_eigen()` also accepts an existing `blm_ld` object or precomputed
+`eigenvectors` and `eigenvalues`; the latter avoids its internal complete dense
+eigendecomposition. `combine_blm_ld_eigen()` joins independently converted
+batches in input order. Truncation does not add a diagonal correction, and
+`ld_shrink` must remain zero when an eigen LD object is used.
+
 `R` contains signed correlations, not squared correlations. List elements are
 treated as exactly independent. `as_blm_ld()` also detects exact contiguous
 sub-blocks within each element and stores one triangle with an implicit unit

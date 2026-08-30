@@ -5,6 +5,10 @@ prepare_eigen_statistics_cpp <- function(eigenvectors, eigenvalues, crossproduct
     .Call(`_BayesLinReg_prepare_eigen_statistics_cpp`, eigenvectors, eigenvalues, crossproduct)
 }
 
+prepare_eigen_factor_statistics_cpp <- function(factor, crossproduct) {
+    .Call(`_BayesLinReg_prepare_eigen_factor_statistics_cpp`, factor, crossproduct)
+}
+
 build_scaled_eigen_factor_cpp <- function(eigenvectors, eigenvalues, predictor_scale, source_order) {
     .Call(`_BayesLinReg_build_scaled_eigen_factor_cpp`, eigenvectors, eigenvalues, predictor_scale, source_order)
 }

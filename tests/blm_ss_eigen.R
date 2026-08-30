@@ -347,6 +347,54 @@ stopifnot(
   identical(block_diagnostics$nthreads, 1L)
 )
 
+# The fused eigen PVE path also preserves allocated block quadratics when
+# prior blocks cross eigen-block boundaries.
+allocated_arguments <- block_fit_arguments
+allocated_arguments$pve_type <- "allocated"
+set.seed(608)
+allocated_dense_fit <- do.call(
+  blm_ss, c(list(XtX = block_XtX), allocated_arguments)
+)
+set.seed(608)
+allocated_eigen_fit <- do.call(
+  blm_ss_eigen,
+  c(
+    list(
+      XtX_eigenvectors = eigenvector_blocks,
+      XtX_eigenvalues = eigenvalue_blocks,
+      XtX_prop_var = c(first = 1, second = 1)
+    ),
+    allocated_arguments
+  )
+)
+stopifnot(
+  isTRUE(all.equal(
+    allocated_dense_fit$total_pve_mean,
+    allocated_eigen_fit$total_pve_mean, tolerance = 1e-8
+  )),
+  isTRUE(all.equal(
+    allocated_dense_fit$total_pve_var,
+    allocated_eigen_fit$total_pve_var, tolerance = 1e-8
+  )),
+  isTRUE(all.equal(
+    allocated_dense_fit$cross_block_pve_mean,
+    allocated_eigen_fit$cross_block_pve_mean, tolerance = 1e-8
+  )),
+  isTRUE(all.equal(
+    allocated_dense_fit$cross_block_pve_var,
+    allocated_eigen_fit$cross_block_pve_var, tolerance = 1e-8
+  )),
+  all(vapply(seq_along(allocated_dense_fit$ETA), function(block) {
+    isTRUE(all.equal(
+      allocated_dense_fit$ETA[[block]]$pve_mean,
+      allocated_eigen_fit$ETA[[block]]$pve_mean, tolerance = 1e-8
+    )) && isTRUE(all.equal(
+      allocated_dense_fit$ETA[[block]]$pve_var,
+      allocated_eigen_fit$ETA[[block]]$pve_var, tolerance = 1e-8
+    ))
+  }, logical(1)))
+)
+
 # Threaded block-eigen sweeps cover every prior, learned residual variance,
 # PVE, and online summaries. They are reproducible across runs and thread
 # counts to numerical precision and accept nonzero means because the

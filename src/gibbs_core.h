@@ -228,14 +228,18 @@ Rcpp::List blm_gibbs_core(
   double total_pve_m2 = 0.0;
   double cross_block_pve_mean = 0.0;
   double cross_block_pve_m2 = 0.0;
-  // The LD specialization reuses per-LD-block output across retained draws.
-  // Other summary-matrix backends leave this empty and use the generic path.
-  LDPveWorkspace ld_pve_workspace;
-  if constexpr (has_parallel_ld_pve<SummaryMatrix>::value) {
+  // Specialized block backends reuse transformed and reduced PVE workspaces
+  // across retained draws. Other summary matrices use the generic path.
+  ParallelPveWorkspace parallel_pve_workspace;
+  if constexpr (has_parallel_ld_pve<SummaryMatrix>::value ||
+                has_parallel_eigen_pve<SummaryMatrix>::value) {
     if (compute_pve) {
-      ld_pve_workspace.ensure_size(
+      parallel_pve_workspace.ensure_size(
         summary_XtX.block_count(), number_of_blocks
       );
+      if constexpr (has_parallel_eigen_pve<SummaryMatrix>::value) {
+        summary_XtX.prepare_parallel_pve_workspace(number_of_blocks);
+      }
     }
   }
   Rcpp::NumericVector normal_var_mean(
@@ -811,7 +815,14 @@ Rcpp::List blm_gibbs_core(
           if constexpr (has_parallel_ld_pve<SummaryMatrix>::value) {
             parallel_ld_pve_quadratics(
               summary_XtX, coefficient, block_id, number_of_blocks,
-              ld_pve_workspace, standalone_sum_squares,
+              parallel_pve_workspace, standalone_sum_squares,
+              allocated_sum_squares, total_sum_squares,
+              total_contribution_scale, nthreads
+            );
+          } else if constexpr (has_parallel_eigen_pve<SummaryMatrix>::value) {
+            parallel_eigen_pve_quadratics(
+              summary_XtX, coefficient, block_id, number_of_blocks,
+              parallel_pve_workspace, standalone_sum_squares,
               allocated_sum_squares, total_sum_squares,
               total_contribution_scale, nthreads
             );

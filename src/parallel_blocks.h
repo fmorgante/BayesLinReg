@@ -170,25 +170,26 @@ inline void LDSummaryMatrix::repair_streaming_state(
   RcppParallel::parallelFor(0, blocks_.size(), worker, 1, nthreads_);
 }
 
-// Reusable retained-draw PVE storage. Each LD block owns one output row, so
-// workers never contend for writes. Reduction is deliberately performed later
-// in LD-block order to keep results independent of thread scheduling.
-struct LDPveWorkspace {
-  int ld_blocks = 0;
+// Reusable retained-draw PVE output storage. Each computational block owns one
+// output row, so workers never contend for writes. Reduction is deliberately
+// performed later in block order to keep results independent of scheduling.
+struct ParallelPveWorkspace {
+  int matrix_blocks = 0;
   int prior_blocks = 0;
   std::vector<double> total;
   std::vector<double> contribution_scale;
   std::vector<double> standalone;
   std::vector<double> allocated;
 
-  void ensure_size(const int new_ld_blocks, const int new_prior_blocks) {
-    if (ld_blocks == new_ld_blocks && prior_blocks == new_prior_blocks) return;
-    ld_blocks = new_ld_blocks;
+  void ensure_size(const int new_matrix_blocks, const int new_prior_blocks) {
+    if (matrix_blocks == new_matrix_blocks &&
+        prior_blocks == new_prior_blocks) return;
+    matrix_blocks = new_matrix_blocks;
     prior_blocks = new_prior_blocks;
-    total.resize(ld_blocks);
-    contribution_scale.resize(ld_blocks);
+    total.resize(matrix_blocks);
+    contribution_scale.resize(matrix_blocks);
     const std::size_t block_entries =
-      static_cast<std::size_t>(ld_blocks) * prior_blocks;
+      static_cast<std::size_t>(matrix_blocks) * prior_blocks;
     standalone.resize(block_entries);
     allocated.resize(block_entries);
   }
@@ -263,7 +264,7 @@ class LDPveWorker : public RcppParallel::Worker {
       const std::vector<double>& coefficient,
       const int* prior_block,
       const int number_of_prior_blocks,
-      LDPveWorkspace& workspace)
+      ParallelPveWorkspace& workspace)
     : matrix_(matrix), coefficient_(coefficient), prior_block_(prior_block),
       number_of_prior_blocks_(number_of_prior_blocks), workspace_(workspace) {}
 
@@ -285,7 +286,7 @@ class LDPveWorker : public RcppParallel::Worker {
   const std::vector<double>& coefficient_;
   const int* prior_block_;
   int number_of_prior_blocks_;
-  LDPveWorkspace& workspace_;
+  ParallelPveWorkspace& workspace_;
 };
 
 inline void parallel_ld_pve_quadratics(
@@ -293,7 +294,7 @@ inline void parallel_ld_pve_quadratics(
     const std::vector<double>& coefficient,
     const Rcpp::IntegerVector& prior_block,
     const int number_of_prior_blocks,
-    LDPveWorkspace& workspace,
+    ParallelPveWorkspace& workspace,
     std::vector<double>& standalone,
     std::vector<double>& allocated,
     double& total,
@@ -319,6 +320,147 @@ inline void parallel_ld_pve_quadratics(
     contribution_scale += workspace.contribution_scale[ld_block];
     const std::size_t offset =
       static_cast<std::size_t>(ld_block) * number_of_prior_blocks;
+    for (int block = 0; block < number_of_prior_blocks; ++block) {
+      standalone[block] += workspace.standalone[offset + block];
+      allocated[block] += workspace.allocated[offset + block];
+    }
+  }
+}
+
+inline void EigenBlockSummaryMatrix::pve_block_quadratics(
+    const int eigen_block,
+    const std::vector<double>& coefficient,
+    const int* prior_block,
+    const int number_of_prior_blocks,
+    double& total,
+    double& contribution_scale,
+    double* standalone,
+    double* allocated) const {
+  total = 0.0;
+  contribution_scale = 0.0;
+  std::fill(standalone, standalone + number_of_prior_blocks, 0.0);
+  std::fill(allocated, allocated + number_of_prior_blocks, 0.0);
+
+  const Block& block = blocks_[eigen_block];
+  std::vector<double>& transformed = pve_fitted_[eigen_block];
+  std::fill(transformed.begin(), transformed.end(), 0.0);
+  for (int local = 0; local < block.cols; ++local) {
+    const int global = block.global[local];
+    const int prior = prior_block[global] - 1;
+    const double beta = coefficient[global];
+    if (beta == 0.0) continue;
+    const double* column = block.design +
+      static_cast<std::size_t>(block.rows) * local;
+    double* prior_fitted = transformed.data() +
+      static_cast<std::size_t>(prior) * block.rows;
+    Eigen::Map<Eigen::VectorXd> fitted_vector(prior_fitted, block.rows);
+    const Eigen::Map<const Eigen::VectorXd> design_column(column, block.rows);
+    fitted_vector.noalias() += beta * design_column;
+  }
+
+  if (number_of_prior_blocks == 1) {
+    const Eigen::Map<const Eigen::VectorXd> fitted(
+      transformed.data(), block.rows
+    );
+    total = fitted.squaredNorm();
+    contribution_scale = total;
+    standalone[0] = total;
+    allocated[0] = total;
+    return;
+  }
+
+  for (int prior = 0; prior < number_of_prior_blocks; ++prior) {
+    const Eigen::Map<const Eigen::VectorXd> prior_fitted(
+      transformed.data() + static_cast<std::size_t>(prior) * block.rows,
+      block.rows
+    );
+    standalone[prior] = prior_fitted.squaredNorm();
+  }
+  Eigen::Map<Eigen::VectorXd> total_fitted(transformed.data(), block.rows);
+  for (int prior = 1; prior < number_of_prior_blocks; ++prior) {
+    const Eigen::Map<const Eigen::VectorXd> prior_fitted(
+      transformed.data() + static_cast<std::size_t>(prior) * block.rows,
+      block.rows
+    );
+    total_fitted.noalias() += prior_fitted;
+  }
+  total = total_fitted.squaredNorm();
+  contribution_scale = total;
+  double allocated_other = 0.0;
+  for (int prior = 1; prior < number_of_prior_blocks; ++prior) {
+    const Eigen::Map<const Eigen::VectorXd> prior_fitted(
+      transformed.data() + static_cast<std::size_t>(prior) * block.rows,
+      block.rows
+    );
+    allocated[prior] = prior_fitted.dot(total_fitted);
+    allocated_other += allocated[prior];
+  }
+  allocated[0] = total - allocated_other;
+}
+
+class EigenPveWorker : public RcppParallel::Worker {
+ public:
+  EigenPveWorker(
+      const EigenBlockSummaryMatrix& matrix,
+      const std::vector<double>& coefficient,
+      const int* prior_block,
+      const int number_of_prior_blocks,
+      ParallelPveWorkspace& workspace)
+    : matrix_(matrix), coefficient_(coefficient), prior_block_(prior_block),
+      number_of_prior_blocks_(number_of_prior_blocks), workspace_(workspace) {}
+
+  void operator()(const std::size_t begin, const std::size_t end) {
+    for (std::size_t eigen_block = begin; eigen_block < end; ++eigen_block) {
+      const std::size_t offset = eigen_block * number_of_prior_blocks_;
+      matrix_.pve_block_quadratics(
+        static_cast<int>(eigen_block), coefficient_, prior_block_,
+        number_of_prior_blocks_, workspace_.total[eigen_block],
+        workspace_.contribution_scale[eigen_block],
+        workspace_.standalone.data() + offset,
+        workspace_.allocated.data() + offset
+      );
+    }
+  }
+
+ private:
+  const EigenBlockSummaryMatrix& matrix_;
+  const std::vector<double>& coefficient_;
+  const int* prior_block_;
+  int number_of_prior_blocks_;
+  ParallelPveWorkspace& workspace_;
+};
+
+inline void parallel_eigen_pve_quadratics(
+    const EigenBlockSummaryMatrix& matrix,
+    const std::vector<double>& coefficient,
+    const Rcpp::IntegerVector& prior_block,
+    const int number_of_prior_blocks,
+    ParallelPveWorkspace& workspace,
+    std::vector<double>& standalone,
+    std::vector<double>& allocated,
+    double& total,
+    double& contribution_scale,
+    const int nthreads) {
+  const int eigen_blocks = matrix.block_count();
+  workspace.ensure_size(eigen_blocks, number_of_prior_blocks);
+  EigenPveWorker worker(
+    matrix, coefficient, prior_block.begin(), number_of_prior_blocks, workspace
+  );
+  if (nthreads > 1 && eigen_blocks > 1) {
+    RcppParallel::parallelFor(0, eigen_blocks, worker, 1, nthreads);
+  } else {
+    worker(0, eigen_blocks);
+  }
+
+  total = 0.0;
+  contribution_scale = 0.0;
+  std::fill(standalone.begin(), standalone.end(), 0.0);
+  std::fill(allocated.begin(), allocated.end(), 0.0);
+  for (int eigen_block = 0; eigen_block < eigen_blocks; ++eigen_block) {
+    total += workspace.total[eigen_block];
+    contribution_scale += workspace.contribution_scale[eigen_block];
+    const std::size_t offset =
+      static_cast<std::size_t>(eigen_block) * number_of_prior_blocks;
     for (int block = 0; block < number_of_prior_blocks; ++block) {
       standalone[block] += workspace.standalone[offset + block];
       allocated[block] += workspace.allocated[offset + block];
@@ -639,6 +781,12 @@ struct has_parallel_ld_pve : std::false_type {};
 
 template <>
 struct has_parallel_ld_pve<LDSummaryMatrix> : std::true_type {};
+
+template <typename SummaryMatrix>
+struct has_parallel_eigen_pve : std::false_type {};
+
+template <>
+struct has_parallel_eigen_pve<EigenBlockSummaryMatrix> : std::true_type {};
 
 }  // namespace bayeslinreg
 

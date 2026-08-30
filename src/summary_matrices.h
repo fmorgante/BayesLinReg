@@ -791,10 +791,7 @@ class EigenBlockSummaryMatrix {
         Rcpp::stop("Eigen-block predictor indices must cover every predictor.");
       }
     }
-    pve_fitted_.reserve(blocks_.size());
-    for (const Block& block : blocks_) {
-      pve_fitted_.emplace_back(block.rows, 0.0);
-    }
+    pve_fitted_.resize(blocks_.size());
     pve_touched_.assign(blocks_.size(), 0);
     pve_touched_blocks_.reserve(blocks_.size());
   }
@@ -880,6 +877,25 @@ class EigenBlockSummaryMatrix {
   }
   void update_center_dot(double&, const int, const double) const {}
 
+  void prepare_parallel_pve_workspace(const int number_of_prior_blocks) const {
+    for (int block_index = 0; block_index < block_count(); ++block_index) {
+      const std::size_t required =
+        static_cast<std::size_t>(blocks_[block_index].rows) *
+        number_of_prior_blocks;
+      pve_fitted_[block_index].resize(required);
+    }
+  }
+
+  void pve_block_quadratics(
+      const int eigen_block,
+      const std::vector<double>& coefficient,
+      const int* prior_block,
+      const int number_of_prior_blocks,
+      double& total,
+      double& contribution_scale,
+      double* standalone,
+      double* allocated) const;
+
   double block_quadratic(
       const std::vector<double>& coefficient,
       const std::vector<int>& predictors,
@@ -891,6 +907,10 @@ class EigenBlockSummaryMatrix {
       const Block& block = blocks_[block_index];
       const int local = global_local_[j];
       if (pve_touched_[block_index] == 0) {
+        if (pve_fitted_[block_index].size() <
+            static_cast<std::size_t>(block.rows)) {
+          pve_fitted_[block_index].resize(block.rows);
+        }
         std::fill(
           pve_fitted_[block_index].begin(),
           pve_fitted_[block_index].end(),
