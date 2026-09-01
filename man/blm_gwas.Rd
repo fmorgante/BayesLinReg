@@ -90,7 +90,9 @@ Its \code{excluded} element counts excluded table entries: unmatched entries
 contribute one and matched-but-incompatible variant pairs contribute two.
 Eigen LD fits additionally report \code{ld_eigen_rank}, block-specific ranks
 and retained trace fractions, aggregate \code{ld_prop_var}, and whether the
-representation is approximate.
+representation is approximate. Trace fractions use the unit-diagonal
+trace under the strict eigenvalue policy and the available positive trace
+under \code{negative_eigenvalues = "discard"}.
 }
 \description{
 Fits the same coefficient-prior models as \code{\link[=blm_ss]{blm_ss()}} from additive

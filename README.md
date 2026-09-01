@@ -380,6 +380,10 @@ fit_gwas_eigen <- blm_gwas(
 eigendecomposition. `combine_blm_ld_eigen()` joins independently converted
 batches in input order. Truncation does not add a diagonal correction, and
 `ld_shrink` must remain zero when an eigen LD object is used.
+Materially negative eigenvalues are errors by default. Setting
+`negative_eigenvalues = "discard"` instead removes all nonpositive components
+and applies `prop_var` relative to the remaining positive eigenvalue sum. This
+is SBayesRC-style positive-eigenspace truncation, not unit-diagonal LD repair.
 
 `R` contains signed correlations, not squared correlations. List elements are
 treated as exactly independent. `as_blm_ld()` also detects exact contiguous

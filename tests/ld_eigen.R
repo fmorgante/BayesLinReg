@@ -38,7 +38,7 @@ explicit <- as_blm_ld(
 eigen_ld <- as_blm_ld_eigen(explicit, prop_var = 1)
 stopifnot(
   inherits(eigen_ld, "blm_ld_eigen"),
-  identical(eigen_ld$format_version, 1L),
+  identical(eigen_ld$format_version, 2L),
   identical(eigen_ld$parents, c("chr1", "chr2")),
   identical(eigen_ld$block_table$rank, c(3L, 4L)),
   isTRUE(all.equal(
@@ -120,6 +120,83 @@ stopifnot(
   identical(truncated$blocks[[1L]]$rank, 1L),
   truncated$blocks[[1L]]$prop_var >= 0.8,
   any(abs(diag(reconstruct_eigen_ld(truncated)) - 1) > 1e-6)
+)
+
+# Indefinite LD remains an error by default. The explicit discard policy uses
+# the retained positive eigenspace directly, with prop_var relative to the
+# positive trace and without a unit-diagonal correction.
+indefinite <- matrix(c(
+  1, 0.9, 0.9,
+  0.9, 1, -0.9,
+  0.9, -0.9, 1
+), 3L)
+indefinite_ids <- paste0("ind", seq_len(3L))
+dimnames(indefinite) <- list(indefinite_ids, indefinite_ids)
+indefinite_variants <- data.frame(
+  CHR = 4, ID = indefinite_ids, POS = seq_len(3L),
+  A1 = rep("A", 3L), A0 = rep("C", 3L)
+)
+indefinite_error <- try(as_blm_ld_eigen(
+  indefinite, indefinite_variants, prop_var = 1
+), silent = TRUE)
+discarded <- as_blm_ld_eigen(
+  indefinite, indefinite_variants, prop_var = 1,
+  negative_eigenvalues = "discard"
+)
+indefinite_decomposition <- eigen(indefinite, symmetric = TRUE)
+positive <- indefinite_decomposition$values > 0
+positive_part <- tcrossprod(sweep(
+  indefinite_decomposition$vectors[, positive, drop = FALSE], 2L,
+  sqrt(indefinite_decomposition$values[positive]), `*`
+))
+stopifnot(
+  inherits(indefinite_error, "try-error"),
+  grepl("materially negative eigenvalue", indefinite_error),
+  identical(discarded$blocks[[1L]]$rank, 2L),
+  identical(
+    discarded$blocks[[1L]]$negative_eigenvalues, "discard"
+  ),
+  identical(discarded$blocks[[1L]]$discarded_negative_eigenvalues, 1L),
+  isTRUE(all.equal(
+    discarded$blocks[[1L]]$minimum_source_eigenvalue, -0.8,
+    tolerance = 1e-12
+  )),
+  discarded$blocks[[1L]]$complete_eigenspace,
+  isTRUE(all.equal(discarded$blocks[[1L]]$prop_var, 1)),
+  isTRUE(all.equal(
+    reconstruct_eigen_ld(discarded), positive_part, tolerance = 1e-12,
+    check.attributes = FALSE
+  )),
+  any(abs(diag(reconstruct_eigen_ld(discarded)) - 1) > 1e-6),
+  inherits(
+    BayesLinReg:::.validate_blm_ld_eigen_object(discarded),
+    "blm_ld_eigen"
+  )
+)
+
+discard_gwas <- transform(
+  indefinite_variants, N = 100, BETA = 0, SE = 0.1
+)
+discard_fit <- blm_gwas(
+  discard_gwas, discarded, list(model = "Normal"), residual_var = 1,
+  iterations = 10L, burnin = 5L
+)
+stopifnot(
+  discard_fit$ld_approximate,
+  isTRUE(all.equal(discard_fit$ld_prop_var, 1))
+)
+
+discarded_half <- as_blm_ld_eigen(
+  variants = indefinite_variants,
+  eigenvectors = indefinite_decomposition$vectors,
+  eigenvalues = indefinite_decomposition$values,
+  prop_var = 0.5, check_eigenvectors = TRUE,
+  negative_eigenvalues = "discard"
+)
+stopifnot(
+  identical(discarded_half$blocks[[1L]]$rank, 1L),
+  isTRUE(all.equal(discarded_half$blocks[[1L]]$prop_var, 0.5)),
+  !discarded_half$blocks[[1L]]$complete_eigenspace
 )
 
 # Exact eigen LD and explicit LD give the same Markov chain up to floating-
@@ -254,6 +331,10 @@ duplicate_parent_error <- try(
 retruncate_error <- try(
   as_blm_ld_eigen(truncated, prop_var = 0.9), silent = TRUE
 )
+policy_change_error <- try(
+  as_blm_ld_eigen(eigen_ld, negative_eigenvalues = "discard"),
+  silent = TRUE
+)
 singular_R <- matrix(1, 3L, 3L)
 dimnames(singular_R) <- list(ids[1:3], ids[1:3])
 singular_ld <- as_blm_ld_eigen(
@@ -274,6 +355,8 @@ stopifnot(
   inherits(duplicate_parent_error, "try-error"),
   inherits(retruncate_error, "try-error"),
   grepl("cannot change", retruncate_error),
+  inherits(policy_change_error, "try-error"),
+  grepl("cannot change", policy_change_error),
   inherits(projection_error, "try-error"),
   grepl("outside the exact eigenspace", projection_error)
 )

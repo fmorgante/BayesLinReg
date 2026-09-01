@@ -862,6 +862,21 @@ $$
 
 Here $\rho$ is the requested `prop_var`.
 
+Materially negative eigenvalues are rejected by default. With
+`negative_eigenvalues = "discard"`, all numerically nonpositive components are
+removed and the truncation criterion instead uses the total positive trace,
+
+$$
+\frac{\sum_{k=1}^{q_b}\lambda_{bk}}
+{\sum_{k:\lambda_{bk}>0}\lambda_{bk}}\geq \rho.
+$$
+
+This matches the positive-eigenspace truncation strategy used by SBayesRC. It
+produces a positive-semidefinite approximation but is not correlation-matrix
+repair: the diagonal is not restored, and no diagonal correction is stored.
+Each block records the selected policy, the source minimum eigenvalue, and the
+number of materially negative eigenvalues discarded.
+
 This is pure spectral truncation. The omitted eigenspace is assigned zero
 variance and no diagonal correction is added. The realized trace fraction,
 rank, requested fraction, and source-block metadata are stored per block. The

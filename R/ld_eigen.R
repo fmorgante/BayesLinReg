@@ -20,19 +20,28 @@
 #'   eigenvalues reaching this proportion of the unit-diagonal LD trace is
 #'   retained. If supplied eigenpairs do not reach the requested proportion,
 #'   all supplied positive eigenpairs are retained and a warning is produced.
+#'   With `negative_eigenvalues = "discard"`, the denominator is instead the
+#'   sum of the available positive eigenvalues.
 #'   Existing `blm_ld_eigen` input is returned unchanged; if `prop_var` is
 #'   supplied explicitly, it must match the object's requested value.
 #' @param check_eigenvectors Whether to check mutual orthonormality of supplied
 #'   eigenvectors. Eigenvectors calculated internally are not rechecked.
+#' @param negative_eigenvalues How materially negative eigenvalues are handled.
+#'   `"error"` preserves strict validation. `"discard"` removes them together
+#'   with numerically nonpositive components and applies `prop_var` relative to
+#'   the remaining positive eigenvalue sum. This is a pure positive-eigenspace
+#'   approximation: it does not restore the unit diagonal or add a diagonal
+#'   correction.
 #'
 #' @return A `blm_ld_eigen` object containing pure truncated eigen
 #'   representations of block-diagonal LD.
 #'
 #' @details Correlation-matrix input is first converted with [as_blm_ld()], so
 #' exact contiguous sub-blocks are detected before eigendecomposition. Blocks
-#' are processed sequentially. Materially negative eigenvalues are rejected;
-#' regularize an existing `blm_ld` object before conversion when necessary.
-#' Tiny nonpositive eigenvalues at the numerical tolerance are discarded.
+#' are processed sequentially. By default, materially negative eigenvalues are
+#' rejected; `negative_eigenvalues = "discard"` instead provides SBayesRC-style
+#' positive-eigenspace truncation. Tiny nonpositive eigenvalues at the numerical
+#' tolerance are always discarded.
 #'
 #' Existing eigenpairs must describe correlation matrices, not scaled
 #' cross-products. Their rows must follow `variants`, their columns must be
@@ -49,8 +58,10 @@
 as_blm_ld_eigen <- function(
     R = NULL, variants = NULL, eigenvectors = NULL, eigenvalues = NULL,
     prop_var = 0.995,
-    check_eigenvectors = FALSE) {
+    check_eigenvectors = FALSE,
+    negative_eigenvalues = c("error", "discard")) {
   prop_var_missing <- missing(prop_var)
+  negative_eigenvalues_missing <- missing(negative_eigenvalues)
   if (!is.numeric(prop_var) || length(prop_var) != 1L || is.na(prop_var) ||
       !is.finite(prop_var) || prop_var <= 0 || prop_var > 1) {
     stop("`prop_var` must be a finite number in (0, 1].", call. = FALSE)
@@ -60,6 +71,7 @@ as_blm_ld_eigen <- function(
     stop("`check_eigenvectors` must be TRUE or FALSE.", call. = FALSE)
   }
   prop_var <- as.numeric(prop_var)
+  negative_eigenvalues <- match.arg(negative_eigenvalues)
 
   supplied_pairs <- !is.null(eigenvectors) || !is.null(eigenvalues)
   if (supplied_pairs) {
@@ -70,7 +82,8 @@ as_blm_ld_eigen <- function(
       stop("Supply both `eigenvectors` and `eigenvalues`.", call. = FALSE)
     }
     return(.as_blm_ld_eigen_from_pairs(
-      eigenvectors, eigenvalues, variants, prop_var, check_eigenvectors
+      eigenvectors, eigenvalues, variants, prop_var, check_eigenvectors,
+      negative_eigenvalues
     ))
   }
   if (is.null(R)) {
@@ -96,6 +109,20 @@ as_blm_ld_eigen <- function(
         ),
         call. = FALSE
       )
+    }
+    if (!negative_eigenvalues_missing) {
+      policies <- unique(vapply(
+        R$blocks, `[[`, character(1), "negative_eigenvalues"
+      ))
+      if (length(policies) != 1L || policies != negative_eigenvalues) {
+        stop(
+          paste0(
+            "`negative_eigenvalues` cannot change an existing ",
+            "`blm_ld_eigen` object; reconstruct it from LD or eigenpairs."
+          ),
+          call. = FALSE
+        )
+      }
     }
     return(R)
   }
@@ -127,7 +154,8 @@ as_blm_ld_eigen <- function(
     .make_blm_ld_eigen_block(
       decomposition$vectors, decomposition$values,
       explicit_ld$variants$ID[indices], source$name, source$parent,
-      prop_var, check_eigenvectors = FALSE
+      prop_var, check_eigenvectors = FALSE,
+      negative_eigenvalues = negative_eigenvalues
     )
   })
   names(blocks) <- names(explicit_ld$blocks)
@@ -140,7 +168,8 @@ as_blm_ld_eigen <- function(
 }
 
 .as_blm_ld_eigen_from_pairs <- function(
-    eigenvectors, eigenvalues, variants, prop_var, check_eigenvectors) {
+    eigenvectors, eigenvalues, variants, prop_var, check_eigenvectors,
+    negative_eigenvalues) {
   list_input <- is.list(eigenvectors) && !is.matrix(eigenvectors)
   if (list_input) {
     if (!length(eigenvectors) || !is.list(eigenvalues) ||
@@ -201,7 +230,7 @@ as_blm_ld_eigen <- function(
     }
     blocks[[block_index]] <- .make_blm_ld_eigen_block(
       vectors, eigenvalues[[block_index]], table$ID, name, name,
-      prop_var, check_eigenvectors
+      prop_var, check_eigenvectors, negative_eigenvalues
     )
     tables[[block_index]] <- table
   }
@@ -220,7 +249,7 @@ as_blm_ld_eigen <- function(
 
 .make_blm_ld_eigen_block <- function(
     eigenvectors, eigenvalues, predictor_names, name, parent, prop_var,
-    check_eigenvectors) {
+    check_eigenvectors, negative_eigenvalues) {
   if (!is.numeric(eigenvalues) || !is.atomic(eigenvalues) ||
       is.object(eigenvalues) || !is.null(dim(eigenvalues)) ||
       length(eigenvalues) != ncol(eigenvectors) || anyNA(eigenvalues) ||
@@ -236,7 +265,9 @@ as_blm_ld_eigen <- function(
   eigenvectors <- eigenvectors[, order, drop = FALSE]
   tolerance <- sqrt(.Machine$double.eps) *
     max(1, max(abs(eigenvalues)))
-  if (any(eigenvalues < -tolerance)) {
+  minimum_source_eigenvalue <- min(eigenvalues)
+  materially_negative <- eigenvalues < -tolerance
+  if (any(materially_negative) && negative_eigenvalues == "error") {
     stop(sprintf(
       paste0(
         "LD block `%s` has a materially negative eigenvalue (minimum %.6g; ",
@@ -250,6 +281,7 @@ as_blm_ld_eigen <- function(
     stop(sprintf("LD block `%s` has no positive eigenvalues.", name),
          call. = FALSE)
   }
+  discarded_negative_eigenvalues <- sum(materially_negative)
   eigenvalues <- eigenvalues[positive]
   eigenvectors <- eigenvectors[, positive, drop = FALSE]
   if (check_eigenvectors) {
@@ -264,9 +296,14 @@ as_blm_ld_eigen <- function(
   }
 
   size <- nrow(eigenvectors)
-  target_trace <- prop_var * size
+  trace_basis <- if (negative_eigenvalues == "discard") {
+    sum(eigenvalues)
+  } else {
+    size
+  }
+  target_trace <- prop_var * trace_basis
   cumulative <- cumsum(eigenvalues)
-  trace_tolerance <- sqrt(.Machine$double.eps) * max(1, size)
+  trace_tolerance <- sqrt(.Machine$double.eps) * max(1, trace_basis)
   reached <- which(cumulative >= target_trace - trace_tolerance)[1L]
   if (is.na(reached)) {
     reached <- length(eigenvalues)
@@ -276,9 +313,10 @@ as_blm_ld_eigen <- function(
         "correlation trace, below requested `prop_var = %.6f`; all supplied ",
         "eigenpairs were retained."
       ),
-      name, cumulative[[reached]] / size, prop_var
+      name, cumulative[[reached]] / trace_basis, prop_var
     ), call. = FALSE)
   }
+  complete_eigenspace <- reached == length(eigenvalues)
   eigenvalues <- eigenvalues[seq_len(reached)]
   eigenvectors <- eigenvectors[, seq_len(reached), drop = FALSE]
   rownames(eigenvectors) <- predictor_names
@@ -290,7 +328,8 @@ as_blm_ld_eigen <- function(
       eigenvalues[[component]] * eigenvectors[, component]^2
   }
   diagonal_tolerance <- sqrt(.Machine$double.eps) * max(1, size)
-  if (any(diagonal > 1 + diagonal_tolerance)) {
+  if (negative_eigenvalues == "error" &&
+      any(diagonal > 1 + diagonal_tolerance)) {
     stop(sprintf(
       "Eigenpairs for block `%s` are incompatible with a correlation matrix.",
       name
@@ -305,9 +344,16 @@ as_blm_ld_eigen <- function(
     eigenvectors = eigenvectors,
     eigenvalues = eigenvalues,
     retained_trace = retained_trace,
-    prop_var = min(1, retained_trace / size),
+    trace_basis = trace_basis,
+    prop_var = min(1, retained_trace / trace_basis),
     requested_prop_var = prop_var,
-    eigenvalue_tolerance = tolerance
+    eigenvalue_tolerance = tolerance,
+    negative_eigenvalues = negative_eigenvalues,
+    discarded_negative_eigenvalues = as.integer(
+      discarded_negative_eigenvalues
+    ),
+    minimum_source_eigenvalue = minimum_source_eigenvalue,
+    complete_eigenspace = complete_eigenspace
   )
 }
 
@@ -447,7 +493,7 @@ print.blm_ld_eigen <- function(x, ...) {
   invisible(x)
 }
 
-.blm_ld_eigen_format_version <- 1L
+.blm_ld_eigen_format_version <- 2L
 
 .ld_eigen_block_table <- function(blocks) {
   sizes <- vapply(blocks, `[[`, integer(1), "size")
@@ -461,6 +507,12 @@ print.blm_ld_eigen <- function(x, ...) {
     storage = "truncated_eigen",
     rank = vapply(blocks, `[[`, integer(1), "rank"),
     prop_var = vapply(blocks, `[[`, numeric(1), "prop_var"),
+    negative_eigenvalues = vapply(
+      blocks, `[[`, character(1), "negative_eigenvalues"
+    ),
+    discarded_negative_eigenvalues = vapply(
+      blocks, `[[`, integer(1), "discarded_negative_eigenvalues"
+    ),
     stringsAsFactors = FALSE,
     row.names = NULL
   )
@@ -500,7 +552,9 @@ print.blm_ld_eigen <- function(x, ...) {
     required <- c(
       "name", "parent", "source_block", "size", "rank", "eigenvectors",
       "eigenvalues", "retained_trace", "prop_var", "requested_prop_var",
-      "eigenvalue_tolerance"
+      "eigenvalue_tolerance", "trace_basis", "negative_eigenvalues",
+      "discarded_negative_eigenvalues", "minimum_source_eigenvalue",
+      "complete_eigenspace"
     )
     valid <- is.list(block) && all(required %in% names(block)) &&
       identical(block$name, block_names[[block_index]]) &&
@@ -521,10 +575,14 @@ print.blm_ld_eigen <- function(x, ...) {
       is.numeric(block$retained_trace) &&
       length(block$retained_trace) == 1L &&
       isTRUE(all.equal(block$retained_trace, sum(block$eigenvalues))) &&
+      is.numeric(block$trace_basis) && length(block$trace_basis) == 1L &&
+      is.finite(block$trace_basis) && block$trace_basis > 0 &&
+      block$retained_trace <= block$trace_basis *
+        (1 + sqrt(.Machine$double.eps)) &&
       is.numeric(block$prop_var) && length(block$prop_var) == 1L &&
       is.finite(block$prop_var) && block$prop_var > 0 && block$prop_var <= 1 &&
       isTRUE(all.equal(
-        block$prop_var, min(1, block$retained_trace / block$size)
+        block$prop_var, min(1, block$retained_trace / block$trace_basis)
       )) &&
       is.numeric(block$requested_prop_var) &&
       length(block$requested_prop_var) == 1L &&
@@ -533,7 +591,21 @@ print.blm_ld_eigen <- function(x, ...) {
       is.numeric(block$eigenvalue_tolerance) &&
       length(block$eigenvalue_tolerance) == 1L &&
       is.finite(block$eigenvalue_tolerance) &&
-      block$eigenvalue_tolerance >= 0
+      block$eigenvalue_tolerance >= 0 &&
+      is.character(block$negative_eigenvalues) &&
+      length(block$negative_eigenvalues) == 1L &&
+      block$negative_eigenvalues %in% c("error", "discard") &&
+      is.integer(block$discarded_negative_eigenvalues) &&
+      length(block$discarded_negative_eigenvalues) == 1L &&
+      block$discarded_negative_eigenvalues >= 0L &&
+      (block$negative_eigenvalues == "discard" ||
+       block$discarded_negative_eigenvalues == 0L) &&
+      is.numeric(block$minimum_source_eigenvalue) &&
+      length(block$minimum_source_eigenvalue) == 1L &&
+      is.finite(block$minimum_source_eigenvalue) &&
+      is.logical(block$complete_eigenspace) &&
+      length(block$complete_eigenspace) == 1L &&
+      !is.na(block$complete_eigenspace)
     if (!valid) stop("`ld` contains an invalid eigen block.", call. = FALSE)
   }
   sizes <- vapply(ld$blocks, `[[`, integer(1), "size")
@@ -610,8 +682,18 @@ print.blm_ld_eigen <- function(x, ...) {
     block$rank <- as.integer(length(values))
     block$eigenvectors <- vectors
     block$eigenvalues <- values
+    old_prop_var <- block$prop_var
     block$retained_trace <- sum(values)
-    block$prop_var <- min(1, block$retained_trace / block$size)
+    block$trace_basis <- if (block$negative_eigenvalues == "discard") {
+      if (block$complete_eigenspace) {
+        block$retained_trace
+      } else {
+        block$retained_trace / old_prop_var
+      }
+    } else {
+      block$size
+    }
+    block$prop_var <- min(1, block$retained_trace / block$trace_basis)
     block$eigenvalue_tolerance <- tolerance
     new_blocks[[block$name]] <- block
     complete[block$name] <- FALSE

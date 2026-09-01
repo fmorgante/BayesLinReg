@@ -53,7 +53,9 @@
 #'   contribute one and matched-but-incompatible variant pairs contribute two.
 #'   Eigen LD fits additionally report `ld_eigen_rank`, block-specific ranks
 #'   and retained trace fractions, aggregate `ld_prop_var`, and whether the
-#'   representation is approximate.
+#'   representation is approximate. Trace fractions use the unit-diagonal
+#'   trace under the strict eigenvalue policy and the available positive trace
+#'   under `negative_eigenvalues = "discard"`.
 #'
 #' @details Variants are matched by `ID` and checked against chromosome,
 #'   position, and alleles. Reversed alleles are handled by changing effect
@@ -302,7 +304,7 @@ blm_gwas <- function(
       transformed_y_blocks[[block_index]] <- prepared$transformed_response
       projected_Xty[indices] <- prepared$projected_crossproduct
       approximate_diagonal[indices] <- prepared$diagonal
-      if (block$prop_var >= 1 - 1e-12) {
+      if (block$complete_eigenspace) {
         projection_error <- working_Xty[indices] -
           prepared$projected_crossproduct
         projection_tolerance <- sqrt(.Machine$double.eps) *
@@ -457,9 +459,14 @@ blm_gwas <- function(
     result$ld_eigen_rank_by_block <- block_rank
     result$ld_prop_var <- sum(vapply(
       ld$blocks, `[[`, numeric(1), "retained_trace"
-    )) / sum(vapply(ld$blocks, `[[`, integer(1), "size"))
+    )) / sum(vapply(ld$blocks, `[[`, numeric(1), "trace_basis"))
     result$ld_prop_var_by_block <- block_prop_var
-    result$ld_approximate <- any(block_prop_var < 1 - 1e-12)
+    result$ld_approximate <- any(
+      !vapply(ld$blocks, `[[`, logical(1), "complete_eigenspace") |
+      vapply(
+        ld$blocks, `[[`, integer(1), "discarded_negative_eigenvalues"
+      ) > 0L
+    )
     result$ld_eigen_requested_prop_var <- ld$requested_prop_var
   }
   if (!is.null(input_ld_regularization_report)) {

@@ -10,7 +10,8 @@ as_blm_ld_eigen(
   eigenvectors = NULL,
   eigenvalues = NULL,
   prop_var = 0.995,
-  check_eigenvectors = FALSE
+  check_eigenvectors = FALSE,
+  negative_eigenvalues = c("error", "discard")
 )
 }
 \arguments{
@@ -33,11 +34,20 @@ vectors corresponding to \code{eigenvectors}.}
 eigenvalues reaching this proportion of the unit-diagonal LD trace is
 retained. If supplied eigenpairs do not reach the requested proportion,
 all supplied positive eigenpairs are retained and a warning is produced.
+With \code{negative_eigenvalues = "discard"}, the denominator is instead the
+sum of the available positive eigenvalues.
 Existing \code{blm_ld_eigen} input is returned unchanged; if \code{prop_var} is
 supplied explicitly, it must match the object's requested value.}
 
 \item{check_eigenvectors}{Whether to check mutual orthonormality of supplied
 eigenvectors. Eigenvectors calculated internally are not rechecked.}
+
+\item{negative_eigenvalues}{How materially negative eigenvalues are handled.
+\code{"error"} preserves strict validation. \code{"discard"} removes them together
+with numerically nonpositive components and applies \code{prop_var} relative to
+the remaining positive eigenvalue sum. This is a pure positive-eigenspace
+approximation: it does not restore the unit diagonal or add a diagonal
+correction.}
 }
 \value{
 A \code{blm_ld_eigen} object containing pure truncated eigen
@@ -52,9 +62,10 @@ eigenvectors accompanied by \code{eigenvalues}.
 \details{
 Correlation-matrix input is first converted with \code{\link[=as_blm_ld]{as_blm_ld()}}, so
 exact contiguous sub-blocks are detected before eigendecomposition. Blocks
-are processed sequentially. Materially negative eigenvalues are rejected;
-regularize an existing \code{blm_ld} object before conversion when necessary.
-Tiny nonpositive eigenvalues at the numerical tolerance are discarded.
+are processed sequentially. By default, materially negative eigenvalues are
+rejected; \code{negative_eigenvalues = "discard"} instead provides SBayesRC-style
+positive-eigenspace truncation. Tiny nonpositive eigenvalues at the numerical
+tolerance are always discarded.
 
 Existing eigenpairs must describe correlation matrices, not scaled
 cross-products. Their rows must follow \code{variants}, their columns must be
