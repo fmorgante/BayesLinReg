@@ -661,14 +661,32 @@ categorized_harmonization <- suppressWarnings(
     BayesLinReg:::.validate_blm_gwas(categorized_gwas), ld
   )
 )
-stopifnot(identical(
-  categorized_harmonization$counts,
-  c(
+matched_public <- suppressWarnings(match_gwas_ld(categorized_gwas, ld))
+matched_eigen_error <- try(match_gwas_ld(
+  categorized_gwas, as_blm_ld_eigen(ld, prop_var = 1)
+), silent = TRUE)
+expected_match_counts <- c(
     retained = 3L, flipped = 0L, excluded = 6L, gwas_only = 1L,
     ld_only = 1L, location_mismatch = 1L, allele_mismatch = 1L,
     ambiguous = 0L
-  )
-))
+)
+stopifnot(
+  identical(categorized_harmonization$counts, expected_match_counts),
+  identical(matched_public$report, expected_match_counts),
+  identical(matched_public$gwas$ID, matched_public$ld$variants$ID),
+  identical(matched_public$retained_ids, ids[c(1L, 4L, 5L)]),
+  identical(
+    matched_public$excluded_gwas_ids,
+    c("rs2", "rs3", "gwas_only")
+  ),
+  identical(matched_public$excluded_ld_ids, ids[c(2L, 3L, 6L)]),
+  identical(
+    matched_public$orientation,
+    stats::setNames(rep(1, 3L), ids[c(1L, 4L, 5L)])
+  ),
+  inherits(matched_eigen_error, "try-error"),
+  grepl("native `blm_ld`", matched_eigen_error)
+)
 harmonization_warnings <- character()
 set.seed(1104)
 excluded_fit <- withCallingHandlers(

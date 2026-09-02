@@ -356,18 +356,19 @@ fit_gwas <- blm_gwas(
 )
 ```
 
-For blocks with substantially lower effective rank, the same interface accepts
-a reusable pure truncated-eigen LD object:
+For blocks with substantially lower effective rank, first establish the final
+shared GWAS/LD panel and then create a reusable pure truncated-eigen LD object:
 
 ```r
+matched <- match_gwas_ld(gwas_results, ld)
+
 ld_eigen <- as_blm_ld_eigen(
-  R = list(chr1 = R_chr1, chr2 = R_chr2),
-  variants = list(chr1 = variants_chr1, chr2 = variants_chr2),
+  matched$ld,
   prop_var = 0.995
 )
 
 fit_gwas_eigen <- blm_gwas(
-  gwas = gwas_results,
+  gwas = matched$gwas,
   ld = ld_eigen,
   ETA = list(model = "SpikeMultiSlab"),
   scale = "standardized",
@@ -384,6 +385,10 @@ Materially negative eigenvalues are errors by default. Setting
 `negative_eigenvalues = "discard"` instead removes all nonpositive components
 and applies `prop_var` relative to the remaining positive eigenvalue sum. This
 is SBayesRC-style positive-eigenspace truncation, not unit-diagonal LD repair.
+Unlike native LD input, eigen LD is not subset during fitting: every eigen-LD
+variant must have compatible GWAS statistics. GWAS-only rows are harmless and
+are ignored. Use `match_gwas_ld()` on the native LD object before eigen
+decomposition when variants must be removed.
 
 `R` contains signed correlations, not squared correlations. List elements are
 treated as exactly independent. `as_blm_ld()` also detects exact contiguous
@@ -392,10 +397,11 @@ diagonal. LD blocks control computation and may be chromosomes or smaller
 regions; `ETA` blocks independently control coefficient priors and may cross
 LD-block boundaries.
 
-GWAS variants are matched by `ID`, position, and alleles. Reversed alleles are
-handled by changing effect orientation, while unresolved strand-ambiguous or
-incompatible variants are excluded. Returned coefficients are effects per
-input GWAS `A1` allele. `residual_df_gwas` controls the finite-sample marginal-
+GWAS variants are matched by `ID`, position, and alleles. For native LD,
+unresolved strand-ambiguous or incompatible variants are excluded; for eigen
+LD, any missing or incompatible LD-panel variant is an error. Reversed alleles
+are handled by changing effect orientation. Returned coefficients are effects
+per input GWAS `A1` allele. `residual_df_gwas` controls the finite-sample marginal-
 regression conversion and defaults to `N - 2`; it is distinct from the fitted
 model's `residual_var`, `residual_shape`, and `residual_scale` arguments.
 The returned `ld_harmonization` vector separates GWAS-only, LD-only,

@@ -175,7 +175,7 @@ stopifnot(
 )
 
 discard_gwas <- transform(
-  indefinite_variants, N = 100, BETA = 0, SE = 0.1
+  indefinite_variants, N = 100, BETA = c(0.1, -0.05, 0.2), SE = 0.1
 )
 discard_fit <- blm_gwas(
   discard_gwas, discarded, list(model = "Normal"), residual_var = 1,
@@ -227,6 +227,18 @@ stopifnot(
   isTRUE(all.equal(eigen_fit$ld_prop_var, 1, tolerance = 1e-12)),
   !eigen_fit$ld_approximate
 )
+
+# Eigen LD permits reordered rows and irrelevant GWAS-only variants while
+# retaining the complete LD panel.
+extra_gwas <- rbind(
+  gwas[rev(seq_len(nrow(gwas))), ],
+  transform(gwas[1L, ], ID = "gwas_extra", POS = 999L)
+)
+extra_fit <- suppressWarnings(blm_gwas(
+  extra_gwas, eigen_ld, list(model = "Normal"), residual_var = 1,
+  iterations = 20L, burnin = 10L
+))
+stopifnot(identical(extra_fit$gwas_variants$ID, eigen_ld$variants$ID))
 
 # Native-LD and eigen blocks use the same block-indexed RNG streams and
 # parallel coordinate/local-variance workers for every prior family. Check
@@ -296,22 +308,30 @@ stopifnot(isTRUE(all.equal(
   explicit_original$ETA, eigen_original$ETA, tolerance = 1e-12
 )))
 
-# Harmonization forms the corresponding principal submatrix of the stored
-# approximation and reorthogonalizes its eigenvectors.
+# Eigen LD cannot be subset during fitting. Match the native LD and GWAS first,
+# then decompose the final shared panel.
 subset_gwas <- gwas[-2L, ]
-subset_fit <- suppressWarnings(blm_gwas(
+subset_error <- try(suppressWarnings(blm_gwas(
   subset_gwas, eigen_ld, list(model = "Normal"), residual_var = 1,
   iterations = 20L, burnin = 10L
-))
-subset_object <- BayesLinReg:::.subset_blm_ld_eigen(
-  eigen_ld, c(1L, 3:7)
+)), silent = TRUE)
+matched_subset <- suppressWarnings(match_gwas_ld(subset_gwas, explicit))
+subset_object <- as_blm_ld_eigen(matched_subset$ld, prop_var = 1)
+subset_fit <- blm_gwas(
+  matched_subset$gwas, subset_object, list(model = "Normal"),
+  residual_var = 1, iterations = 20L, burnin = 10L
 )
-expected_subset <- reconstruct_eigen_ld(eigen_ld)[c(1L, 3:7), c(1L, 3:7)]
 stopifnot(
+  inherits(subset_error, "try-error"),
+  grepl("complete eigen-LD variant panel", subset_error),
+  identical(matched_subset$retained_ids, ids[c(1L, 3:7)]),
+  identical(subset_fit$gwas_variants$ID, ids[c(1L, 3:7)]),
+  identical(subset_fit$ld_eigen_rank, 6L),
   isTRUE(all.equal(
-    reconstruct_eigen_ld(subset_object), expected_subset, tolerance = 1e-12
-  )),
-  identical(subset_fit$ld_eigen_rank, 6L)
+    reconstruct_eigen_ld(subset_object),
+    as.matrix(Matrix::bdiag(R1[c(1L, 3L), c(1L, 3L)], R2)),
+    tolerance = 1e-12, check.attributes = FALSE
+  ))
 )
 
 # Invalid combinations and eigenpairs fail before sampling.

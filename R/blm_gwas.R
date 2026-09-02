@@ -59,19 +59,24 @@
 #'
 #' @details Variants are matched by `ID` and checked against chromosome,
 #'   position, and alleles. Reversed alleles are handled by changing effect
-#'   orientation. Unmatched, incompatible, and unresolved strand-ambiguous
-#'   variants are excluded with a warning. Excluded IDs are also removed from
-#'   character-indexed `ETA` blocks, with a block-specific warning; a block
-#'   that becomes empty is rejected. If harmonization excludes an LD variant,
-#'   numeric `ETA` indices are rejected because their intended position is
-#'   ambiguous; use character variant IDs instead. Gibbs coordinates retain
-#'   LD order, while `ETA` blocks remain independent of LD blocks.
+#'   orientation. With native LD, unmatched, incompatible, and unresolved
+#'   strand-ambiguous variants are excluded with a warning. Excluded IDs are
+#'   also removed from character-indexed `ETA` blocks, with a block-specific
+#'   warning; a block that becomes empty is rejected. If harmonization excludes
+#'   an LD variant, numeric `ETA` indices are rejected because their intended
+#'   position is ambiguous; use character variant IDs instead. Eigen LD instead
+#'   requires complete compatible coverage of its LD variant panel. Gibbs
+#'   coordinates retain LD order, while `ETA` blocks remain independent of LD
+#'   blocks.
 #'
 #'   A `blm_ld_eigen` object uses the pure truncated representation
 #'   \eqn{R_q=U_q\Lambda_qU_q'} stored in that object. The omitted eigenspace
 #'   is treated as having zero LD variance; no diagonal correction is added.
-#'   Harmonization that removes variants recomputes eigenpairs of each retained
-#'   principal submatrix of \eqn{R_q}, preserving the stored approximation.
+#'   Eigen LD requires complete coverage of its variant panel. GWAS rows may be
+#'   reordered and may contain additional variants, but every eigen-LD variant
+#'   must have compatible GWAS position and allele metadata. Match a native
+#'   `blm_ld` object with [match_gwas_ld()] before eigen decomposition when
+#'   variants need to be removed.
 #'   Predictor standardization and expected-PVE prior calibration continue to
 #'   use the original unit-diagonal LD scale, so changing `prop_var` does not
 #'   silently redefine prior scales.
@@ -169,7 +174,9 @@ blm_gwas <- function(
 
   gwas <- .validate_blm_gwas(gwas)
   input_gwas_ids <- gwas$ID
-  harmonized <- .harmonize_gwas_ld(gwas, ld)
+  harmonized <- .harmonize_gwas_ld(
+    gwas, ld, require_complete_ld = eigen_ld
+  )
   gwas <- harmonized$gwas
   orientation <- harmonized$orientation
   ETA <- .harmonize_gwas_eta(
@@ -304,7 +311,8 @@ blm_gwas <- function(
       transformed_y_blocks[[block_index]] <- prepared$transformed_response
       projected_Xty[indices] <- prepared$projected_crossproduct
       approximate_diagonal[indices] <- prepared$diagonal
-      if (block$complete_eigenspace) {
+      if (block$complete_eigenspace &&
+          block$discarded_negative_eigenvalues == 0L) {
         projection_error <- working_Xty[indices] -
           prepared$projected_crossproduct
         projection_tolerance <- sqrt(.Machine$double.eps) *
@@ -481,6 +489,64 @@ blm_gwas <- function(
   result
 }
 
+#' Match GWAS summary statistics to native LD
+#'
+#' Harmonizes GWAS summary statistics with a native [blm_ld][as_blm_ld()]
+#' object and keeps only variants with compatible identifiers, positions, and
+#' alleles in both inputs. This is intended to establish the final variant
+#' panel before calling [as_blm_ld_eigen()].
+#'
+#' @param gwas A GWAS summary-statistics object accepted by [blm_gwas()].
+#' @param ld A native `blm_ld` object returned by [as_blm_ld()]. Eigen LD input
+#'   is rejected because filtering must occur before eigen decomposition.
+#'
+#' @return A list containing `gwas` and `ld` restricted to the same variants in
+#'   LD order, `orientation` giving the GWAS-to-LD effect orientation,
+#'   `retained_ids`, `excluded_gwas_ids`, `excluded_ld_ids`, and a named count
+#'   vector `report`. GWAS alleles and effect estimates retain their input
+#'   orientation; [blm_gwas()] handles any required coefficient reorientation.
+#'
+#' @details Matching uses `ID`, then checks chromosome, position, and alleles.
+#' Reversed and complementary alleles are retained, while unresolved
+#' strand-ambiguous variants are excluded. Subsetting preserves the native LD
+#' representation, detects newly created exact contiguous sub-blocks, and
+#' carries forward regularization provenance.
+#'
+#' @examples
+#' R <- matrix(c(1, 0.2, 0.2, 1), 2)
+#' variants <- data.frame(
+#'   CHR = 1, ID = c("rs1", "rs2"), POS = 1:2,
+#'   A1 = c("A", "C"), A0 = c("C", "T")
+#' )
+#' ld <- as_blm_ld(R, variants)
+#' gwas <- transform(variants, N = 1000, BETA = c(0.1, -0.1), SE = 0.05)
+#' matched <- match_gwas_ld(gwas, ld)
+#' eigen_ld <- as_blm_ld_eigen(matched$ld)
+#' @export
+match_gwas_ld <- function(gwas, ld) {
+  if (inherits(ld, "blm_ld_eigen")) {
+    stop(
+      "`ld` must be a native `blm_ld` object, not `blm_ld_eigen`.",
+      call. = FALSE
+    )
+  }
+  .validate_blm_ld_object(ld)
+  gwas <- .validate_blm_gwas(gwas)
+  matched <- .harmonize_gwas_ld(gwas, ld)
+  retained_ids <- matched$gwas$ID
+  list(
+    gwas = matched$gwas,
+    ld = matched$ld,
+    orientation = stats::setNames(matched$orientation, retained_ids),
+    retained_ids = retained_ids,
+    excluded_gwas_ids = gwas$ID[!gwas$ID %in% retained_ids],
+    excluded_ld_ids = ld$variants$ID[
+      !ld$variants$ID %in% retained_ids
+    ],
+    report = matched$counts
+  )
+}
+
 .validate_blm_gwas <- function(gwas) {
   if (!is.data.frame(gwas)) {
     stop("`gwas` must be a data frame or data-frame-like R object.",
@@ -596,11 +662,23 @@ blm_gwas <- function(
   if (single_block) specifications[[1L]] else specifications
 }
 
-.harmonize_gwas_ld <- function(gwas, ld) {
+.harmonize_gwas_ld <- function(
+    gwas, ld, require_complete_ld = FALSE) {
   match_index <- match(ld$variants$ID, gwas$ID)
   id_match <- !is.na(match_index)
   candidate <- which(id_match)
   if (!length(candidate)) {
+    if (require_complete_ld) {
+      stop(
+        paste0(
+          "The GWAS statistics do not cover the eigen-LD variant panel. ",
+          "Match the GWAS and native `blm_ld` object with ",
+          "`match_gwas_ld()` before calling `as_blm_ld_eigen()`, or ",
+          "impute the missing summary statistics."
+        ),
+        call. = FALSE
+      )
+    }
     stop("No GWAS variants match the LD object by `ID`.", call. = FALSE)
   }
   rows <- match_index[candidate]
@@ -622,26 +700,36 @@ blm_gwas <- function(
     complement_reversed
   compatible <- location_match & !palindromic & allele_compatible
   retained_ld <- candidate[compatible]
-  if (!length(retained_ld)) {
-    stop("No GWAS variants remain after position and allele harmonization.",
-         call. = FALSE)
-  }
   retained_gwas <- input[compatible, , drop = FALSE]
   orientation <- ifelse(
     direct[compatible] | complement_direct[compatible], 1, -1
   )
-  subset_ld <- if (identical(retained_ld, seq_len(nrow(ld$variants)))) {
-    ld
-  } else if (inherits(ld, "blm_ld_eigen")) {
-    .subset_blm_ld_eigen(ld, retained_ld)
-  } else {
-    .subset_blm_ld(ld, retained_ld)
-  }
   gwas_unmatched <- sum(!gwas$ID %in% ld$variants$ID)
   ld_unmatched <- sum(!id_match)
   location_mismatch <- sum(!location_match)
   ambiguous <- sum(location_match & palindromic)
   allele_mismatch <- sum(location_match & !palindromic & !allele_compatible)
+  if (require_complete_ld && length(retained_ld) != nrow(ld$variants)) {
+    stop(sprintf(
+      paste0(
+        "The GWAS statistics do not cover the complete eigen-LD variant ",
+        "panel (LD-only %d; location mismatch %d; allele mismatch %d; ",
+        "ambiguous %d). Match the GWAS and native `blm_ld` object with ",
+        "`match_gwas_ld()` before calling `as_blm_ld_eigen()`, or impute ",
+        "the missing summary statistics."
+      ),
+      ld_unmatched, location_mismatch, allele_mismatch, ambiguous
+    ), call. = FALSE)
+  }
+  if (!length(retained_ld)) {
+    stop("No GWAS variants remain after position and allele harmonization.",
+         call. = FALSE)
+  }
+  subset_ld <- if (identical(retained_ld, seq_len(nrow(ld$variants)))) {
+    ld
+  } else {
+    .subset_blm_ld(ld, retained_ld)
+  }
   excluded <- gwas_unmatched + ld_unmatched +
     2L * (location_mismatch + ambiguous + allele_mismatch)
   if (excluded > 0L) {

@@ -914,14 +914,15 @@ when retained ranks are moderate; the default standardized path avoids it.
 Posterior PVE is computed in the retained representation and can run in
 parallel across eigen blocks.
 
-If GWAS harmonization removes variants, deleting eigenvector rows alone would
-not leave orthonormal eigenvectors. The implementation instead forms the
-corresponding principal submatrix of the stored approximation and recomputes
-its positive eigenpairs. Thus it preserves $R_{b,q}[S,S]$, not the unknown
-principal submatrix of the original untruncated $R_b$. `ld_shrink` is rejected
-for eigen input because shrinkage would define a different representation;
-regularization must occur before conversion or be reflected in the supplied
-eigenpairs.
+Eigen LD requires complete coverage by compatible GWAS statistics. GWAS-only
+rows may be ignored, and compatible rows are reordered and allele-oriented,
+but an LD-panel variant cannot be removed after decomposition. When filtering
+is necessary, `match_gwas_ld()` subsets the native `blm_ld` object and GWAS
+table first; `as_blm_ld_eigen()` then decomposes that final shared panel. This
+avoids treating a row-subset of a truncated eigenspace as though its original
+retained trace fraction remained known. `ld_shrink` is rejected for eigen input
+because shrinkage would define a different representation; regularization must
+occur before conversion or be reflected in supplied eigenpairs.
 
 The returned `ld_harmonization` vector separates GWAS-only and LD-only entries
 from location-mismatched, allele-mismatched, and unresolved ambiguous matched

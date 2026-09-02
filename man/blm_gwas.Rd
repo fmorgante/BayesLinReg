@@ -103,19 +103,24 @@ working Gram matrix is applied without materializing a global dense matrix.
 \details{
 Variants are matched by \code{ID} and checked against chromosome,
 position, and alleles. Reversed alleles are handled by changing effect
-orientation. Unmatched, incompatible, and unresolved strand-ambiguous
-variants are excluded with a warning. Excluded IDs are also removed from
-character-indexed \code{ETA} blocks, with a block-specific warning; a block
-that becomes empty is rejected. If harmonization excludes an LD variant,
-numeric \code{ETA} indices are rejected because their intended position is
-ambiguous; use character variant IDs instead. Gibbs coordinates retain
-LD order, while \code{ETA} blocks remain independent of LD blocks.
+orientation. With native LD, unmatched, incompatible, and unresolved
+strand-ambiguous variants are excluded with a warning. Excluded IDs are
+also removed from character-indexed \code{ETA} blocks, with a block-specific
+warning; a block that becomes empty is rejected. If harmonization excludes
+an LD variant, numeric \code{ETA} indices are rejected because their intended
+position is ambiguous; use character variant IDs instead. Eigen LD instead
+requires complete compatible coverage of its LD variant panel. Gibbs
+coordinates retain LD order, while \code{ETA} blocks remain independent of LD
+blocks.
 
 A \code{blm_ld_eigen} object uses the pure truncated representation
 \eqn{R_q=U_q\Lambda_qU_q'} stored in that object. The omitted eigenspace
 is treated as having zero LD variance; no diagonal correction is added.
-Harmonization that removes variants recomputes eigenpairs of each retained
-principal submatrix of \eqn{R_q}, preserving the stored approximation.
+Eigen LD requires complete coverage of its variant panel. GWAS rows may be
+reordered and may contain additional variants, but every eigen-LD variant
+must have compatible GWAS position and allele metadata. Match a native
+\code{blm_ld} object with \code{\link[=match_gwas_ld]{match_gwas_ld()}} before eigen decomposition when
+variants need to be removed.
 Predictor standardization and expected-PVE prior calibration continue to
 use the original unit-diagonal LD scale, so changing \code{prop_var} does not
 silently redefine prior scales.
