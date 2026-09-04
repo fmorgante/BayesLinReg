@@ -687,6 +687,34 @@ stopifnot(
   inherits(matched_eigen_error, "try-error"),
   grepl("native `blm_ld`", matched_eigen_error)
 )
+
+# Regularization provenance survives public matching and eigen conversion.
+# The fit-level map refers to the matched input blocks, rather than trying to
+# resolve their pre-subsetting provenance as current block names.
+matched_regularized <- suppressWarnings(
+  match_gwas_ld(categorized_gwas, regularized_ld)
+)
+matched_regularized_eigen <- as_blm_ld_eigen(
+  matched_regularized$ld, prop_var = 1
+)
+set.seed(1105)
+matched_regularized_fit <- blm_gwas(
+  matched_regularized$gwas, matched_regularized_eigen,
+  list(model = "Normal"), residual_var = 1,
+  iterations = 20L, burnin = 10L
+)
+stopifnot(
+  identical(
+    matched_regularized_fit$ld_regularization_report,
+    matched_regularized$ld$regularization_report
+  ),
+  identical(
+    matched_regularized_fit$ld_regularization_block_map$source_block,
+    matched_regularized$ld$regularization_report$block
+  ),
+  all(!matched_regularized_fit$ld_regularization_block_map$subset)
+)
+
 harmonization_warnings <- character()
 set.seed(1104)
 excluded_fit <- withCallingHandlers(
