@@ -6,6 +6,23 @@
 
 // [[Rcpp::depends(RcppEigen)]]
 
+// Validate a numeric eigenvector matrix in one allocation-free pass. Using
+// std::isfinite directly avoids constructing an R logical matrix of the same
+// dimensions as the input.
+// [[Rcpp::export]]
+bool eigen_matrix_is_finite_cpp(
+    const Rcpp::NumericMatrix& eigenvectors) {
+  const R_xlen_t size = eigenvectors.size();
+  const double* values = eigenvectors.begin();
+  for (R_xlen_t index = 0; index < size; ++index) {
+    if (!std::isfinite(values[index])) return false;
+    if (index > 0 && (index & ((1L << 24) - 1L)) == 0) {
+      Rcpp::checkUserInterrupt();
+    }
+  }
+  return true;
+}
+
 // Compute quantities derived from one eigen block without materializing
 // squared eigenvectors or other p-by-q temporary matrices.
 // [[Rcpp::export]]

@@ -846,6 +846,18 @@ remain valid when their shared structural and numerical fields are consistent.
 
 `as_blm_ld_eigen()` constructs a `blm_ld_eigen` object either from correlation
 matrices, a `blm_ld` object, or precomputed `eigenvectors` and `eigenvalues`.
+Each eigen block separately records whether the supplied eigenpairs establish
+the complete source eigenspace and whether the retained representation remains
+complete after applying `prop_var`. Full internally computed decompositions are
+known to cover the source eigenspace. Precomputed eigenpairs with fewer columns
+than rows are conservatively treated as incomplete unless, under the strict
+unit-diagonal policy, their eigenvalues account for the complete correlation
+trace within numerical tolerance.
+Eigenvector finiteness is checked by a fused native scan, avoiding an
+eigenvector-sized logical temporary. Combining eigen LD objects validates each
+input once and then checks only newly assembled cross-object metadata and
+regularization provenance; unchanged numerical blocks are not scanned a
+second time.
 Correlation input first passes through `as_blm_ld()`, including exact
 contiguous sub-block detection, and is then eigendecomposed one computational
 block at a time. The current internal path uses a complete dense symmetric

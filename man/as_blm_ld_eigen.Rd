@@ -69,7 +69,13 @@ tolerance are always discarded.
 
 Existing eigenpairs must describe correlation matrices, not scaled
 cross-products. Their rows must follow \code{variants}, their columns must be
-eigenvectors, and their eigenvalues may be supplied in any order.
+eigenvectors, and their eigenvalues may be supplied in any order. Supplied
+eigenpairs with fewer columns than rows are conservatively recorded as an
+incomplete source eigenspace unless, under the strict unit-diagonal policy,
+their eigenvalues account for the complete correlation trace within
+numerical tolerance. This prevents already-truncated input from being
+treated as an exact representation merely because every supplied component
+was retained.
 }
 \examples{
 R <- matrix(c(1, 0.4, 0.4, 1), 2)

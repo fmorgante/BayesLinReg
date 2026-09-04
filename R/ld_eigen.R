@@ -45,7 +45,13 @@
 #'
 #' Existing eigenpairs must describe correlation matrices, not scaled
 #' cross-products. Their rows must follow `variants`, their columns must be
-#' eigenvectors, and their eigenvalues may be supplied in any order.
+#' eigenvectors, and their eigenvalues may be supplied in any order. Supplied
+#' eigenpairs with fewer columns than rows are conservatively recorded as an
+#' incomplete source eigenspace unless, under the strict unit-diagonal policy,
+#' their eigenvalues account for the complete correlation trace within
+#' numerical tolerance. This prevents already-truncated input from being
+#' treated as an exact representation merely because every supplied component
+#' was retained.
 #'
 #' @examples
 #' R <- matrix(c(1, 0.4, 0.4, 1), 2)
@@ -212,8 +218,8 @@ as_blm_ld_eigen <- function(
     vectors <- eigenvectors[[block_index]]
     if (!is.matrix(vectors) || !is.numeric(vectors) ||
         nrow(vectors) < 1L || ncol(vectors) < 1L ||
-        ncol(vectors) > nrow(vectors) || anyNA(vectors) ||
-        any(!is.finite(vectors))) {
+        ncol(vectors) > nrow(vectors) ||
+        !eigen_matrix_is_finite_cpp(vectors)) {
       stop(sprintf(
         "Eigenvectors for block `%s` must be a finite numeric m-by-q matrix.",
         name
@@ -230,7 +236,8 @@ as_blm_ld_eigen <- function(
     }
     blocks[[block_index]] <- .make_blm_ld_eigen_block(
       vectors, eigenvalues[[block_index]], table$ID, name, name,
-      prop_var, check_eigenvectors, negative_eigenvalues
+      prop_var, check_eigenvectors, negative_eigenvalues,
+      full_spectrum_supplied = ncol(vectors) == nrow(vectors)
     )
     tables[[block_index]] <- table
   }
@@ -249,7 +256,8 @@ as_blm_ld_eigen <- function(
 
 .make_blm_ld_eigen_block <- function(
     eigenvectors, eigenvalues, predictor_names, name, parent, prop_var,
-    check_eigenvectors, negative_eigenvalues) {
+    check_eigenvectors, negative_eigenvalues,
+    full_spectrum_supplied = TRUE) {
   if (!is.numeric(eigenvalues) || !is.atomic(eigenvalues) ||
       is.object(eigenvalues) || !is.null(dim(eigenvalues)) ||
       length(eigenvalues) != ncol(eigenvectors) || anyNA(eigenvalues) ||
@@ -304,6 +312,9 @@ as_blm_ld_eigen <- function(
   target_trace <- prop_var * trace_basis
   cumulative <- cumsum(eigenvalues)
   trace_tolerance <- sqrt(.Machine$double.eps) * max(1, trace_basis)
+  source_eigenspace_complete <- full_spectrum_supplied ||
+    (negative_eigenvalues == "error" &&
+     abs(sum(eigenvalues) - size) <= trace_tolerance)
   reached <- which(cumulative >= target_trace - trace_tolerance)[1L]
   if (is.na(reached)) {
     reached <- length(eigenvalues)
@@ -316,7 +327,8 @@ as_blm_ld_eigen <- function(
       name, cumulative[[reached]] / trace_basis, prop_var
     ), call. = FALSE)
   }
-  complete_eigenspace <- reached == length(eigenvalues)
+  complete_eigenspace <- source_eigenspace_complete &&
+    reached == length(eigenvalues)
   eigenvalues <- eigenvalues[seq_len(reached)]
   eigenvectors <- eigenvectors[, seq_len(reached), drop = FALSE]
   rownames(eigenvectors) <- predictor_names
@@ -353,6 +365,7 @@ as_blm_ld_eigen <- function(
       discarded_negative_eigenvalues
     ),
     minimum_source_eigenvalue = minimum_source_eigenvalue,
+    source_eigenspace_complete = source_eigenspace_complete,
     complete_eigenspace = complete_eigenspace
   )
 }
@@ -449,7 +462,10 @@ combine_blm_ld_eigen <- function(...) {
     result$regularization_report <- do.call(rbind, reports)
     rownames(result$regularization_report) <- NULL
   }
-  .validate_blm_ld_eigen_object(result)
+  # Every input block was fully validated above and is reused unchanged.
+  # Validate only the newly assembled report; the constructor and explicit
+  # cross-object checks establish the remaining combined metadata invariants.
+  .validate_ld_regularization_report(result)
   result
 }
 
@@ -493,7 +509,7 @@ print.blm_ld_eigen <- function(x, ...) {
   invisible(x)
 }
 
-.blm_ld_eigen_format_version <- 2L
+.blm_ld_eigen_format_version <- 3L
 
 .ld_eigen_block_table <- function(blocks) {
   sizes <- vapply(blocks, `[[`, integer(1), "size")
@@ -554,7 +570,7 @@ print.blm_ld_eigen <- function(x, ...) {
       "eigenvalues", "retained_trace", "prop_var", "requested_prop_var",
       "eigenvalue_tolerance", "trace_basis", "negative_eigenvalues",
       "discarded_negative_eigenvalues", "minimum_source_eigenvalue",
-      "complete_eigenspace"
+      "source_eigenspace_complete", "complete_eigenspace"
     )
     valid <- is.list(block) && all(required %in% names(block)) &&
       identical(block$name, block_names[[block_index]]) &&
@@ -566,7 +582,7 @@ print.blm_ld_eigen <- function(x, ...) {
       block$rank >= 1L && block$rank <= block$size &&
       is.matrix(block$eigenvectors) && is.numeric(block$eigenvectors) &&
       identical(dim(block$eigenvectors), c(block$size, block$rank)) &&
-      !anyNA(block$eigenvectors) && all(is.finite(block$eigenvectors)) &&
+      eigen_matrix_is_finite_cpp(block$eigenvectors) &&
       is.numeric(block$eigenvalues) &&
       length(block$eigenvalues) == block$rank &&
       !anyNA(block$eigenvalues) && all(is.finite(block$eigenvalues)) &&
@@ -603,9 +619,13 @@ print.blm_ld_eigen <- function(x, ...) {
       is.numeric(block$minimum_source_eigenvalue) &&
       length(block$minimum_source_eigenvalue) == 1L &&
       is.finite(block$minimum_source_eigenvalue) &&
+      is.logical(block$source_eigenspace_complete) &&
+      length(block$source_eigenspace_complete) == 1L &&
+      !is.na(block$source_eigenspace_complete) &&
       is.logical(block$complete_eigenspace) &&
       length(block$complete_eigenspace) == 1L &&
-      !is.na(block$complete_eigenspace)
+      !is.na(block$complete_eigenspace) &&
+      (!block$complete_eigenspace || block$source_eigenspace_complete)
     if (!valid) stop("`ld` contains an invalid eigen block.", call. = FALSE)
   }
   sizes <- vapply(ld$blocks, `[[`, integer(1), "size")

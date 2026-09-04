@@ -11,6 +11,17 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
+// eigen_matrix_is_finite_cpp
+bool eigen_matrix_is_finite_cpp(const Rcpp::NumericMatrix& eigenvectors);
+RcppExport SEXP _BayesLinReg_eigen_matrix_is_finite_cpp(SEXP eigenvectorsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const Rcpp::NumericMatrix& >::type eigenvectors(eigenvectorsSEXP);
+    rcpp_result_gen = Rcpp::wrap(eigen_matrix_is_finite_cpp(eigenvectors));
+    return rcpp_result_gen;
+END_RCPP
+}
 // prepare_eigen_statistics_cpp
 Rcpp::List prepare_eigen_statistics_cpp(const Rcpp::NumericMatrix& eigenvectors, const Rcpp::NumericVector& eigenvalues, const Rcpp::NumericVector& crossproduct);
 RcppExport SEXP _BayesLinReg_prepare_eigen_statistics_cpp(SEXP eigenvectorsSEXP, SEXP eigenvaluesSEXP, SEXP crossproductSEXP) {
@@ -355,6 +366,7 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
+    {"_BayesLinReg_eigen_matrix_is_finite_cpp", (DL_FUNC) &_BayesLinReg_eigen_matrix_is_finite_cpp, 1},
     {"_BayesLinReg_prepare_eigen_statistics_cpp", (DL_FUNC) &_BayesLinReg_prepare_eigen_statistics_cpp, 3},
     {"_BayesLinReg_prepare_eigen_factor_statistics_cpp", (DL_FUNC) &_BayesLinReg_prepare_eigen_factor_statistics_cpp, 2},
     {"_BayesLinReg_build_scaled_eigen_factor_cpp", (DL_FUNC) &_BayesLinReg_build_scaled_eigen_factor_cpp, 4},

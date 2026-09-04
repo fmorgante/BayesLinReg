@@ -38,7 +38,10 @@ explicit <- as_blm_ld(
 eigen_ld <- as_blm_ld_eigen(explicit, prop_var = 1)
 stopifnot(
   inherits(eigen_ld, "blm_ld_eigen"),
-  identical(eigen_ld$format_version, 2L),
+  identical(eigen_ld$format_version, 3L),
+  all(vapply(
+    eigen_ld$blocks, `[[`, logical(1), "source_eigenspace_complete"
+  )),
   identical(eigen_ld$parents, c("chr1", "chr2")),
   identical(eigen_ld$block_table$rank, c(3L, 4L)),
   isTRUE(all.equal(
@@ -77,6 +80,9 @@ stopifnot(
   isTRUE(all.equal(
     reconstruct_eigen_ld(from_pairs), reconstruct_eigen_ld(eigen_ld),
     tolerance = 1e-12
+  )),
+  all(vapply(
+    from_pairs$blocks, `[[`, logical(1), "source_eigenspace_complete"
   )),
   identical(combined$variants, eigen_ld$variants),
   identical(names(combined$blocks), names(eigen_ld$blocks)),
@@ -118,6 +124,8 @@ truncated <- as_blm_ld_eigen(
 )
 stopifnot(
   identical(truncated$blocks[[1L]]$rank, 1L),
+  truncated$blocks[[1L]]$source_eigenspace_complete,
+  !truncated$blocks[[1L]]$complete_eigenspace,
   truncated$blocks[[1L]]$prop_var >= 0.8,
   any(abs(diag(reconstruct_eigen_ld(truncated)) - 1) > 1e-6)
 )
@@ -162,6 +170,7 @@ stopifnot(
     tolerance = 1e-12
   )),
   discarded$blocks[[1L]]$complete_eigenspace,
+  discarded$blocks[[1L]]$source_eigenspace_complete,
   isTRUE(all.equal(discarded$blocks[[1L]]$prop_var, 1)),
   isTRUE(all.equal(
     reconstruct_eigen_ld(discarded), positive_part, tolerance = 1e-12,
@@ -198,6 +207,61 @@ stopifnot(
   isTRUE(all.equal(discarded_half$blocks[[1L]]$prop_var, 0.5)),
   !discarded_half$blocks[[1L]]$complete_eigenspace
 )
+
+# Already-truncated supplied eigenpairs are not marked complete merely because
+# every supplied component is retained. The approximate likelihood projects
+# GWAS cross-products rather than applying the exact-eigenspace guard.
+truncated_vectors <- qr.Q(qr(cbind(c(1, -1, 0), c(1, 1, -2))))
+truncated_pair_variants <- data.frame(
+  CHR = 5, ID = paste0("pre", seq_len(3L)), POS = seq_len(3L),
+  A1 = c("A", "A", "C"), A0 = c("C", "G", "T")
+)
+truncated_pairs <- as_blm_ld_eigen(
+  variants = truncated_pair_variants,
+  eigenvectors = truncated_vectors,
+  eigenvalues = c(1.495, 1.495), prop_var = 0.995,
+  check_eigenvectors = TRUE
+)
+truncated_pairs_discard <- as_blm_ld_eigen(
+  variants = truncated_pair_variants,
+  eigenvectors = truncated_vectors,
+  eigenvalues = c(1.495, 1.495), prop_var = 1,
+  check_eigenvectors = TRUE, negative_eigenvalues = "discard"
+)
+truncated_pair_gwas <- transform(
+  truncated_pair_variants, N = 200, BETA = c(0.1, -0.05, 0.2), SE = 0.08
+)
+truncated_pair_fit <- blm_gwas(
+  truncated_pair_gwas, truncated_pairs, list(model = "Normal"),
+  residual_var = 1, iterations = 10L, burnin = 5L
+)
+stopifnot(
+  identical(truncated_pairs$blocks[[1L]]$rank, 2L),
+  !truncated_pairs$blocks[[1L]]$source_eigenspace_complete,
+  !truncated_pairs$blocks[[1L]]$complete_eigenspace,
+  !truncated_pairs_discard$blocks[[1L]]$source_eigenspace_complete,
+  !truncated_pairs_discard$blocks[[1L]]$complete_eigenspace,
+  truncated_pair_fit$ld_approximate
+)
+
+# The native finite scan rejects non-finite eigenvector storage without an
+# equally sized logical temporary.
+nonfinite_eigen <- eigen_ld
+nonfinite_eigen$blocks[[1L]]$eigenvectors[1L, 1L] <- Inf
+nonfinite_error <- try(
+  BayesLinReg:::.validate_blm_ld_eigen_object(nonfinite_eigen), silent = TRUE
+)
+stopifnot(
+  inherits(nonfinite_error, "try-error"),
+  grepl("invalid eigen block", nonfinite_error)
+)
+old_format_eigen <- eigen_ld
+old_format_eigen$format_version <- 2L
+stopifnot(inherits(
+  try(BayesLinReg:::.validate_blm_ld_eigen_object(old_format_eigen),
+      silent = TRUE),
+  "try-error"
+))
 
 # Exact eigen LD and explicit LD give the same Markov chain up to floating-
 # point roundoff, including PVE calculations.
