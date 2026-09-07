@@ -252,7 +252,8 @@ compute_ss_from_gwas <- function(
 }
 
 .gwas_working_components <- function(beta, se, n, residual_df,
-                                     response_var, scale) {
+                                     response_var, scale,
+                                     reference_n = n[[1L]]) {
   z <- beta / se
   if (any(!is.finite(z)) || any(!is.finite(z^2))) {
     stop("The `BETA / SE` z-scores are too large to represent safely.",
@@ -261,9 +262,9 @@ compute_ss_from_gwas <- function(
   adjustment <- (n - 1) / (z^2 + residual_df)
   if (scale == "standardized") {
     return(list(
-      diagonal = rep(n - 1, length(beta)),
+      diagonal = rep_len(n - 1, length(beta)),
       Xty = sqrt(n - 1) * sqrt(adjustment) * z,
-      yty = n - 1,
+      yty = reference_n - 1,
       reference_response_var = 1
     ))
   }
@@ -271,7 +272,7 @@ compute_ss_from_gwas <- function(
   list(
     diagonal = diagonal,
     Xty = diagonal * beta,
-    yty = (n - 1) * response_var,
+    yty = (reference_n - 1) * response_var,
     reference_response_var = response_var
   )
 }

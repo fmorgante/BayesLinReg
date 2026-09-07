@@ -349,6 +349,7 @@ Rcpp::List blm_gibbs_ld_rcpp_cpp(
     const Rcpp::List& ld_blocks,
     const Rcpp::List& ld_indices,
     const Rcpp::NumericVector& ld_scale,
+    const Rcpp::NumericVector& ld_pve_scale,
     const double ld_shrink,
     const Rcpp::NumericVector& summary_Xty,
     const double summary_yty,
@@ -361,7 +362,7 @@ Rcpp::List blm_gibbs_ld_rcpp_cpp(
   const Rcpp::NumericVector empty_y;
   const Rcpp::NumericMatrix empty_X(0, 0);
   const LDSummaryMatrix summary_matrix(
-    ld_blocks, ld_indices, ld_scale, ld_shrink, nthreads
+    ld_blocks, ld_indices, ld_scale, ld_pve_scale, ld_shrink, nthreads
   );
   return blm_gibbs_core(
     empty_y, empty_X, residual_shape, residual_scale, iterations, burnin, thin,
@@ -412,6 +413,7 @@ Rcpp::List blm_gibbs_eigen_block_rcpp_cpp(
     const Rcpp::NumericVector& intercept_x_mean,
     const double intercept_y_mean,
     const Rcpp::List& transformed_X,
+    const Rcpp::List& pve_X,
     const Rcpp::List& transformed_y,
     const Rcpp::List& eigen_indices,
     const Rcpp::NumericVector& summary_Xty,
@@ -425,7 +427,8 @@ Rcpp::List blm_gibbs_eigen_block_rcpp_cpp(
   const Rcpp::NumericVector empty_y;
   const Rcpp::NumericMatrix empty_X(0, 0);
   const EigenBlockSummaryMatrix summary_matrix(
-    transformed_X, transformed_y, eigen_indices, summary_Xty.size(), nthreads
+    transformed_X, pve_X, transformed_y, eigen_indices,
+    summary_Xty.size(), nthreads
   );
   return blm_gibbs_core(
     empty_y, empty_X, residual_shape, residual_scale, iterations, burnin, thin,

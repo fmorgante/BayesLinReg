@@ -757,26 +757,33 @@ overlap.
 position and alleles, changes the sign of marginal effects when allele dosage
 orientation is reversed, and restores coefficients to the input GWAS `A1`
 orientation on output. Unresolved ambiguous or incompatible variants are not
-included. Retained variants currently require a common `N`.
+included. `N` may vary among retained variants and may contain noninteger
+effective sample sizes.
 Character-indexed `ETA` blocks are filtered by variant ID. Numeric indices are
 rejected when an LD variant is excluded because positions before and after
 harmonization do not have an unambiguous common meaning.
 
-Writing $\nu_{\mathrm{GWAS}}$ for `residual_df_gwas`, define
+Writing $N_j$ for the effective sample size and $\nu_j$ for
+`residual_df_gwas` at variant $j$, define
 
 $$
 z_j=\frac{\widehat\beta_j}{s_j},\qquad
-a_j=\frac{n-1}{z_j^2+\nu_{\mathrm{GWAS}}}.
+a_j=\frac{N_j-1}{z_j^2+\nu_j}.
 $$
 
-The default $\nu_{\mathrm{GWAS}}=n-2$ corresponds to an intercept and one
-tested predictor. This input is separate from `residual_var`,
+The default $\nu_j=N_j-2$ corresponds to an intercept and one tested
+predictor. A scalar `residual_df_gwas` is recycled, or a separate value may be
+provided for every input GWAS row; row-specific values follow their variant IDs
+through harmonization. This input is separate from `residual_var`,
 `residual_shape`, and `residual_scale`, which describe residual variation in
 the fitted joint Bayesian regression. It is also separate from the joint
-model's `likelihood_df`. Because the reconstructed GWAS statistics are
-centered, `blm_gwas()` uses `likelihood_df = n - 1` for the residual-variance
-update and PVE normalization even though the phenotype mean is unavailable and
-no intercept is returned.
+model's `likelihood_df`.
+
+When all sample sizes equal the integer $n$, the existing reconstructed
+sufficient-statistic likelihood is retained exactly. Because those statistics
+are centered, `blm_gwas()` uses `likelihood_df = n - 1` for the
+residual-variance update and PVE normalization even though the phenotype mean
+is unavailable and no intercept is returned.
 
 On the standardized working scale,
 
@@ -805,6 +812,57 @@ G=D^{1/2}RD^{1/2},\qquad
 g_j=d_j\widehat\beta_j,\qquad
 y_2=(n-1)V_y.
 $$
+
+When sample sizes vary, marginal sample sizes alone do not identify the
+pairwise overlap matrix needed for an exact score likelihood. The implemented
+RSS approximation assumes that score correlations equal the supplied
+reference-panel LD. On the standardized working scale it uses
+
+$$
+D_N=\mathrm{diag}(N_1-1,\ldots,N_p-1),\qquad
+G=D_N^{1/2}R D_N^{1/2},\qquad
+g_j=\sqrt{N_j-1}\sqrt{a_j}z_j.
+$$
+
+On the original scale, define
+
+$$
+d_j=\frac{V_y a_j}{s_j^2},\qquad
+D=\mathrm{diag}(d_1,\ldots,d_p),\qquad
+G=D^{1/2}R D^{1/2},\qquad
+g_j=d_j\widehat\beta_j.
+$$
+
+This approximation is most defensible when variants were analyzed in
+essentially the same individuals and the variation in $N_j$ is caused by
+variant-level missingness or effective-sample-size estimation. It does not
+model pairwise sample overlap. A warning records this assumption at fit time.
+Residual variance must be fixed with `residual_var = 1`, and the full
+reconstructed-statistic `check_psd` option is unavailable because there is no
+single observed response cross-product.
+
+The likelihood Gram matrix must not be reused as predictor covariance for PVE:
+otherwise variants with larger $N_j$ would spuriously contribute more response
+variance. Instead, the PVE kernels use
+
+$$
+C=\mathrm{diag}(c)R\mathrm{diag}(c),\qquad
+c_j^2=\frac{G_{jj}}{N_j-1},
+$$
+
+after accounting for any internal predictor standardization. The native-LD
+kernel applies a second scale vector to the same compressed correlations. The
+eigen-LD kernel builds a second scaled factor only when PVE is requested.
+Thus heterogeneous sample sizes change preprocessing storage for eigen LD but
+do not change the asymptotic Gibbs cost. When `ld_shrink` is nonzero, the
+working $R_\lambda$ replaces $R$ in both the likelihood and PVE expressions.
+
+No single `likelihood_df` is reported for a heterogeneous-$N$ fit. The rounded
+median sample size is stored as `gwas_reference_n`; it is used only where the
+sampler requires an integer reference dimension and for GlobalLocal prior
+calibration. `gwas_sample_size_summary` records the retained sample-size
+distribution, and `gwas_sample_overlap_assumption` records the overlap
+assumption.
 
 The LD kernel applies $D^{1/2}RD^{1/2}\theta$ directly and never constructs
 the full Gram matrix. During an ascending Gibbs sweep, strict-lower entries

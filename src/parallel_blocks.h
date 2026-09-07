@@ -215,7 +215,7 @@ inline void LDSummaryMatrix::pve_block_quadratics(
     const int global_column = block.global[column];
     const double column_coefficient = coefficient[global_column];
     const double diagonal_contribution =
-      column_coefficient * diagonal(global_column) * column_coefficient;
+      column_coefficient * pve_diagonal(global_column) * column_coefficient;
     total += diagonal_contribution;
     contribution_scale += std::abs(diagonal_contribution);
 
@@ -232,8 +232,9 @@ inline void LDSummaryMatrix::pve_block_quadratics(
         : block.row_index[position];
       const int global_row = block.global[row];
       const double edge_contribution = column_coefficient *
-        scale_[global_column] * off_diagonal_scale_ * block.data[position] *
-        scale_[global_row] * coefficient[global_row];
+        pve_scale_[global_column] * off_diagonal_scale_ *
+        block.data[position] * pve_scale_[global_row] *
+        coefficient[global_row];
       total += 2.0 * edge_contribution;
       contribution_scale += 2.0 * std::abs(edge_contribution);
 
@@ -349,18 +350,20 @@ inline void EigenBlockSummaryMatrix::pve_block_quadratics(
     const int prior = prior_block[global] - 1;
     const double beta = coefficient[global];
     if (beta == 0.0) continue;
-    const double* column = block.design +
-      static_cast<std::size_t>(block.rows) * local;
+    const double* column = block.pve_design +
+      static_cast<std::size_t>(block.pve_rows) * local;
     double* prior_fitted = transformed.data() +
-      static_cast<std::size_t>(prior) * block.rows;
-    Eigen::Map<Eigen::VectorXd> fitted_vector(prior_fitted, block.rows);
-    const Eigen::Map<const Eigen::VectorXd> design_column(column, block.rows);
+      static_cast<std::size_t>(prior) * block.pve_rows;
+    Eigen::Map<Eigen::VectorXd> fitted_vector(prior_fitted, block.pve_rows);
+    const Eigen::Map<const Eigen::VectorXd> design_column(
+      column, block.pve_rows
+    );
     fitted_vector.noalias() += beta * design_column;
   }
 
   if (number_of_prior_blocks == 1) {
     const Eigen::Map<const Eigen::VectorXd> fitted(
-      transformed.data(), block.rows
+      transformed.data(), block.pve_rows
     );
     total = fitted.squaredNorm();
     contribution_scale = total;
@@ -371,16 +374,18 @@ inline void EigenBlockSummaryMatrix::pve_block_quadratics(
 
   for (int prior = 0; prior < number_of_prior_blocks; ++prior) {
     const Eigen::Map<const Eigen::VectorXd> prior_fitted(
-      transformed.data() + static_cast<std::size_t>(prior) * block.rows,
-      block.rows
+      transformed.data() + static_cast<std::size_t>(prior) * block.pve_rows,
+      block.pve_rows
     );
     standalone[prior] = prior_fitted.squaredNorm();
   }
-  Eigen::Map<Eigen::VectorXd> total_fitted(transformed.data(), block.rows);
+  Eigen::Map<Eigen::VectorXd> total_fitted(
+    transformed.data(), block.pve_rows
+  );
   for (int prior = 1; prior < number_of_prior_blocks; ++prior) {
     const Eigen::Map<const Eigen::VectorXd> prior_fitted(
-      transformed.data() + static_cast<std::size_t>(prior) * block.rows,
-      block.rows
+      transformed.data() + static_cast<std::size_t>(prior) * block.pve_rows,
+      block.pve_rows
     );
     total_fitted.noalias() += prior_fitted;
   }
@@ -389,8 +394,8 @@ inline void EigenBlockSummaryMatrix::pve_block_quadratics(
   double allocated_other = 0.0;
   for (int prior = 1; prior < number_of_prior_blocks; ++prior) {
     const Eigen::Map<const Eigen::VectorXd> prior_fitted(
-      transformed.data() + static_cast<std::size_t>(prior) * block.rows,
-      block.rows
+      transformed.data() + static_cast<std::size_t>(prior) * block.pve_rows,
+      block.pve_rows
     );
     allocated[prior] = prior_fitted.dot(total_fitted);
     allocated_other += allocated[prior];

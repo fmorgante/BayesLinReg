@@ -493,15 +493,18 @@ class LDSummaryMatrix {
       const Rcpp::List& input_blocks,
       const Rcpp::List& indices,
       const Rcpp::NumericVector& scale,
+      const Rcpp::NumericVector& pve_scale,
       const double ld_shrink,
       const int nthreads = 1)
-    : scale_(scale), p_(scale.size()), global_block_(p_, -1),
+    : scale_(scale), pve_scale_(pve_scale), p_(scale.size()),
+      global_block_(p_, -1),
       global_local_(p_, -1), off_diagonal_scale_(1.0 - ld_shrink),
       nthreads_(nthreads) {
     if (!std::isfinite(ld_shrink) || ld_shrink < 0.0 || ld_shrink >= 1.0) {
       Rcpp::stop("`ld_shrink` must be finite and in [0, 1).");
     }
-    if (input_blocks.size() < 1 || input_blocks.size() != indices.size()) {
+    if (pve_scale_.size() != p_ || input_blocks.size() < 1 ||
+        input_blocks.size() != indices.size()) {
       Rcpp::stop("Invalid LD block representation.");
     }
     blocks_.reserve(input_blocks.size());
@@ -534,6 +537,10 @@ class LDSummaryMatrix {
         global_local_[global] = local;
         if (!std::isfinite(scale_[global]) || scale_[global] <= 0.0) {
           Rcpp::stop("LD predictor scales must be positive and finite.");
+        }
+        if (!std::isfinite(pve_scale_[global]) ||
+            pve_scale_[global] <= 0.0) {
+          Rcpp::stop("LD PVE scales must be positive and finite.");
         }
       }
       for (int column = 0; column < block.size; ++column) {
@@ -573,6 +580,10 @@ class LDSummaryMatrix {
 
   double diagonal(const int j) const {
     return scale_[j] * scale_[j];
+  }
+
+  double pve_diagonal(const int j) const {
+    return pve_scale_[j] * pve_scale_[j];
   }
 
   double corrected_value(
@@ -728,6 +739,7 @@ class LDSummaryMatrix {
   };
 
   const Rcpp::NumericVector& scale_;
+  const Rcpp::NumericVector& pve_scale_;
   int p_;
   std::vector<Block> blocks_;
   std::vector<int> global_block_;
@@ -743,13 +755,15 @@ class EigenBlockSummaryMatrix {
  public:
   EigenBlockSummaryMatrix(
       const Rcpp::List& designs,
+      const Rcpp::List& pve_designs,
       const Rcpp::List& responses,
       const Rcpp::List& indices,
       const int p,
       const int nthreads = 1)
     : p_(p), global_block_(p, -1), global_local_(p, -1),
       diagonal_(p, 0.0), nthreads_(nthreads) {
-    if (designs.size() < 1 || designs.size() != responses.size() ||
+    if (designs.size() < 1 || designs.size() != pve_designs.size() ||
+        designs.size() != responses.size() ||
         designs.size() != indices.size()) {
       Rcpp::stop("Invalid block eigen representation.");
     }
@@ -757,15 +771,20 @@ class EigenBlockSummaryMatrix {
     for (int block_index = 0; block_index < designs.size(); ++block_index) {
       Block block;
       const Rcpp::NumericMatrix design = designs[block_index];
+      const Rcpp::NumericMatrix pve_design = pve_designs[block_index];
       const Rcpp::NumericVector response = responses[block_index];
       const Rcpp::IntegerVector mapping = indices[block_index];
       block.rows = design.nrow();
+      block.pve_rows = pve_design.nrow();
       block.cols = design.ncol();
       if (block.rows < 1 || block.cols < 1 || response.size() != block.rows ||
+          block.pve_rows != block.rows ||
+          pve_design.ncol() != block.cols ||
           mapping.size() != block.cols) {
         Rcpp::stop("Eigen-block dimensions are inconsistent.");
       }
       block.design = design.begin();
+      block.pve_design = pve_design.begin();
       block.response.assign(response.begin(), response.end());
       block.residual = block.response;
       block.transformed_fitted.resize(block.rows, 0.0);
@@ -880,7 +899,7 @@ class EigenBlockSummaryMatrix {
   void prepare_parallel_pve_workspace(const int number_of_prior_blocks) const {
     for (int block_index = 0; block_index < block_count(); ++block_index) {
       const std::size_t required =
-        static_cast<std::size_t>(blocks_[block_index].rows) *
+        static_cast<std::size_t>(blocks_[block_index].pve_rows) *
         number_of_prior_blocks;
       pve_fitted_[block_index].resize(required);
     }
@@ -908,8 +927,8 @@ class EigenBlockSummaryMatrix {
       const int local = global_local_[j];
       if (pve_touched_[block_index] == 0) {
         if (pve_fitted_[block_index].size() <
-            static_cast<std::size_t>(block.rows)) {
-          pve_fitted_[block_index].resize(block.rows);
+            static_cast<std::size_t>(block.pve_rows)) {
+          pve_fitted_[block_index].resize(block.pve_rows);
         }
         std::fill(
           pve_fitted_[block_index].begin(),
@@ -919,13 +938,13 @@ class EigenBlockSummaryMatrix {
         pve_touched_[block_index] = 1;
         pve_touched_blocks_.push_back(block_index);
       }
-      const double* column = block.design +
-        static_cast<std::size_t>(block.rows) * local;
+      const double* column = block.pve_design +
+        static_cast<std::size_t>(block.pve_rows) * local;
       Eigen::Map<Eigen::VectorXd> fitted(
-        pve_fitted_[block_index].data(), block.rows
+        pve_fitted_[block_index].data(), block.pve_rows
       );
       const Eigen::Map<const Eigen::VectorXd> design_column(
-        column, block.rows
+        column, block.pve_rows
       );
       fitted.noalias() += coefficient[j] * design_column;
     }
@@ -944,8 +963,10 @@ class EigenBlockSummaryMatrix {
  private:
   struct Block {
     int rows = 0;
+    int pve_rows = 0;
     int cols = 0;
     const double* design = NULL;
+    const double* pve_design = NULL;
     std::vector<int> global;
     std::vector<double> response;
     mutable std::vector<double> residual;

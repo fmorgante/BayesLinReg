@@ -7,7 +7,8 @@
 #'
 #' @param gwas A data frame with columns `CHR`, `ID`, `POS`, `A1`, `A0`, `N`,
 #'   `BETA`, and `SE`. `BETA` is the additive marginal effect per `A1` allele.
-#'   All retained variants must have a common sample size `N`.
+#'   `N` may vary among retained variants; noninteger effective sample sizes
+#'   are allowed.
 #' @param ld A `blm_ld` object returned by [as_blm_ld()] or a
 #'   `blm_ld_eigen` object returned by [as_blm_ld_eigen()].
 #' @param ETA Prior specifications in the same format as [blm_ss()]. Character
@@ -30,7 +31,8 @@
 #'   response and predictors. `"original"` requires
 #'   `reference_response_var`.
 #' @param residual_df_gwas Positive residual degrees of freedom used by the
-#'   marginal GWAS regressions. The default is `N - 2`.
+#'   marginal GWAS regressions. It may be a scalar or one value per input GWAS
+#'   row. The default is `N - 2` elementwise.
 #' @param ld_shrink Numeric scalar in `[0, 1)`. Off-diagonal LD correlations
 #'   are multiplied by `1 - ld_shrink` while the unit diagonal is retained.
 #'   This is applied by the native LD operator without copying or modifying
@@ -42,7 +44,11 @@
 #'   GWAS `A1` alleles. No intercept is fitted because centered GWAS summary
 #'   statistics do not identify the phenotype mean. Nevertheless, their
 #'   centered likelihood has `likelihood_df = N - 1`; this value is recorded
-#'   in the result and is separate from `residual_df_gwas`. When `ld` was created by
+#'   in the result and is separate from `residual_df_gwas`.
+#'   `gwas_sample_size_summary` describes retained `N`, and `gwas_likelihood`
+#'   identifies the likelihood construction. With heterogeneous `N`, the fit
+#'   also records `gwas_reference_n` and `gwas_sample_overlap_assumption`, and
+#'   it has no single `likelihood_df`. When `ld` was created by
 #'   [regularize_blm_ld()], `ld_regularization_report` preserves that object's
 #'   original regularization audit report unchanged, while
 #'   `ld_regularization_block_map` maps fitted post-harmonization blocks to the
@@ -97,6 +103,18 @@
 #'   that requirement. For standardized quantitative traits,
 #'   `residual_var = 1` is a conservative robust choice. `ld_shrink` addresses
 #'   LD regularization but does not make approximate statistics exact.
+#'
+#'   When `N` differs among variants (or contains noninteger effective sample
+#'   sizes), `blm_gwas()` uses a heterogeneous-sample-size RSS approximation.
+#'   Each marginal statistic receives its own likelihood scaling, while the
+#'   score-correlation matrix is assumed to equal the supplied LD matrix. This
+#'   assumes essentially common sample overlap; marginal `N` values alone do
+#'   not identify pairwise sample overlap. The residual variance must be fixed
+#'   at one and `check_psd = TRUE` is unavailable in this mode. PVE continues
+#'   to use predictor covariance rather than likelihood information, and a
+#'   separate PVE scaling is applied internally. The median `N`, rounded to an
+#'   integer, is used only as a computational and GlobalLocal prior-calibration
+#'   reference.
 #' @export
 blm_gwas <- function(
     gwas, ld, ETA, residual_var = NULL,
@@ -174,30 +192,97 @@ blm_gwas <- function(
 
   gwas <- .validate_blm_gwas(gwas)
   input_gwas_ids <- gwas$ID
+  residual_df_by_id <- NULL
+  if (!is.null(residual_df_gwas) && length(residual_df_gwas) != 1L) {
+    if (length(residual_df_gwas) != nrow(gwas)) {
+      stop(
+        paste0(
+          "`residual_df_gwas` must be a scalar or have one value per input ",
+          "GWAS row."
+        ),
+        call. = FALSE
+      )
+    }
+    residual_df_by_id <- stats::setNames(residual_df_gwas, input_gwas_ids)
+  }
   harmonized <- .harmonize_gwas_ld(
     gwas, ld, require_complete_ld = eigen_ld
   )
   gwas <- harmonized$gwas
+  if (!is.null(residual_df_by_id)) {
+    residual_df_gwas <- unname(residual_df_by_id[gwas$ID])
+  }
   orientation <- harmonized$orientation
   ETA <- .harmonize_gwas_eta(
     ETA, gwas$ID, input_gwas_ids, ld$variants$ID
   )
   ld <- harmonized$ld
-  n_values <- unique(gwas$N)
-  if (length(n_values) != 1L) {
-    stop("Retained GWAS variants must have one common value of `N`.",
-         call. = FALSE)
+  n_by_variant <- gwas$N
+  n_range <- range(n_by_variant)
+  heterogeneous_n <- n_range[[1L]] != n_range[[2L]] ||
+    n_range[[1L]] != floor(n_range[[1L]])
+  sample_size_quantiles <- if (heterogeneous_n) {
+    unname(stats::quantile(n_by_variant, c(0.25, 0.5, 0.75)))
+  } else {
+    rep(n_range[[1L]], 3L)
   }
-  n <- n_values[[1L]]
-  likelihood_df <- .resolve_likelihood_df(n, FALSE, n - 1)
-  if (is.null(residual_df_gwas)) residual_df_gwas <- n - 2
-  if (!is.numeric(residual_df_gwas) || length(residual_df_gwas) != 1L ||
-      is.na(residual_df_gwas) || !is.finite(residual_df_gwas) ||
-      residual_df_gwas <= 0 || residual_df_gwas > n - 1) {
-    stop(
-      "`residual_df_gwas` must be positive and no greater than `N - 1`.",
+  reference_n <- if (heterogeneous_n) {
+    as.integer(round(sample_size_quantiles[[2L]]))
+  } else {
+    as.integer(n_range[[1L]])
+  }
+  likelihood_df <- .resolve_likelihood_df(
+    reference_n, FALSE, reference_n - 1L
+  )
+  if (heterogeneous_n) {
+    if (is.null(residual_var) || !is.numeric(residual_var) ||
+        length(residual_var) != 1L ||
+        is.na(residual_var) || !is.finite(residual_var) || residual_var != 1) {
+      stop(
+        paste0(
+          "Heterogeneous `gwas$N` requires `residual_var = 1`; residual ",
+          "variance learning is not identified by this RSS approximation."
+        ),
+        call. = FALSE
+      )
+    }
+    if (check_psd) {
+      stop(
+        "`check_psd = TRUE` is unavailable with heterogeneous `gwas$N`.",
+        call. = FALSE
+      )
+    }
+    warning(
+      paste0(
+        "Heterogeneous `gwas$N` uses an RSS approximation that assumes ",
+        "score correlations equal the supplied reference LD; pairwise ",
+        "sample overlap is not modeled."
+      ),
       call. = FALSE
     )
+  }
+  if (is.null(residual_df_gwas)) {
+    residual_df_gwas <- if (heterogeneous_n) {
+      n_by_variant - 2
+    } else {
+      reference_n - 2
+    }
+  }
+  if (!is.numeric(residual_df_gwas) ||
+      !length(residual_df_gwas) %in% c(1L, length(n_by_variant)) ||
+      anyNA(residual_df_gwas) || any(!is.finite(residual_df_gwas)) ||
+      any(residual_df_gwas <= 0) ||
+      any(residual_df_gwas > n_by_variant - 1)) {
+    stop(
+      paste0(
+        "`residual_df_gwas` must be positive, with every value no greater ",
+        "than `N - 1`."
+      ),
+      call. = FALSE
+    )
+  }
+  if (length(residual_df_gwas) == 1L && heterogeneous_n) {
+    residual_df_gwas <- rep(residual_df_gwas, length(n_by_variant))
   }
 
   working_reference_var <- if (scale == "standardized") {
@@ -206,12 +291,14 @@ blm_gwas <- function(
     reference_response_var
   }
   components <- .gwas_working_components(
-    gwas$BETA * orientation, gwas$SE, n, residual_df_gwas,
-    working_reference_var, scale
+    gwas$BETA * orientation, gwas$SE, n_by_variant, residual_df_gwas,
+    working_reference_var, scale, reference_n
   )
   predictor_names <- gwas$ID
   names(components$Xty) <- predictor_names
-  normalized <- .normalize_ss_eta(ETA, predictor_names, residual_var, n)
+  normalized <- .normalize_ss_eta(
+    ETA, predictor_names, residual_var, reference_n
+  )
   blocks <- normalized$blocks
   source_indices <- normalized$source_indices
   has_expected_pve <- any(vapply(
@@ -220,7 +307,7 @@ blm_gwas <- function(
   predictor_scales <- lapply(seq_along(blocks), function(block_index) {
     indices <- source_indices[[block_index]]
     if (!blocks[[block_index]]$standardize) return(rep(1, length(indices)))
-    sqrt(components$diagonal[indices] / (n - 1))
+    sqrt(components$diagonal[indices] / (n_by_variant[indices] - 1))
   })
   for (block_index in seq_along(blocks)) {
     blocks[[block_index]]$predictor_scale <- predictor_scales[[block_index]]
@@ -230,11 +317,13 @@ blm_gwas <- function(
       indices <- source_indices[[block_index]]
       sum(
         components$diagonal[indices] /
-          predictor_scales[[block_index]]^2 / (n - 1)
+          predictor_scales[[block_index]]^2 /
+          (n_by_variant[indices] - 1)
       )
     }, numeric(1))
     blocks <- .calibrate_eta_priors(
-      blocks, predictor_variance_sums, components$reference_response_var, n
+      blocks, predictor_variance_sums, components$reference_response_var,
+      reference_n
     )
   }
   learn_residual_var <- is.null(residual_var)
@@ -265,6 +354,13 @@ blm_gwas <- function(
   sampler_layout$internal_names <- sampler_internal_names
   source_scale <- sqrt(components$diagonal)
   sampler_scale <- source_scale / sampler_predictor_scale
+  pve_scale <- if (heterogeneous_n) {
+    sqrt(
+      likelihood_df * components$diagonal / (n_by_variant - 1)
+    ) / sampler_predictor_scale
+  } else {
+    sampler_scale
+  }
   working_Xty <- components$Xty / sampler_predictor_scale
   names(working_Xty) <- sampler_internal_names
   ld_block_ends <- cumsum(vapply(ld$blocks, `[[`, integer(1), "size"))
@@ -278,6 +374,12 @@ blm_gwas <- function(
   fixed_source <- unlist(source_indices[fixed_blocks], use.names = FALSE)
   if (eigen_ld) {
     transformed_X_blocks <- vector("list", length(ld$blocks))
+    separate_pve_factor <- heterogeneous_n && compute_pve
+    pve_X_blocks <- if (separate_pve_factor) {
+      vector("list", length(ld$blocks))
+    } else {
+      NULL
+    }
     transformed_y_blocks <- vector("list", length(ld$blocks))
     projected_Xty <- numeric(p)
     approximate_diagonal <- numeric(p)
@@ -298,6 +400,12 @@ blm_gwas <- function(
         block$eigenvectors, block$eigenvalues,
         1 / factor_scale, integer()
       )
+      if (separate_pve_factor) {
+        pve_X_blocks[[block_index]] <- build_scaled_eigen_factor_cpp(
+          block$eigenvectors, block$eigenvalues,
+          1 / pve_scale[indices], integer()
+        )
+      }
       prepared <- if (common_scale) {
         prepare_eigen_statistics_cpp(
           block$eigenvectors,
@@ -328,6 +436,7 @@ blm_gwas <- function(
         }
       }
     }
+    if (!separate_pve_factor) pve_X_blocks <- transformed_X_blocks
     rm(factor, prepared)
     diagonal_tolerance <- 100 * .Machine$double.eps *
       pmax(1, approximate_diagonal)
@@ -408,7 +517,7 @@ blm_gwas <- function(
     store_coefficient_cov = store_coefficient_cov,
     compute_pve = compute_pve,
     pve_type = pve_type,
-    effective_n = n,
+    effective_n = reference_n,
     likelihood_df = likelihood_df,
     fit_intercept = FALSE,
     intercept_x_mean = numeric(length(working_Xty)),
@@ -416,6 +525,7 @@ blm_gwas <- function(
   )
   if (eigen_ld) {
     sampler_arguments$eigen_X <- transformed_X_blocks
+    sampler_arguments$eigen_pve_X <- pve_X_blocks
     sampler_arguments$eigen_y <- transformed_y_blocks
     sampler_arguments$eigen_indices <- ld_indices
     sampler_arguments$Xty <- projected_Xty
@@ -425,6 +535,7 @@ blm_gwas <- function(
     })
     sampler_arguments$ld_indices <- ld_indices
     sampler_arguments$ld_scale <- sampler_scale
+    sampler_arguments$ld_pve_scale <- pve_scale
     sampler_arguments$ld_shrink <- ld_shrink
     sampler_arguments$Xty <- working_Xty
   }
@@ -444,7 +555,7 @@ blm_gwas <- function(
     expected_pve_total = residual_prior$expected_pve_total,
     reference_response_var = components$reference_response_var,
     reference_residual_var = residual_prior$reference_residual_var,
-    likelihood_df = likelihood_df,
+    likelihood_df = if (heterogeneous_n) NULL else likelihood_df,
     sampler_block_id = sampler_block_id
   )
   result <- .orient_gwas_coefficients(
@@ -455,6 +566,24 @@ blm_gwas <- function(
   result$gwas_scale <- scale
   result$residual_df_gwas <- residual_df_gwas
   result$reference_response_var <- components$reference_response_var
+  result$gwas_likelihood <- if (heterogeneous_n) {
+    "rss_heterogeneous_n"
+  } else {
+    "reconstructed_sufficient_statistics"
+  }
+  result$gwas_sample_size_summary <- c(
+    minimum = n_range[[1L]],
+    first_quartile = sample_size_quantiles[[1L]],
+    median = sample_size_quantiles[[2L]],
+    mean = mean(n_by_variant),
+    third_quartile = sample_size_quantiles[[3L]],
+    maximum = n_range[[2L]]
+  )
+  if (heterogeneous_n) {
+    result$gwas_reference_n <- reference_n
+    result$gwas_sample_overlap_assumption <-
+      "score_correlation_equals_reference_ld"
+  }
   result$ld_block_table <- ld$block_table
   result$ld_cross_block_assumption <- ld$cross_block_assumption
   result$ld_representation <- if (eigen_ld) "truncated_eigen" else "explicit"
@@ -569,15 +698,24 @@ match_gwas_ld <- function(gwas, ld) {
   if (anyDuplicated(result$ID)) {
     stop("`gwas$ID` must contain unique variant identifiers.", call. = FALSE)
   }
-  for (name in c("POS", "N")) {
-    value <- result[[name]]
-    if (!is.numeric(value) || anyNA(value) || any(!is.finite(value)) ||
-        any(value != floor(value)) || any(value < if (name == "N") 3 else 1)) {
-      stop(sprintf("`gwas$%s` must contain valid positive integers.", name),
-           call. = FALSE)
-    }
-    result[[name]] <- as.numeric(value)
+  if (!is.numeric(result$POS) || anyNA(result$POS) ||
+      any(!is.finite(result$POS)) || any(result$POS != floor(result$POS)) ||
+      any(result$POS < 1)) {
+    stop("`gwas$POS` must contain valid positive integers.", call. = FALSE)
   }
+  result$POS <- as.numeric(result$POS)
+  if (!is.numeric(result$N) || anyNA(result$N) ||
+      any(!is.finite(result$N)) || any(result$N < 3) ||
+      any(result$N > .Machine$integer.max)) {
+    stop(
+      paste0(
+        "`gwas$N` must contain positive finite sample sizes of at least ",
+        "three and no greater than `.Machine$integer.max`."
+      ),
+      call. = FALSE
+    )
+  }
+  result$N <- as.numeric(result$N)
   if (!is.numeric(result$BETA) || anyNA(result$BETA) ||
       any(!is.finite(result$BETA))) {
     stop("`gwas$BETA` must contain finite numeric values.", call. = FALSE)

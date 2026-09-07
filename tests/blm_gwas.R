@@ -1207,16 +1207,117 @@ stopifnot(
   ))
 )
 
-# Input validation distinguishes GWAS residual degrees of freedom from the
-# fitted regression residual-variance controls.
-bad_n <- gwas
-bad_n$N[1] <- n - 1L
+# Variant-specific effective sample sizes use the heterogeneous-N RSS
+# approximation. Native and complete-eigen LD target the same likelihood, and
+# PVE uses the LD-scale predictor covariance rather than the likelihood Gram.
+heterogeneous_gwas <- gwas
+heterogeneous_gwas$N <- c(100, 98, 96, 94, 92, 90.5)
+heterogeneous_eigen_ld <- as_blm_ld_eigen(ld, prop_var = 1)
+heterogeneous_arguments <- list(
+  gwas = heterogeneous_gwas,
+  ETA = single_eta,
+  residual_var = 1,
+  iterations = 80L,
+  burnin = 20L,
+  store_samples = TRUE,
+  compute_pve = TRUE
+)
+set.seed(1112)
+heterogeneous_fit <- suppressWarnings(do.call(
+  blm_gwas, c(list(ld = ld), heterogeneous_arguments)
+))
+set.seed(1112)
+heterogeneous_eigen_fit <- suppressWarnings(do.call(
+  blm_gwas, c(list(ld = heterogeneous_eigen_ld), heterogeneous_arguments)
+))
+heterogeneous_draws <- as.matrix(
+  heterogeneous_fit$ETA$ETA1$coefficient_samples
+)
+heterogeneous_R <- BayesLinReg:::.materialize_blm_ld(ld)
+heterogeneous_signal <- rowSums(
+  (heterogeneous_draws %*% heterogeneous_R) * heterogeneous_draws
+)
+heterogeneous_pve <- heterogeneous_signal / (heterogeneous_signal + 1)
+reordered_heterogeneous_gwas <- heterogeneous_gwas[6:1, ]
+reordered_df <- reordered_heterogeneous_gwas$N - 2.5
+set.seed(1113)
+reordered_heterogeneous_fit <- suppressWarnings(blm_gwas(
+  reordered_heterogeneous_gwas, ld, single_eta,
+  residual_var = 1,
+  residual_df_gwas = reordered_df,
+  iterations = 10L,
+  burnin = 5L
+))
+stopifnot(
+  isTRUE(all.equal(
+    heterogeneous_fit$ETA,
+    heterogeneous_eigen_fit$ETA,
+    tolerance = 1e-10
+  )),
+  isTRUE(all.equal(
+    heterogeneous_fit$total_pve_samples,
+    heterogeneous_eigen_fit$total_pve_samples,
+    tolerance = 1e-10
+  )),
+  isTRUE(all.equal(
+    as.numeric(heterogeneous_fit$total_pve_samples),
+    heterogeneous_pve,
+    tolerance = 1e-10
+  )),
+  identical(heterogeneous_fit$gwas_likelihood, "rss_heterogeneous_n"),
+  is.null(heterogeneous_fit$likelihood_df),
+  identical(heterogeneous_fit$gwas_reference_n, 95L),
+  identical(
+    heterogeneous_fit$gwas_sample_overlap_assumption,
+    "score_correlation_equals_reference_ld"
+  ),
+  identical(
+    heterogeneous_fit$residual_df_gwas,
+    heterogeneous_gwas$N - 2
+  ),
+  identical(
+    reordered_heterogeneous_fit$residual_df_gwas,
+    reordered_df[match(ids, reordered_heterogeneous_gwas$ID)]
+  ),
+  identical(
+    names(heterogeneous_fit$gwas_sample_size_summary),
+    c(
+      "minimum", "first_quartile", "median", "mean",
+      "third_quartile", "maximum"
+    )
+  )
+)
+
+# Input validation distinguishes marginal-GWAS degrees of freedom from fitted
+# residual-variance controls. Heterogeneous N requires the fixed-variance RSS
+# likelihood and cannot request a full reconstructed-statistic PSD check.
 stopifnot(
   inherits(try(
     blm_gwas(
-      bad_n, ld, single_eta, residual_var = 1,
+      heterogeneous_gwas, ld, single_eta,
       iterations = 10L, burnin = 5L
     ),
+    silent = TRUE
+  ), "try-error"),
+  inherits(try(
+    blm_gwas(
+      heterogeneous_gwas, ld, single_eta, residual_var = 2,
+      iterations = 10L, burnin = 5L
+    ),
+    silent = TRUE
+  ), "try-error"),
+  inherits(try(
+    blm_gwas(
+      heterogeneous_gwas, ld, single_eta, residual_var = 1,
+      check_psd = TRUE, iterations = 10L, burnin = 5L
+    ),
+    silent = TRUE
+  ), "try-error"),
+  inherits(try(
+    suppressWarnings(blm_gwas(
+      heterogeneous_gwas, ld, single_eta, residual_var = 1,
+      residual_df_gwas = rep(95, 2L), iterations = 10L, burnin = 5L
+    )),
     silent = TRUE
   ), "try-error"),
   inherits(try(

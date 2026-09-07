@@ -31,7 +31,8 @@ blm_gwas(
 \arguments{
 \item{gwas}{A data frame with columns \code{CHR}, \code{ID}, \code{POS}, \code{A1}, \code{A0}, \code{N},
 \code{BETA}, and \code{SE}. \code{BETA} is the additive marginal effect per \code{A1} allele.
-All retained variants must have a common sample size \code{N}.}
+\code{N} may vary among retained variants; noninteger effective sample sizes
+are allowed.}
 
 \item{ld}{A \code{blm_ld} object returned by \code{\link[=as_blm_ld]{as_blm_ld()}} or a
 \code{blm_ld_eigen} object returned by \code{\link[=as_blm_ld_eigen]{as_blm_ld_eigen()}}.}
@@ -52,7 +53,8 @@ response and predictors. \code{"original"} requires
 \code{reference_response_var}.}
 
 \item{residual_df_gwas}{Positive residual degrees of freedom used by the
-marginal GWAS regressions. The default is \code{N - 2}.}
+marginal GWAS regressions. It may be a scalar or one value per input GWAS
+row. The default is \code{N - 2} elementwise.}
 
 \item{ld_shrink}{Numeric scalar in \verb{[0, 1)}. Off-diagonal LD correlations
 are multiplied by \code{1 - ld_shrink} while the unit diagonal is retained.
@@ -79,7 +81,11 @@ An object of class \code{blm_fit}. Coefficients are oriented to the input
 GWAS \code{A1} alleles. No intercept is fitted because centered GWAS summary
 statistics do not identify the phenotype mean. Nevertheless, their
 centered likelihood has \code{likelihood_df = N - 1}; this value is recorded
-in the result and is separate from \code{residual_df_gwas}. When \code{ld} was created by
+in the result and is separate from \code{residual_df_gwas}.
+\code{gwas_sample_size_summary} describes retained \code{N}, and \code{gwas_likelihood}
+identifies the likelihood construction. With heterogeneous \code{N}, the fit
+also records \code{gwas_reference_n} and \code{gwas_sample_overlap_assumption}, and
+it has no single \code{likelihood_df}. When \code{ld} was created by
 \code{\link[=regularize_blm_ld]{regularize_blm_ld()}}, \code{ld_regularization_report} preserves that object's
 original regularization audit report unchanged, while
 \code{ld_regularization_block_map} maps fitted post-harmonization blocks to the
@@ -141,4 +147,16 @@ recommended. Learning it requires the reconstructed \code{XtX}, \code{Xty}, and
 that requirement. For standardized quantitative traits,
 \code{residual_var = 1} is a conservative robust choice. \code{ld_shrink} addresses
 LD regularization but does not make approximate statistics exact.
+
+When \code{N} differs among variants (or contains noninteger effective sample
+sizes), \code{blm_gwas()} uses a heterogeneous-sample-size RSS approximation.
+Each marginal statistic receives its own likelihood scaling, while the
+score-correlation matrix is assumed to equal the supplied LD matrix. This
+assumes essentially common sample overlap; marginal \code{N} values alone do
+not identify pairwise sample overlap. The residual variance must be fixed
+at one and \code{check_psd = TRUE} is unavailable in this mode. PVE continues
+to use predictor covariance rather than likelihood information, and a
+separate PVE scaling is applied internally. The median \code{N}, rounded to an
+integer, is used only as a computational and GlobalLocal prior-calibration
+reference.
 }

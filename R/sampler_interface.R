@@ -23,9 +23,10 @@
                             XtX = NULL, XtX_center = NULL,
                             XtX_indices = NULL, XtX_types = NULL, Xty = NULL,
                             ld_blocks = NULL, ld_indices = NULL,
-                            ld_scale = NULL, ld_shrink = 0,
+                            ld_scale = NULL, ld_pve_scale = NULL,
+                            ld_shrink = 0,
                             eigen_X = NULL, eigen_y = NULL,
-                            eigen_indices = NULL,
+                            eigen_pve_X = NULL, eigen_indices = NULL,
                             nthreads = 1L,
                             yty = NULL, center_observations = TRUE,
                             residual_sse_offset = 0, compute_pve = FALSE,
@@ -54,6 +55,8 @@
   )
   if (is.null(intercept_x_mean)) intercept_x_mean <- colMeans(x)
   if (is.null(intercept_y_mean)) intercept_y_mean <- mean(y)
+  if (is.null(ld_pve_scale)) ld_pve_scale <- ld_scale
+  if (is.null(eigen_pve_X)) eigen_pve_X <- eigen_X
   common_arguments <- list(
     y = y,
     X = x,
@@ -118,6 +121,7 @@
           ld_blocks = ld_blocks,
           ld_indices = ld_indices,
           ld_scale = ld_scale,
+          ld_pve_scale = ld_pve_scale,
           ld_shrink = ld_shrink,
           summary_Xty = Xty,
           summary_yty = if (is.null(yty)) 0 else yty,
@@ -144,6 +148,7 @@
         )],
         list(
           transformed_X = eigen_X,
+          pve_X = eigen_pve_X,
           transformed_y = eigen_y,
           eigen_indices = eigen_indices,
           summary_Xty = Xty,
