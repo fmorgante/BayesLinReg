@@ -43,9 +43,10 @@
 #'
 #'   This is a scalable, conservative DENTIST-style first-pass diagnostic, not
 #'   a reimplementation of the complete iterative DENTIST procedure. Windows
-#'   are bounded by variant count, processed sequentially, and linear solves
-#'   are batched so a global dense LD matrix is never created. Optimized BLAS
-#'   can accelerate the Cholesky and triangular-solve operations.
+#'   are bounded by variant count and placed in one cross-block parallel work
+#'   queue. Linear solves are batched so a global dense LD matrix is never
+#'   created. Optimized BLAS can accelerate the Cholesky and triangular-solve
+#'   operations.
 #'
 #'   Conditional p-values assume that correlations among GWAS z-scores equal
 #'   the supplied reference LD. Marginal sample sizes do not identify pairwise
@@ -135,6 +136,56 @@ diagnose_gwas_ld <- function(
   aligned_z <- matched_gwas$BETA / matched_gwas$SE * orientation
   input_z <- matched_gwas$BETA / matched_gwas$SE
 
+  block_sizes <- vapply(matched_ld$blocks, `[[`, integer(1), "size")
+  block_offsets <- cumsum(block_sizes) - block_sizes
+  window_plans <- lapply(block_sizes, function(size) {
+    .prepare_gwas_ld_windows(size, window_variants, overlap_variants)
+  })
+  window_counts <- vapply(window_plans, function(plan) {
+    length(plan$core_start)
+  }, integer(1))
+  window_block <- rep.int(seq_along(window_plans) - 1L, window_counts)
+  expanded_lengths <- unlist(lapply(window_plans, function(plan) {
+    plan$expanded_end - plan$expanded_start + 1L
+  }), use.names = FALSE)
+  group_offset <- c(0, cumsum(expanded_lengths))
+  if (group_offset[[length(group_offset)]] > .Machine$integer.max) {
+    stop(
+      "The combined diagnostic-window index exceeds the native integer limit.",
+      call. = FALSE
+    )
+  }
+  diagnosed_all <- diagnose_gwas_ld_cpp(
+    blocks = matched_ld$blocks,
+    block_offset = as.integer(block_offsets),
+    z = aligned_z,
+    window_block = as.integer(window_block),
+    core_start = as.integer(unlist(lapply(
+      window_plans, `[[`, "core_start"
+    ), use.names = FALSE)),
+    core_end = as.integer(unlist(lapply(
+      window_plans, `[[`, "core_end"
+    ), use.names = FALSE)),
+    expanded_start = as.integer(unlist(lapply(
+      window_plans, `[[`, "expanded_start"
+    ), use.names = FALSE)),
+    expanded_end = as.integer(unlist(lapply(
+      window_plans, `[[`, "expanded_end"
+    ), use.names = FALSE)),
+    group_offset = as.integer(group_offset),
+    group = as.integer(unlist(lapply(
+      window_plans, `[[`, "group"
+    ), use.names = FALSE)),
+    ld_shrink = ld_shrink,
+    conditional_variance_floor = conditional_variance_floor,
+    nthreads = nthreads
+  )
+  diagnosed_all$p_value <- stats::pchisq(
+    diagnosed_all$statistic, df = 1, lower.tail = FALSE
+  )
+  window_ends <- cumsum(window_counts)
+  window_starts <- window_ends - window_counts + 1L
+
   retain_all_variants <- identical(store_variant_report, "all")
   block_results <- if (retain_all_variants) {
     vector("list", length(matched_ld$blocks))
@@ -156,10 +207,17 @@ diagnose_gwas_ld <- function(
     n_range <- range(block_n)
     n_ratio <- n_range[[2L]] / n_range[[1L]]
     similar_n <- n_ratio <= 1 + n_variation_tolerance
-    diagnosed <- .diagnose_gwas_ld_block(
-      block, aligned_z[global], window_variants, overlap_variants,
-      ld_shrink, conditional_variance_floor, nthreads
+    diagnosed <- lapply(
+      diagnosed_all[c(
+        "predicted_z", "conditional_variance", "tagging", "conditional_z",
+        "statistic", "p_value", "flip_log_likelihood_ratio",
+        "predictors_used"
+      )],
+      function(value) value[global]
     )
+    tasks <- seq.int(window_starts[[block_index]], window_ends[[block_index]])
+    diagnosed$windows <- window_counts[[block_index]]
+    diagnosed$failed_windows <- sum(diagnosed_all$window_failed[tasks])
     result <- data.frame(
       CHR = matched_gwas$CHR[global],
       ID = matched_gwas$ID[global],
@@ -319,10 +377,8 @@ print.blm_gwas_ld_diagnostics <- function(x, ...) {
   invisible(x)
 }
 
-.diagnose_gwas_ld_block <- function(
-    block, z, window_variants, overlap_variants, ld_shrink,
-    conditional_variance_floor, nthreads = 1L) {
-  size <- block$size
+.prepare_gwas_ld_windows <- function(
+    size, window_variants, overlap_variants) {
   starts <- seq.int(1L, size, by = window_variants)
   core_end <- pmin(
     size, as.double(starts) + window_variants - 1
@@ -343,23 +399,13 @@ print.blm_gwas_ld_diagnostics <- function(x, ...) {
     )
     group[destination] <- window_group
   }
-  result <- diagnose_gwas_ld_block_cpp(
-    block = block,
-    z = z,
+  list(
     core_start = as.integer(starts - 1L),
     core_end = as.integer(core_end - 1),
     expanded_start = as.integer(expanded_start - 1),
     expanded_end = as.integer(expanded_end - 1),
-    group_offset = as.integer(group_offset),
-    group = group,
-    ld_shrink = ld_shrink,
-    conditional_variance_floor = conditional_variance_floor,
-    nthreads = nthreads
+    group = group
   )
-  result$p_value <- stats::pchisq(
-    result$statistic, df = 1, lower.tail = FALSE
-  )
-  result
 }
 
 .validate_diagnostic_blas_threads <- function(nthreads) {

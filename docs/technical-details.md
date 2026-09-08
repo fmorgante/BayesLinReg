@@ -907,9 +907,11 @@ computed by one multiple-right-hand-side triangular solve. With
 `EIGEN_USE_BLAS`, eligible matrix products, symmetric rank updates, and
 triangular matrix solves use R's external BLAS.
 
-Independent windows can be processed concurrently with `nthreads > 1`.
-Random partitions are generated serially before native parallel work, so
-results remain reproducible under `set.seed()`. To prevent nested
+Windows from every computational LD block are assembled into one work queue and
+can be processed concurrently with `nthreads > 1`. This preserves parallelism
+when individual LD blocks contain only one window. Random partitions are
+generated serially before native parallel work, so results remain reproducible
+under `set.seed()`. To prevent nested
 parallelism, an external-BLAS build requires its applicable thread setting to
 be explicitly equal to one whenever `nthreads > 1`; otherwise the function
 errors before computation. Using `nthreads = 1` leaves BLAS free to use its

@@ -49,8 +49,8 @@ blm_gibbs_eigen_block_rcpp_cpp <- function(residual_shape, residual_scale, itera
     .Call(`_BayesLinReg_blm_gibbs_eigen_block_rcpp_cpp`, residual_shape, residual_scale, iterations, burnin, thin, progress_callback, block_id, block_model, normal_shape, normal_scale, pi_alpha, pi_beta, spike_var_shape, spike_var_scale, global_scale, fixed_global_var, local_a, local_b, multi_gamma_list, multi_pi_alpha_list, multi_var_shape, multi_var_scale, fixed_var, learn_residual_var, fixed_residual_var, store_samples, store_coefficient_cov, effective_n, likelihood_df, fit_intercept, intercept_x_mean, intercept_y_mean, transformed_X, pve_X, transformed_y, eigen_indices, summary_Xty, summary_yty, compute_pve, pve_type_code, nthreads)
 }
 
-diagnose_gwas_ld_block_cpp <- function(block, z, core_start, core_end, expanded_start, expanded_end, group_offset, group, ld_shrink, conditional_variance_floor, nthreads) {
-    .Call(`_BayesLinReg_diagnose_gwas_ld_block_cpp`, block, z, core_start, core_end, expanded_start, expanded_end, group_offset, group, ld_shrink, conditional_variance_floor, nthreads)
+diagnose_gwas_ld_cpp <- function(blocks, block_offset, z, window_block, core_start, core_end, expanded_start, expanded_end, group_offset, group, ld_shrink, conditional_variance_floor, nthreads) {
+    .Call(`_BayesLinReg_diagnose_gwas_ld_cpp`, blocks, block_offset, z, window_block, core_start, core_end, expanded_start, expanded_end, group_offset, group, ld_shrink, conditional_variance_floor, nthreads)
 }
 
 compress_dense_ld_blocks_cpp <- function(matrix, label, max_stored_values) {

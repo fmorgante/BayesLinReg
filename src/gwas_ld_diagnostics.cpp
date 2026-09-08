@@ -12,14 +12,32 @@ using Eigen::VectorXd;
 using RcppParallel::RVector;
 using RcppParallel::Worker;
 
+struct DiagnosticBlockView {
+  DiagnosticBlockView(
+      const Rcpp::List& block,
+      const int offset)
+      : data(Rcpp::as<Rcpp::NumericVector>(block["data"])),
+        indptr(Rcpp::as<Rcpp::IntegerVector>(block["indptr"])),
+        row_index(Rcpp::as<Rcpp::IntegerVector>(block["row_index"])),
+        storage_type(Rcpp::as<int>(block["type"])),
+        size(Rcpp::as<int>(block["size"])),
+        offset(offset) {}
+
+  RVector<double> data;
+  RVector<int> indptr;
+  RVector<int> row_index;
+  int storage_type;
+  int size;
+  int offset;
+};
+
 class GwasLdDiagnosticWorker : public Worker {
  public:
   GwasLdDiagnosticWorker(
-      const Rcpp::NumericVector& data,
-      const Rcpp::IntegerVector& indptr,
-      const Rcpp::IntegerVector& row_index,
-      const int storage_type,
+      const Rcpp::List& blocks,
+      const Rcpp::IntegerVector& block_offset,
       const Rcpp::NumericVector& z,
+      const Rcpp::IntegerVector& window_block,
       const Rcpp::IntegerVector& core_start,
       const Rcpp::IntegerVector& core_end,
       const Rcpp::IntegerVector& expanded_start,
@@ -36,11 +54,8 @@ class GwasLdDiagnosticWorker : public Worker {
       Rcpp::NumericVector& flip_log_likelihood_ratio,
       Rcpp::IntegerVector& predictors_used,
       Rcpp::IntegerVector& failed)
-      : data_(data),
-        indptr_(indptr),
-        row_index_(row_index),
-        storage_type_(storage_type),
-        z_(z),
+      : z_(z),
+        window_block_(window_block),
         core_start_(core_start),
         core_end_(core_end),
         expanded_start_(expanded_start),
@@ -56,7 +71,14 @@ class GwasLdDiagnosticWorker : public Worker {
         statistic_(statistic),
         flip_log_likelihood_ratio_(flip_log_likelihood_ratio),
         predictors_used_(predictors_used),
-        failed_(failed) {}
+        failed_(failed) {
+    blocks_.reserve(blocks.size());
+    for (int index = 0; index < blocks.size(); ++index) {
+      blocks_.emplace_back(
+        Rcpp::as<Rcpp::List>(blocks[index]), block_offset[index]
+      );
+    }
+  }
 
   void operator()(std::size_t begin, std::size_t end) {
     for (std::size_t window = begin; window < end; ++window) {
@@ -65,11 +87,9 @@ class GwasLdDiagnosticWorker : public Worker {
   }
 
  private:
-  RVector<double> data_;
-  RVector<int> indptr_;
-  RVector<int> row_index_;
-  int storage_type_;
+  std::vector<DiagnosticBlockView> blocks_;
   RVector<double> z_;
+  RVector<int> window_block_;
   RVector<int> core_start_;
   RVector<int> core_end_;
   RVector<int> expanded_start_;
@@ -88,6 +108,7 @@ class GwasLdDiagnosticWorker : public Worker {
   RVector<int> failed_;
 
   void diagnose_window(const std::size_t window) {
+    const DiagnosticBlockView& block = blocks_[window_block_[window]];
     const int core_first = core_start_[window];
     const int core_last = core_end_[window];
     const int expanded_first = expanded_start_[window];
@@ -144,18 +165,18 @@ class GwasLdDiagnosticWorker : public Worker {
     for (int column = expanded_first; column <= expanded_last; ++column) {
       const int column_local = column - expanded_first;
       const std::size_t stored_first =
-        static_cast<std::size_t>(indptr_[column]);
+        static_cast<std::size_t>(block.indptr[column]);
       const std::size_t stored_end =
-        static_cast<std::size_t>(indptr_[column + 1]);
+        static_cast<std::size_t>(block.indptr[column + 1]);
       for (std::size_t position = stored_first;
            position < stored_end; ++position) {
-        const int row = storage_type_ == 0
+        const int row = block.storage_type == 0
           ? column + 1 + static_cast<int>(position - stored_first)
-          : row_index_[position];
+          : block.row_index[position];
         if (row > expanded_last) break;
         if (row < expanded_first) continue;
         const int row_local = row - expanded_first;
-        const double value = ld_scale_ * data_[position];
+        const double value = ld_scale_ * block.data[position];
         const int column_group = group_[group_first + column_local];
         const int row_group = group_[group_first + row_local];
         if (column_group == 1 && row_group == 1) {
@@ -200,10 +221,10 @@ class GwasLdDiagnosticWorker : public Worker {
 
     bool successful = true;
     successful = diagnose_direction(
-      covariance_two, cross_one_two, predictor_two, target_one
+      covariance_two, cross_one_two, predictor_two, target_one, block.offset
     ) && successful;
     successful = diagnose_direction(
-      covariance_one, cross_two_one, predictor_one, target_two
+      covariance_one, cross_two_one, predictor_one, target_two, block.offset
     ) && successful;
     failed_[window] = successful ? 0 : 1;
   }
@@ -212,14 +233,16 @@ class GwasLdDiagnosticWorker : public Worker {
       const MatrixXd& covariance,
       const MatrixXd& cross,
       const std::vector<int>& predictor,
-      const std::vector<int>& target) {
+      const std::vector<int>& target,
+      const int block_offset) {
     if (target.empty() || predictor.empty()) return true;
     Eigen::LLT<MatrixXd> factor(covariance);
     if (factor.info() != Eigen::Success) return false;
 
     VectorXd predictor_z(predictor.size());
     for (std::size_t i = 0; i < predictor.size(); ++i) {
-      predictor_z[static_cast<Eigen::Index>(i)] = z_[predictor[i]];
+      predictor_z[static_cast<Eigen::Index>(i)] =
+        z_[block_offset + predictor[i]];
     }
     const VectorXd weights = factor.solve(predictor_z);
     if (factor.info() != Eigen::Success || !weights.allFinite()) return false;
@@ -243,7 +266,7 @@ class GwasLdDiagnosticWorker : public Worker {
       }
       h = std::max(0.0, std::min(1.0, h));
       const double variance = std::max(variance_floor_, 1.0 - h);
-      const int global = target[i];
+      const int global = block_offset + target[i];
       const double residual = z_[global] - fitted[static_cast<Eigen::Index>(i)];
       const double standardized = residual / std::sqrt(variance);
       predicted_[global] = fitted[static_cast<Eigen::Index>(i)];
@@ -265,9 +288,11 @@ class GwasLdDiagnosticWorker : public Worker {
 // [[Rcpp::depends(RcppParallel)]]
 
 // [[Rcpp::export]]
-Rcpp::List diagnose_gwas_ld_block_cpp(
-    const Rcpp::List& block,
+Rcpp::List diagnose_gwas_ld_cpp(
+    const Rcpp::List& blocks,
+    const Rcpp::IntegerVector& block_offset,
     const Rcpp::NumericVector& z,
+    const Rcpp::IntegerVector& window_block,
     const Rcpp::IntegerVector& core_start,
     const Rcpp::IntegerVector& core_end,
     const Rcpp::IntegerVector& expanded_start,
@@ -277,25 +302,58 @@ Rcpp::List diagnose_gwas_ld_block_cpp(
     const double ld_shrink,
     const double conditional_variance_floor,
     const int nthreads) {
-  const int size = Rcpp::as<int>(block["size"]);
+  const int block_count = blocks.size();
   const int windows = core_start.size();
-  if (z.size() != size || core_end.size() != windows ||
+  if (block_count < 1 || block_offset.size() != block_count ||
+      window_block.size() != windows || core_end.size() != windows ||
       expanded_start.size() != windows || expanded_end.size() != windows ||
-      group_offset.size() != windows + 1 || nthreads < 1) {
+      group_offset.size() != windows + 1 || nthreads < 1 ||
+      group_offset[0] != 0 || group_offset[windows] != group.size()) {
     Rcpp::stop("Invalid native GWAS-LD diagnostic inputs.");
   }
-  Rcpp::NumericVector predicted(size, NA_REAL);
-  Rcpp::NumericVector conditional_variance(size, NA_REAL);
-  Rcpp::NumericVector tagging(size, NA_REAL);
-  Rcpp::NumericVector conditional_z(size, NA_REAL);
-  Rcpp::NumericVector statistic(size, NA_REAL);
-  Rcpp::NumericVector flip_log_likelihood_ratio(size, NA_REAL);
-  Rcpp::IntegerVector predictors_used(size);
+  int expected_offset = 0;
+  for (int index = 0; index < block_count; ++index) {
+    const Rcpp::List block = blocks[index];
+    const int size = Rcpp::as<int>(block["size"]);
+    if (block_offset[index] != expected_offset || size < 1) {
+      Rcpp::stop("Invalid native GWAS-LD diagnostic block offsets.");
+    }
+    expected_offset += size;
+  }
+  if (expected_offset != z.size()) {
+    Rcpp::stop("Native GWAS-LD diagnostic blocks do not cover `z`.");
+  }
+  for (int window = 0; window < windows; ++window) {
+    const int block_index = window_block[window];
+    if (block_index < 0 || block_index >= block_count) {
+      Rcpp::stop("Invalid native GWAS-LD diagnostic window block.");
+    }
+    const int size = Rcpp::as<int>(
+      Rcpp::as<Rcpp::List>(blocks[block_index])["size"]
+    );
+    if (core_start[window] < 0 || core_end[window] < core_start[window] ||
+        core_end[window] >= size ||
+        expanded_start[window] < 0 ||
+        expanded_start[window] > core_start[window] ||
+        expanded_end[window] < core_end[window] ||
+        expanded_end[window] >= size ||
+        group_offset[window] > group_offset[window + 1] ||
+        group_offset[window + 1] - group_offset[window] !=
+          expanded_end[window] - expanded_start[window] + 1) {
+      Rcpp::stop("Invalid native GWAS-LD diagnostic window bounds.");
+    }
+  }
+  Rcpp::NumericVector predicted(z.size(), NA_REAL);
+  Rcpp::NumericVector conditional_variance(z.size(), NA_REAL);
+  Rcpp::NumericVector tagging(z.size(), NA_REAL);
+  Rcpp::NumericVector conditional_z(z.size(), NA_REAL);
+  Rcpp::NumericVector statistic(z.size(), NA_REAL);
+  Rcpp::NumericVector flip_log_likelihood_ratio(z.size(), NA_REAL);
+  Rcpp::IntegerVector predictors_used(z.size());
   Rcpp::IntegerVector failed(windows);
 
   GwasLdDiagnosticWorker worker(
-    block["data"], block["indptr"], block["row_index"],
-    Rcpp::as<int>(block["type"]), z, core_start, core_end,
+    blocks, block_offset, z, window_block, core_start, core_end,
     expanded_start, expanded_end, group_offset, group, ld_shrink,
     conditional_variance_floor, predicted, conditional_variance, tagging,
     conditional_z, statistic, flip_log_likelihood_ratio, predictors_used,
@@ -305,10 +363,6 @@ Rcpp::List diagnose_gwas_ld_block_cpp(
     RcppParallel::parallelFor(0, windows, worker, 1, nthreads);
   } else {
     worker(0, windows);
-  }
-  int failed_windows = 0;
-  for (int window = 0; window < windows; ++window) {
-    failed_windows += failed[window];
   }
   return Rcpp::List::create(
     Rcpp::Named("predicted_z") = predicted,
@@ -320,6 +374,6 @@ Rcpp::List diagnose_gwas_ld_block_cpp(
       flip_log_likelihood_ratio,
     Rcpp::Named("predictors_used") = predictors_used,
     Rcpp::Named("windows") = windows,
-    Rcpp::Named("failed_windows") = failed_windows
+    Rcpp::Named("window_failed") = failed
   );
 }

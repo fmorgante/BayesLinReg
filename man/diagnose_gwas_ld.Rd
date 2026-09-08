@@ -75,9 +75,10 @@ random partitions reproducible.
 
 This is a scalable, conservative DENTIST-style first-pass diagnostic, not
 a reimplementation of the complete iterative DENTIST procedure. Windows
-are bounded by variant count, processed sequentially, and linear solves
-are batched so a global dense LD matrix is never created. Optimized BLAS
-can accelerate the Cholesky and triangular-solve operations.
+are bounded by variant count and placed in one cross-block parallel work
+queue. Linear solves are batched so a global dense LD matrix is never
+created. Optimized BLAS can accelerate the Cholesky and triangular-solve
+operations.
 
 Conditional p-values assume that correlations among GWAS z-scores equal
 the supplied reference LD. Marginal sample sizes do not identify pairwise
@@ -88,7 +89,7 @@ measures and should not be used for automatic filtering.
 The external-BLAS guard checks the documented vendor environment settings
 present in the R process. Vendor-specific calls that change BLAS threads
 after R starts cannot be detected portably and should not be used together
-with code{nthreads > 1}.
+with \code{nthreads > 1}.
 
 \code{possible_allele_flip} is only statistical evidence: alleles should be
 changed automatically only when variant metadata establish the change.

@@ -217,6 +217,31 @@ build_information <- blm_build_info()
 parallel_permitted <- !build_information$eigen_blas || identical(
   requested_blas_threads(build_information$blas, Sys.getenv()), 1L
 )
+
+# A single native call queues windows across LD blocks, so threading remains
+# available when every block contributes only one window.
+second_ids <- c("rs3", "rs4")
+second_variants <- transform(variants, CHR = 2, ID = second_ids)
+second_R <- R
+dimnames(second_R) <- list(second_ids, second_ids)
+multi_block_ld <- as_blm_ld(
+  list(first = R, second = second_R),
+  list(first = variants, second = second_variants)
+)
+multi_block_gwas <- rbind(
+  gwas,
+  transform(gwas, CHR = 2, ID = second_ids, BETA = rev(BETA))
+)
+set.seed(1506)
+multi_block_serial <- diagnose_gwas_ld(
+  multi_block_gwas, multi_block_ld,
+  window_variants = 2000L, overlap_variants = 0L,
+  nthreads = 1L, store_variant_report = "all"
+)
+stopifnot(
+  identical(multi_block_serial$block_report$windows, c(1L, 1L)),
+  nrow(multi_block_serial$variant_report) == 4L
+)
 if (parallel_permitted) {
   set.seed(1505)
   parallel_windows <- diagnose_gwas_ld(
@@ -226,5 +251,22 @@ if (parallel_permitted) {
   stopifnot(
     identical(serial_windows$variant_report, parallel_windows$variant_report),
     identical(serial_windows$block_report, parallel_windows$block_report)
+  )
+
+  set.seed(1506)
+  multi_block_parallel <- diagnose_gwas_ld(
+    multi_block_gwas, multi_block_ld,
+    window_variants = 2000L, overlap_variants = 0L,
+    nthreads = 2L, store_variant_report = "all"
+  )
+  stopifnot(
+    identical(
+      multi_block_serial$variant_report,
+      multi_block_parallel$variant_report
+    ),
+    identical(
+      multi_block_serial$block_report,
+      multi_block_parallel$block_report
+    )
   )
 }
