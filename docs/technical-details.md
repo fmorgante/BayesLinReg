@@ -864,6 +864,73 @@ calibration. `gwas_sample_size_summary` records the retained sample-size
 distribution, and `gwas_sample_overlap_assumption` records the overlap
 assumption.
 
+#### Variant-level GWAS--LD diagnostics
+
+`diagnose_gwas_ld()` is a read-only diagnostic applied to native `blm_ld`
+before eigen conversion. It first uses the same identifier, position, allele,
+and strand harmonization as `match_gwas_ld()`. The oriented z-scores are then
+processed independently by computational LD block. No statistically suspect
+variant is removed or reoriented automatically.
+
+Each computational block is divided into bounded central windows with optional
+overlap. Within a window, a random balanced partition separates targets from
+predictors, and the two groups exchange roles. For target $j$ and predictor set
+$t$, let
+
+$$
+R_\lambda=(1-\lambda)R+\lambda I,
+$$
+
+where $\lambda$ is the diagnostic `ld_shrink`. The conditional prediction,
+tagging strength, and standardized discrepancy are
+
+$$
+\widetilde z_j=R_{\lambda,jt}R_{\lambda,tt}^{-1}z_t,
+\qquad
+h_j=R_{\lambda,jt}R_{\lambda,tt}^{-1}R_{\lambda,tj},
+\qquad
+e_j=\frac{z_j-\widetilde z_j}{\sqrt{1-h_j}}.
+$$
+
+The reported statistic $e_j^2$ is compared with a chi-squared distribution
+with one degree of freedom. A statistical allele-flip score compares the
+conditional likelihood at $z_j$ and $-z_j$, but is only evidence for manual
+review: automatic orientation changes remain restricted to deterministic
+allele metadata.
+
+An RcppEigen kernel streams each window from the compressed strict-lower LD
+arrays directly into the two within-partition covariance matrices and their
+cross-covariance matrices. It therefore avoids materializing and subsequently
+slicing a complete window matrix. For a Cholesky factorization $A=LL^T$, the
+tagging strengths are the columnwise squared norms of $L^{-1}C^T$ and are
+computed by one multiple-right-hand-side triangular solve. With
+`EIGEN_USE_BLAS`, eligible matrix products, symmetric rank updates, and
+triangular matrix solves use R's external BLAS.
+
+Independent windows can be processed concurrently with `nthreads > 1`.
+Random partitions are generated serially before native parallel work, so
+results remain reproducible under `set.seed()`. To prevent nested
+parallelism, an external-BLAS build requires its applicable thread setting to
+be explicitly equal to one whenever `nthreads > 1`; otherwise the function
+errors before computation. Using `nthreads = 1` leaves BLAS free to use its
+configured thread count. The guard reads documented vendor environment
+settings; vendor-specific runtime calls that subsequently alter the BLAS
+thread count are not portable to detect and must not be combined with native
+window parallelism.
+
+Peak dense workspace is determined by `window_variants` plus
+`overlap_variants`, multiplied by the number of concurrently processed
+windows, rather than chromosome or genome size. The default output stores only
+flagged variants and block summaries; `store_variant_report = "all"`
+explicitly requests the full per-variant table.
+
+The diagnostic assumes that GWAS score correlations equal reference LD. Since
+marginal $N_j$ values do not identify pairwise sample overlap, blocks whose
+sample-size range exceeds `n_variation_tolerance` are marked and warned about.
+Their conditional statistics remain useful sensitivity measures but are not
+treated as calibrated evidence for automatic filtering. Random partitions use
+the R session RNG and are reproducible under `set.seed()`.
+
 The LD kernel applies $D^{1/2}RD^{1/2}\theta$ directly and never constructs
 the full Gram matrix. During an ascending Gibbs sweep, strict-lower entries
 propagate coefficient changes only to coordinates that have not yet been

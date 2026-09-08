@@ -353,6 +353,27 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// diagnose_gwas_ld_block_cpp
+Rcpp::List diagnose_gwas_ld_block_cpp(const Rcpp::List& block, const Rcpp::NumericVector& z, const Rcpp::IntegerVector& core_start, const Rcpp::IntegerVector& core_end, const Rcpp::IntegerVector& expanded_start, const Rcpp::IntegerVector& expanded_end, const Rcpp::IntegerVector& group_offset, const Rcpp::IntegerVector& group, const double ld_shrink, const double conditional_variance_floor, const int nthreads);
+RcppExport SEXP _BayesLinReg_diagnose_gwas_ld_block_cpp(SEXP blockSEXP, SEXP zSEXP, SEXP core_startSEXP, SEXP core_endSEXP, SEXP expanded_startSEXP, SEXP expanded_endSEXP, SEXP group_offsetSEXP, SEXP groupSEXP, SEXP ld_shrinkSEXP, SEXP conditional_variance_floorSEXP, SEXP nthreadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const Rcpp::List& >::type block(blockSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::NumericVector& >::type z(zSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type core_start(core_startSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type core_end(core_endSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type expanded_start(expanded_startSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type expanded_end(expanded_endSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type group_offset(group_offsetSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type group(groupSEXP);
+    Rcpp::traits::input_parameter< const double >::type ld_shrink(ld_shrinkSEXP);
+    Rcpp::traits::input_parameter< const double >::type conditional_variance_floor(conditional_variance_floorSEXP);
+    Rcpp::traits::input_parameter< const int >::type nthreads(nthreadsSEXP);
+    rcpp_result_gen = Rcpp::wrap(diagnose_gwas_ld_block_cpp(block, z, core_start, core_end, expanded_start, expanded_end, group_offset, group, ld_shrink, conditional_variance_floor, nthreads));
+    return rcpp_result_gen;
+END_RCPP
+}
 // compress_dense_ld_blocks_cpp
 Rcpp::List compress_dense_ld_blocks_cpp(const Rcpp::NumericMatrix& matrix, const std::string& label, const double max_stored_values);
 RcppExport SEXP _BayesLinReg_compress_dense_ld_blocks_cpp(SEXP matrixSEXP, SEXP labelSEXP, SEXP max_stored_valuesSEXP) {
@@ -380,6 +401,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_BayesLinReg_blm_gibbs_block_rcpp_cpp", (DL_FUNC) &_BayesLinReg_blm_gibbs_block_rcpp_cpp, 41},
     {"_BayesLinReg_blm_gibbs_ld_rcpp_cpp", (DL_FUNC) &_BayesLinReg_blm_gibbs_ld_rcpp_cpp, 42},
     {"_BayesLinReg_blm_gibbs_eigen_block_rcpp_cpp", (DL_FUNC) &_BayesLinReg_blm_gibbs_eigen_block_rcpp_cpp, 41},
+    {"_BayesLinReg_diagnose_gwas_ld_block_cpp", (DL_FUNC) &_BayesLinReg_diagnose_gwas_ld_block_cpp, 11},
     {"_BayesLinReg_compress_dense_ld_blocks_cpp", (DL_FUNC) &_BayesLinReg_compress_dense_ld_blocks_cpp, 3},
     {NULL, NULL, 0}
 };
