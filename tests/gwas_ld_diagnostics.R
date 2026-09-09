@@ -119,7 +119,8 @@ errors <- list(
   try(diagnose_gwas_ld(gwas, ld, overlap_variants = -1), silent = TRUE),
   try(diagnose_gwas_ld(gwas, ld, ld_shrink = 1), silent = TRUE),
   try(diagnose_gwas_ld(gwas, ld, p_threshold = 0), silent = TRUE),
-  try(diagnose_gwas_ld(gwas, ld, min_tagging = 1), silent = TRUE)
+  try(diagnose_gwas_ld(gwas, ld, min_tagging = 1), silent = TRUE),
+  try(diagnose_gwas_ld(gwas, ld, n_partitions = 0), silent = TRUE)
 )
 stopifnot(all(vapply(errors, inherits, logical(1), "try-error")))
 
@@ -211,6 +212,215 @@ for (name in names(reference_windows)) {
   )))
 }
 
+# Repeated partitions retain the most discrepant successful split and apply a
+# Bonferroni correction to its raw conditional p-value.
+set.seed(1507)
+repeated_reference <- lapply(seq_len(3L), function(index) {
+  reference_diagnostic(
+    parallel_R, parallel_gwas$BETA / parallel_gwas$SE, 2L, 1L, 0.05
+  )
+})
+reference_statistics <- do.call(
+  cbind, lapply(repeated_reference, `[[`, "statistic")
+)
+reference_best <- max.col(reference_statistics, ties.method = "first")
+reference_best_statistic <- reference_statistics[
+  cbind(seq_len(nrow(reference_statistics)), reference_best)
+]
+set.seed(1507)
+repeated_partitions <- diagnose_gwas_ld(
+  parallel_gwas, parallel_ld, window_variants = 2L,
+  overlap_variants = 1L, n_partitions = 3L, store_variant_report = "all"
+)
+stopifnot(
+  isTRUE(all.equal(
+    repeated_partitions$variant_report$statistic,
+    reference_best_statistic, tolerance = 1e-12
+  )),
+  isTRUE(all.equal(
+    repeated_partitions$variant_report$minimum_partition_p_value,
+    stats::pchisq(reference_best_statistic, 1L, lower.tail = FALSE),
+    tolerance = 1e-12
+  )),
+  isTRUE(all.equal(
+    repeated_partitions$variant_report$p_value,
+    pmin(
+      1, 3 * repeated_partitions$variant_report$minimum_partition_p_value
+    ),
+    tolerance = 0
+  )),
+  all(repeated_partitions$variant_report$partitions_assessed == 3L),
+  all(repeated_partitions$variant_report$partitions_requested == 3L),
+  repeated_partitions$block_report$partition_evaluations ==
+    3L * repeated_partitions$block_report$windows,
+  identical(repeated_partitions$controls$n_partitions, 3L),
+  identical(
+    repeated_partitions$controls$partition_p_value_adjustment, "bonferroni"
+  )
+)
+
+# Numerical failures distinguish a failed factorization from a conditional
+# tagging value that is incompatible with a joint correlation matrix.
+indefinite_R <- matrix(
+  c(1, 0.9, 0.9, 0.9, 1, -0.9, 0.9, -0.9, 1), 3L, 3L
+)
+indefinite_variants <- data.frame(
+  CHR = 1, ID = paste0("indefinite", 1:3), POS = 1:3,
+  A1 = "A", A0 = "C"
+)
+indefinite_ld <- as_blm_ld(indefinite_R, indefinite_variants)
+indefinite_gwas <- transform(
+  indefinite_variants, N = 1000, BETA = c(0.2, 0.1, -0.1), SE = 0.05
+)
+diagnostic_warnings <- character()
+set.seed(7)
+indefinite_diagnostics <- withCallingHandlers(
+  diagnose_gwas_ld(
+    indefinite_gwas, indefinite_ld, window_variants = 3L,
+    overlap_variants = 0L, ld_shrink = 0, store_variant_report = "all"
+  ),
+  warning = function(condition) {
+    diagnostic_warnings <<- c(diagnostic_warnings, conditionMessage(condition))
+    invokeRestart("muffleWarning")
+  }
+)
+stopifnot(
+  indefinite_diagnostics$block_report$failed_windows == 1L,
+  indefinite_diagnostics$block_report$factorization_failures == 0L,
+  indefinite_diagnostics$block_report$solve_failures == 0L,
+  indefinite_diagnostics$block_report$invalid_conditional_windows == 1L,
+  any(grepl("invalid conditional tagging", diagnostic_warnings, fixed = TRUE)),
+  !any(grepl("could not be factorized", diagnostic_warnings, fixed = TRUE))
+)
+
+# Predictor covariance failures retain their own status and warning rather
+# than being reported as invalid conditional tagging.
+unfactorable_R <- matrix(-0.9, 6L, 6L)
+diag(unfactorable_R) <- 1
+unfactorable_variants <- data.frame(
+  CHR = 1, ID = paste0("unfactorable", 1:6), POS = 1:6,
+  A1 = "A", A0 = "C"
+)
+unfactorable_ld <- as_blm_ld(unfactorable_R, unfactorable_variants)
+unfactorable_gwas <- transform(
+  unfactorable_variants, N = 1000, BETA = seq(0.1, 0.6, by = 0.1), SE = 0.05
+)
+diagnostic_warnings <- character()
+set.seed(8)
+unfactorable_diagnostics <- withCallingHandlers(
+  diagnose_gwas_ld(
+    unfactorable_gwas, unfactorable_ld, window_variants = 6L,
+    overlap_variants = 0L, ld_shrink = 0, store_variant_report = "all"
+  ),
+  warning = function(condition) {
+    diagnostic_warnings <<- c(diagnostic_warnings, conditionMessage(condition))
+    invokeRestart("muffleWarning")
+  }
+)
+stopifnot(
+  unfactorable_diagnostics$block_report$failed_windows == 1L,
+  unfactorable_diagnostics$block_report$factorization_failures == 1L,
+  unfactorable_diagnostics$block_report$solve_failures == 0L,
+  unfactorable_diagnostics$block_report$invalid_conditional_windows == 0L,
+  any(grepl("could not be factorized", diagnostic_warnings, fixed = TRUE)),
+  !any(grepl("invalid conditional tagging", diagnostic_warnings, fixed = TRUE))
+)
+
+# Randomized dense, sparse, and multi-block inputs agree with direct conditional
+# calculations across changing window boundaries and random partitions.
+for (case in seq_len(3L)) {
+  set.seed(1600 + case)
+  case_sizes <- c(7L + case, 9L + case)
+  case_R <- lapply(case_sizes, function(size) {
+    stats::cor(matrix(stats::rnorm(3L * size * size), 3L * size, size))
+  })
+  names(case_R) <- c("first", "second")
+  case_variants <- Map(function(size, chromosome, prefix) {
+    data.frame(
+      CHR = chromosome, ID = paste0(prefix, seq_len(size)), POS = seq_len(size),
+      A1 = "A", A0 = "C"
+    )
+  }, case_sizes, 1:2, c("randomA_", "randomB_"))
+  names(case_variants) <- names(case_R)
+  case_gwas <- do.call(rbind, Map(function(table, size) {
+    transform(
+      table, N = 1000, BETA = seq(-0.15, 0.15, length.out = size), SE = 0.05
+    )
+  }, case_variants, case_sizes))
+  dense_case_ld <- as_blm_ld(case_R, case_variants)
+  sparse_case_ld <- as_blm_ld(
+    lapply(case_R, function(value) Matrix::Matrix(value, sparse = TRUE)),
+    case_variants
+  )
+
+  diagnostic_seed <- 1700 + case
+  set.seed(diagnostic_seed)
+  case_reference <- Map(function(R, table) {
+    rows <- match(table$ID, case_gwas$ID)
+    reference_diagnostic(
+      R, case_gwas$BETA[rows] / case_gwas$SE[rows], 4L, 2L, 0.03
+    )
+  }, case_R, case_variants)
+  set.seed(diagnostic_seed)
+  dense_case <- diagnose_gwas_ld(
+    case_gwas, dense_case_ld, window_variants = 4L, overlap_variants = 2L,
+    ld_shrink = 0.03, store_variant_report = "all"
+  )
+  set.seed(diagnostic_seed)
+  sparse_case <- diagnose_gwas_ld(
+    case_gwas, sparse_case_ld, window_variants = 4L, overlap_variants = 2L,
+    ld_shrink = 0.03, store_variant_report = "all"
+  )
+  for (name in names(reference_windows)) {
+    expected <- unlist(lapply(case_reference, `[[`, name), use.names = FALSE)
+    stopifnot(isTRUE(all.equal(
+      dense_case$variant_report[[name]], expected, tolerance = 1e-11
+    )))
+  }
+  stopifnot(isTRUE(all.equal(
+    dense_case$variant_report, sparse_case$variant_report, tolerance = 1e-12
+  )))
+}
+
+# The batching plan bounds large failure-only temporary output while retaining
+# enough cross-block window tasks to use the requested worker threads.
+diagnostic_batches <- BayesLinReg:::.diagnostic_block_batches(
+  rep(10000L, 80L), rep(1L, 80L), nthreads = 8L, max_variants = 100000
+)
+stopifnot(
+  length(diagnostic_batches) > 1L,
+  identical(unlist(diagnostic_batches, use.names = FALSE), seq_len(80L)),
+  all(vapply(diagnostic_batches[-length(diagnostic_batches)], length,
+             integer(1)) >= 16L)
+)
+
+# Processing the same blocks in one or multiple batches preserves the numerical
+# result for the backward-compatible one-partition path.
+diagnose_batch <- BayesLinReg:::.diagnose_gwas_ld_batch
+case_z <- case_gwas$BETA / case_gwas$SE
+set.seed(1801)
+one_batch <- diagnose_batch(
+  dense_case_ld$blocks, case_z, 4L, 2L, 0.03,
+  sqrt(.Machine$double.eps), 1L, 1L
+)
+set.seed(1801)
+separate_batches <- Map(function(block, rows) {
+  diagnose_batch(
+    list(block), case_z[rows], 4L, 2L, 0.03,
+    sqrt(.Machine$double.eps), 1L, 1L
+  )
+}, dense_case_ld$blocks, split(seq_along(case_z), rep(1:2, case_sizes)))
+for (name in setdiff(names(one_batch), "failure_counts")) {
+  stopifnot(identical(
+    one_batch[[name]],
+    unlist(lapply(separate_batches, `[[`, name), use.names = FALSE)
+  ))
+}
+stopifnot(identical(
+  one_batch$failure_counts,
+  do.call(rbind, lapply(separate_batches, `[[`, "failure_counts"))
+))
+
 # Independent windows are reproducible whenever nested BLAS parallelism is not
 # requested.
 build_information <- blm_build_info()
@@ -267,6 +477,22 @@ if (parallel_permitted) {
     identical(
       multi_block_serial$block_report,
       multi_block_parallel$block_report
+    )
+  )
+  set.seed(1507)
+  repeated_parallel <- diagnose_gwas_ld(
+    parallel_gwas, parallel_ld, window_variants = 2L,
+    overlap_variants = 1L, n_partitions = 3L, nthreads = 2L,
+    store_variant_report = "all"
+  )
+  stopifnot(
+    identical(
+      repeated_partitions$variant_report,
+      repeated_parallel$variant_report
+    ),
+    identical(
+      repeated_partitions$block_report,
+      repeated_parallel$block_report
     )
   )
 }

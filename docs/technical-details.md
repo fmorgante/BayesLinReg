@@ -892,11 +892,23 @@ h_j=R_{\lambda,jt}R_{\lambda,tt}^{-1}R_{\lambda,tj},
 e_j=\frac{z_j-\widetilde z_j}{\sqrt{1-h_j}}.
 $$
 
-The reported statistic $e_j^2$ is compared with a chi-squared distribution
-with one degree of freedom. A statistical allele-flip score compares the
-conditional likelihood at $z_j$ and $-z_j$, but is only evidence for manual
-review: automatic orientation changes remain restricted to deterministic
-allele metadata.
+With one random partition, the reported statistic $e_j^2$ is compared with a
+chi-squared distribution with one degree of freedom. If `n_partitions` is
+larger than one, the implementation retains the successfully assessed
+partition with the largest statistic. If $p_{j,min}$ is its raw conditional
+p-value and $K$ partitions were requested, the reported value is
+
+$$
+p_j=\min(1,Kp_{j,\min}).
+$$
+
+This Bonferroni adjustment controls the probability of a conditional-outlier
+flag across the attempted random splits without assuming that their results are
+independent. The raw minimum and the number of successfully assessed partitions
+are also reported. A statistical allele-flip score from the selected partition
+compares the conditional likelihood at $z_j$ and $-z_j$, but is only evidence
+for manual review: automatic orientation changes remain restricted to
+deterministic allele metadata.
 
 An RcppEigen kernel streams each window from the compressed strict-lower LD
 arrays directly into the two within-partition covariance matrices and their
@@ -907,11 +919,12 @@ computed by one multiple-right-hand-side triangular solve. With
 `EIGEN_USE_BLAS`, eligible matrix products, symmetric rank updates, and
 triangular matrix solves use R's external BLAS.
 
-Windows from every computational LD block are assembled into one work queue and
-can be processed concurrently with `nthreads > 1`. This preserves parallelism
-when individual LD blocks contain only one window. Random partitions are
-generated serially before native parallel work, so results remain reproducible
-under `set.seed()`. To prevent nested
+Windows from consecutive computational LD blocks are assembled into bounded
+cross-block work queues and can be processed concurrently with `nthreads > 1`.
+This preserves parallelism when individual LD blocks contain only one window
+without allocating genome-wide temporary diagnostic vectors. Random partitions
+are generated serially before native parallel work, so results remain
+reproducible under `set.seed()`. To prevent nested
 parallelism, an external-BLAS build requires its applicable thread setting to
 be explicitly equal to one whenever `nthreads > 1`; otherwise the function
 errors before computation. Using `nthreads = 1` leaves BLAS free to use its
@@ -921,10 +934,13 @@ thread count are not portable to detect and must not be combined with native
 window parallelism.
 
 Peak dense workspace is determined by `window_variants` plus
-`overlap_variants`, multiplied by the number of concurrently processed
-windows, rather than chromosome or genome size. The default output stores only
-flagged variants and block summaries; `store_variant_report = "all"`
-explicitly requests the full per-variant table.
+`overlap_variants`, multiplied by the number of concurrently processed windows.
+Native result arrays are additionally bounded by the internal cross-block batch
+size rather than genome size. The default output stores only flagged variants
+and block summaries; `store_variant_report = "all"` explicitly requests the
+full per-variant table. Numerical status bits distinguish covariance
+factorization failures, non-finite solves, and invalid conditional tagging or
+fitted values; the block report and warnings preserve these causes separately.
 
 The diagnostic assumes that GWAS score correlations equal reference LD. Since
 marginal $N_j$ values do not identify pairwise sample overlap, blocks whose

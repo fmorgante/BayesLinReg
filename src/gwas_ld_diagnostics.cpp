@@ -12,6 +12,10 @@ using Eigen::VectorXd;
 using RcppParallel::RVector;
 using RcppParallel::Worker;
 
+constexpr int kDiagnosticFactorizationFailure = 1;
+constexpr int kDiagnosticSolveFailure = 2;
+constexpr int kDiagnosticConditionalFailure = 4;
+
 struct DiagnosticBlockView {
   DiagnosticBlockView(
       const Rcpp::List& block,
@@ -53,7 +57,7 @@ class GwasLdDiagnosticWorker : public Worker {
       Rcpp::NumericVector& statistic,
       Rcpp::NumericVector& flip_log_likelihood_ratio,
       Rcpp::IntegerVector& predictors_used,
-      Rcpp::IntegerVector& failed)
+      Rcpp::IntegerVector& status)
       : z_(z),
         window_block_(window_block),
         core_start_(core_start),
@@ -71,7 +75,7 @@ class GwasLdDiagnosticWorker : public Worker {
         statistic_(statistic),
         flip_log_likelihood_ratio_(flip_log_likelihood_ratio),
         predictors_used_(predictors_used),
-        failed_(failed) {
+        status_(status) {
     blocks_.reserve(blocks.size());
     for (int index = 0; index < blocks.size(); ++index) {
       blocks_.emplace_back(
@@ -105,7 +109,7 @@ class GwasLdDiagnosticWorker : public Worker {
   RVector<double> statistic_;
   RVector<double> flip_log_likelihood_ratio_;
   RVector<int> predictors_used_;
-  RVector<int> failed_;
+  RVector<int> status_;
 
   void diagnose_window(const std::size_t window) {
     const DiagnosticBlockView& block = blocks_[window_block_[window]];
@@ -219,25 +223,27 @@ class GwasLdDiagnosticWorker : public Worker {
       }
     }
 
-    bool successful = true;
-    successful = diagnose_direction(
+    int status = 0;
+    status |= diagnose_direction(
       covariance_two, cross_one_two, predictor_two, target_one, block.offset
-    ) && successful;
-    successful = diagnose_direction(
+    );
+    status |= diagnose_direction(
       covariance_one, cross_two_one, predictor_one, target_two, block.offset
-    ) && successful;
-    failed_[window] = successful ? 0 : 1;
+    );
+    status_[window] = status;
   }
 
-  bool diagnose_direction(
+  int diagnose_direction(
       const MatrixXd& covariance,
       const MatrixXd& cross,
       const std::vector<int>& predictor,
       const std::vector<int>& target,
       const int block_offset) {
-    if (target.empty() || predictor.empty()) return true;
+    if (target.empty() || predictor.empty()) return 0;
     Eigen::LLT<MatrixXd> factor(covariance);
-    if (factor.info() != Eigen::Success) return false;
+    if (factor.info() != Eigen::Success) {
+      return kDiagnosticFactorizationFailure;
+    }
 
     VectorXd predictor_z(predictor.size());
     for (std::size_t i = 0; i < predictor.size(); ++i) {
@@ -245,23 +251,26 @@ class GwasLdDiagnosticWorker : public Worker {
         z_[block_offset + predictor[i]];
     }
     const VectorXd weights = factor.solve(predictor_z);
-    if (factor.info() != Eigen::Success || !weights.allFinite()) return false;
+    if (factor.info() != Eigen::Success || !weights.allFinite()) {
+      return kDiagnosticSolveFailure;
+    }
     const VectorXd fitted = cross * weights;
 
     // If covariance = L L', then h_j is the squared column norm of
     // L^{-1} cross'. The multiple-RHS triangular solve is BLAS-eligible when
     // the package is compiled with EIGEN_USE_BLAS.
     const MatrixXd whitened = factor.matrixL().solve(cross.transpose());
+    if (!whitened.allFinite()) return kDiagnosticSolveFailure;
     const VectorXd target_tagging = whitened.colwise().squaredNorm();
     const double tolerance = std::sqrt(
       std::numeric_limits<double>::epsilon()
     );
-    bool successful = true;
+    int status = 0;
     for (std::size_t i = 0; i < target.size(); ++i) {
       double h = target_tagging[static_cast<Eigen::Index>(i)];
       if (!std::isfinite(h) || h < -tolerance || h > 1.0 + tolerance ||
           !std::isfinite(fitted[static_cast<Eigen::Index>(i)])) {
-        successful = false;
+        status |= kDiagnosticConditionalFailure;
         continue;
       }
       h = std::max(0.0, std::min(1.0, h));
@@ -278,7 +287,7 @@ class GwasLdDiagnosticWorker : public Worker {
         -2.0 * z_[global] * fitted[static_cast<Eigen::Index>(i)] / variance;
       predictors_used_[global] = predictor.size();
     }
-    return successful;
+    return status;
   }
 };
 
@@ -350,14 +359,14 @@ Rcpp::List diagnose_gwas_ld_cpp(
   Rcpp::NumericVector statistic(z.size(), NA_REAL);
   Rcpp::NumericVector flip_log_likelihood_ratio(z.size(), NA_REAL);
   Rcpp::IntegerVector predictors_used(z.size());
-  Rcpp::IntegerVector failed(windows);
+  Rcpp::IntegerVector status(windows);
 
   GwasLdDiagnosticWorker worker(
     blocks, block_offset, z, window_block, core_start, core_end,
     expanded_start, expanded_end, group_offset, group, ld_shrink,
     conditional_variance_floor, predicted, conditional_variance, tagging,
     conditional_z, statistic, flip_log_likelihood_ratio, predictors_used,
-    failed
+    status
   );
   if (nthreads > 1 && windows > 1) {
     RcppParallel::parallelFor(0, windows, worker, 1, nthreads);
@@ -374,6 +383,6 @@ Rcpp::List diagnose_gwas_ld_cpp(
       flip_log_likelihood_ratio,
     Rcpp::Named("predictors_used") = predictors_used,
     Rcpp::Named("windows") = windows,
-    Rcpp::Named("window_failed") = failed
+    Rcpp::Named("window_status") = status
   );
 }
