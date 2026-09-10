@@ -25,22 +25,24 @@
 #' @param nthreads Number of threads used to process independent diagnostic
 #'   windows. When the package uses external BLAS, values greater than one
 #'   require the applicable BLAS thread setting to be explicitly equal to one.
-#' @param n_partitions Number of independent random balanced partitions evaluated
-#'   for every window. With more than one partition, the reported diagnostic
-#'   values come from the successfully assessed partition having the largest
-#'   statistic, and `p_value` is its Bonferroni-adjusted conditional p-value.
 #' @param store_variant_report Whether to retain only statistically flagged
 #'   variants or the complete per-variant diagnostic table.
+#' @param n_partitions Number of independent random balanced partitions evaluated
+#'   for every window. With more than one partition, conditional-discrepancy
+#'   values come from the sufficiently tagged partition having the largest
+#'   statistic, and `p_value` is its Bonferroni-adjusted conditional p-value.
+#'   The flip likelihood ratio is maximized separately over sufficiently tagged
+#'   partitions.
 #'
 #' @return An object of class `blm_gwas_ld_diagnostics` containing
 #'   `block_report`, `variant_failures`, optionally `variant_report`, the
 #'   harmonization counts, controls, and the score-correlation assumption.
 #'   Per-variant output includes the raw minimum-partition p-value, its adjusted
-#'   `p_value`, and the numbers of assessed and requested partitions. The block
-#'   report separates covariance-factorization failures, non-finite solves, and
-#'   invalid conditional calculations. With repeated partitions,
-#'   `failed_windows` counts failed partition-window evaluations and can exceed
-#'   `windows`.
+#'   `p_value`, and the numbers of assessed, sufficiently tagged, and requested
+#'   partitions. The block report separates covariance-factorization failures,
+#'   non-finite solves, and invalid conditional calculations. With repeated
+#'   partitions, `failed_windows` counts failed partition-window evaluations and
+#'   can exceed `windows`.
 #'
 #' @details Let `z` be oriented to the LD dosage allele. Within each overlapping
 #'   window, variants are randomly divided into two balanced groups. Each group
@@ -51,16 +53,21 @@
 #'   to all these covariance terms. Set the R seed with [set.seed()] to make the
 #'   random partitions reproducible. Repeated partitions provide more than one
 #'   opportunity to identify a discrepancy caused by the random predictor split.
-#'   Their minimum raw conditional p-value is multiplied by `n_partitions`, so
-#'   `p_value` controls the familywise error rate across the attempted splits by
-#'   the Bonferroni inequality without assuming independence.
+#'   The smallest p-value among sufficiently tagged partitions is multiplied by
+#'   `n_partitions`, so `p_value` controls the familywise error rate across all
+#'   attempted splits by the Bonferroni inequality without assuming independence.
+#'   If no partition reaches `min_tagging`, the most discrepant assessed split is
+#'   returned for inspection but cannot be flagged. Flip evidence is maximized
+#'   separately over sufficiently tagged partitions, with the same inspection-only
+#'   fallback when none is sufficiently tagged.
 #'
 #'   This is a scalable, conservative DENTIST-style first-pass diagnostic, not
 #'   a reimplementation of the complete iterative DENTIST procedure. Windows
 #'   are bounded by variant count and placed in bounded cross-block parallel
-#'   work queues. Linear solves are batched so a global dense LD matrix is never
-#'   created. Optimized BLAS can accelerate the Cholesky and triangular-solve
-#'   operations.
+#'   work queues. A deterministic per-block seed schedule makes partitions
+#'   independent of batch boundaries and `nthreads`. Linear solves are batched so
+#'   a global dense LD matrix is never created. Optimized BLAS can accelerate the
+#'   Cholesky and triangular-solve operations.
 #'
 #'   Conditional p-values assume that correlations among GWAS z-scores equal
 #'   the supplied reference LD. Marginal sample sizes do not identify pairwise
@@ -97,8 +104,8 @@ diagnose_gwas_ld <- function(
     ld_shrink = 0.05, p_threshold = 5e-8, min_tagging = 0.1,
     conditional_variance_floor = sqrt(.Machine$double.eps),
     n_variation_tolerance = 0.1, nthreads = 1L,
-    n_partitions = 1L,
-    store_variant_report = c("failures", "all")) {
+    store_variant_report = c("failures", "all"),
+    n_partitions = 1L) {
   if (inherits(ld, "blm_ld_eigen")) {
     stop(
       paste0(
@@ -161,6 +168,11 @@ diagnose_gwas_ld <- function(
   batches <- .diagnostic_block_batches(
     block_sizes, window_counts, nthreads
   )
+  partition_seeds <- if (n_partitions > 1L) {
+    .diagnostic_partition_seeds(length(matched_ld$blocks), n_partitions)
+  } else {
+    NULL
+  }
 
   retain_all_variants <- identical(store_variant_report, "all")
   block_results <- if (retain_all_variants) {
@@ -176,13 +188,18 @@ diagnose_gwas_ld <- function(
   conditional_outlier_total <- 0
   possible_flip_total <- 0
   for (batch in batches) {
+    batch_seeds <- if (is.null(partition_seeds)) {
+      NULL
+    } else {
+      partition_seeds[, batch, drop = FALSE]
+    }
     batch_global <- seq.int(
       block_starts[[batch[[1L]]]], block_ends[[batch[[length(batch)]]]]
     )
     diagnosed_batch <- .diagnose_gwas_ld_batch(
       matched_ld$blocks[batch], aligned_z[batch_global], window_variants,
       overlap_variants, ld_shrink, conditional_variance_floor, nthreads,
-      n_partitions
+      n_partitions, min_tagging, batch_seeds
     )
     batch_offset <- 0L
     for (local_block_index in seq_along(batch)) {
@@ -199,7 +216,7 @@ diagnose_gwas_ld <- function(
           "predicted_z", "conditional_variance", "tagging", "conditional_z",
           "statistic", "minimum_partition_p_value", "p_value",
           "flip_log_likelihood_ratio", "predictors_used",
-          "partitions_assessed"
+          "partitions_assessed", "partitions_sufficiently_tagged"
         )],
         function(value) value[local]
       )
@@ -228,6 +245,8 @@ diagnose_gwas_ld <- function(
         flip_log_likelihood_ratio = diagnosed$flip_log_likelihood_ratio,
         predictors_used = diagnosed$predictors_used,
         partitions_assessed = diagnosed$partitions_assessed,
+        partitions_sufficiently_tagged =
+          diagnosed$partitions_sufficiently_tagged,
         partitions_requested = n_partitions,
         stringsAsFactors = FALSE
       )
@@ -424,7 +443,8 @@ print.blm_gwas_ld_diagnostics <- function(x, ...) {
 
 .diagnose_gwas_ld_batch <- function(
     blocks, z, window_variants, overlap_variants, ld_shrink,
-    conditional_variance_floor, nthreads, n_partitions) {
+    conditional_variance_floor, nthreads, n_partitions, min_tagging = 0,
+    partition_seeds = NULL) {
   sizes <- vapply(blocks, `[[`, integer(1), "size")
   block_offsets <- cumsum(sizes) - sizes
   output_names <- c(
@@ -437,16 +457,33 @@ print.blm_gwas_ld_diagnostics <- function(x, ...) {
   )
   best$predictors_used <- integer(length(z))
   best_statistic <- rep(-Inf, length(z))
+  best_unqualified <- best
+  best_unqualified_statistic <- rep(-Inf, length(z))
+  best_flip_log_likelihood_ratio <- rep(NA_real_, length(z))
   partitions_assessed <- integer(length(z))
+  partitions_sufficiently_tagged <- integer(length(z))
   failure_counts <- matrix(
     0L, nrow = length(blocks), ncol = 4L,
     dimnames = list(NULL, c("failed", "factorization", "solve", "conditional"))
   )
+  if (!is.null(partition_seeds) &&
+      (!is.matrix(partition_seeds) ||
+       !identical(dim(partition_seeds), c(n_partitions, length(blocks))))) {
+    stop("Invalid diagnostic partition-seed schedule.", call. = FALSE)
+  }
 
   for (partition in seq_len(n_partitions)) {
-    plans <- lapply(sizes, function(size) {
-      .prepare_gwas_ld_windows(size, window_variants, overlap_variants)
-    })
+    plans <- if (is.null(partition_seeds)) {
+      lapply(sizes, function(size) {
+        .prepare_gwas_ld_windows(size, window_variants, overlap_variants)
+      })
+    } else {
+      Map(function(size, seed) {
+        .prepare_gwas_ld_windows(
+          size, window_variants, overlap_variants, seed = seed
+        )
+      }, sizes, partition_seeds[partition, ])
+    }
     window_counts <- vapply(plans, function(plan) {
       length(plan$core_start)
     }, integer(1))
@@ -507,7 +544,22 @@ print.blm_gwas_ld_diagnostics <- function(x, ...) {
 
     assessed <- is.finite(diagnosed$statistic)
     partitions_assessed <- partitions_assessed + assessed
-    replace <- assessed & diagnosed$statistic > best_statistic
+    replace_unqualified <- assessed &
+      diagnosed$statistic > best_unqualified_statistic
+    if (any(replace_unqualified)) {
+      best_unqualified_statistic[replace_unqualified] <-
+        diagnosed$statistic[replace_unqualified]
+      for (name in output_names) {
+        best_unqualified[[name]][replace_unqualified] <-
+          diagnosed[[name]][replace_unqualified]
+      }
+      best_unqualified$predictors_used[replace_unqualified] <-
+        diagnosed$predictors_used[replace_unqualified]
+    }
+    sufficiently_tagged <- assessed & diagnosed$tagging >= min_tagging
+    partitions_sufficiently_tagged <- partitions_sufficiently_tagged +
+      sufficiently_tagged
+    replace <- sufficiently_tagged & diagnosed$statistic > best_statistic
     if (any(replace)) {
       best_statistic[replace] <- diagnosed$statistic[replace]
       for (name in output_names) {
@@ -515,7 +567,27 @@ print.blm_gwas_ld_diagnostics <- function(x, ...) {
       }
       best$predictors_used[replace] <- diagnosed$predictors_used[replace]
     }
+    replace_flip <- sufficiently_tagged & (
+      is.na(best_flip_log_likelihood_ratio) |
+        diagnosed$flip_log_likelihood_ratio > best_flip_log_likelihood_ratio
+    )
+    best_flip_log_likelihood_ratio[replace_flip] <-
+      diagnosed$flip_log_likelihood_ratio[replace_flip]
   }
+
+  no_tagged_partition <- partitions_sufficiently_tagged == 0L &
+    partitions_assessed > 0L
+  if (any(no_tagged_partition)) {
+    for (name in output_names) {
+      best[[name]][no_tagged_partition] <-
+        best_unqualified[[name]][no_tagged_partition]
+    }
+    best$predictors_used[no_tagged_partition] <-
+      best_unqualified$predictors_used[no_tagged_partition]
+    best_flip_log_likelihood_ratio[no_tagged_partition] <-
+      best_unqualified$flip_log_likelihood_ratio[no_tagged_partition]
+  }
+  best$flip_log_likelihood_ratio <- best_flip_log_likelihood_ratio
 
   best$minimum_partition_p_value <- stats::pchisq(
     best$statistic, df = 1, lower.tail = FALSE
@@ -524,12 +596,44 @@ print.blm_gwas_ld_diagnostics <- function(x, ...) {
     1, n_partitions * best$minimum_partition_p_value
   )
   best$partitions_assessed <- partitions_assessed
+  best$partitions_sufficiently_tagged <- partitions_sufficiently_tagged
   best$failure_counts <- failure_counts
   best
 }
 
+.diagnostic_partition_seeds <- function(block_count, n_partitions) {
+  matrix(
+    sample.int(
+      .Machine$integer.max, block_count * n_partitions, replace = TRUE
+    ),
+    nrow = n_partitions, ncol = block_count
+  )
+}
+
+.with_diagnostic_seed <- function(seed, expression) {
+  had_seed <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+  if (had_seed) original_seed <- get(".Random.seed", envir = .GlobalEnv)
+  on.exit({
+    if (had_seed) {
+      assign(".Random.seed", original_seed, envir = .GlobalEnv)
+    } else if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+      rm(".Random.seed", envir = .GlobalEnv)
+    }
+  })
+  set.seed(seed)
+  force(expression)
+}
+
 .prepare_gwas_ld_windows <- function(
-    size, window_variants, overlap_variants) {
+    size, window_variants, overlap_variants, seed = NULL) {
+  if (!is.null(seed)) {
+    return(.with_diagnostic_seed(
+      seed,
+      .prepare_gwas_ld_windows(
+        size, window_variants, overlap_variants, seed = NULL
+      )
+    ))
+  }
   starts <- seq.int(1L, size, by = window_variants)
   core_end <- pmin(
     size, as.double(starts) + window_variants - 1

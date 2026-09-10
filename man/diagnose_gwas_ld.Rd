@@ -15,8 +15,8 @@ diagnose_gwas_ld(
   conditional_variance_floor = sqrt(.Machine$double.eps),
   n_variation_tolerance = 0.1,
   nthreads = 1L,
-  n_partitions = 1L,
-  store_variant_report = c("failures", "all")
+  store_variant_report = c("failures", "all"),
+  n_partitions = 1L
 )
 }
 \arguments{
@@ -51,24 +51,26 @@ block before its sample sizes are marked dissimilar.}
 windows. When the package uses external BLAS, values greater than one
 require the applicable BLAS thread setting to be explicitly equal to one.}
 
-\item{n_partitions}{Number of independent random balanced partitions evaluated
-for every window. With more than one partition, the reported diagnostic
-values come from the successfully assessed partition having the largest
-statistic, and \code{p_value} is its Bonferroni-adjusted conditional p-value.}
-
 \item{store_variant_report}{Whether to retain only statistically flagged
 variants or the complete per-variant diagnostic table.}
+
+\item{n_partitions}{Number of independent random balanced partitions evaluated
+for every window. With more than one partition, conditional-discrepancy
+values come from the sufficiently tagged partition having the largest
+statistic, and \code{p_value} is its Bonferroni-adjusted conditional p-value.
+The flip likelihood ratio is maximized separately over sufficiently tagged
+partitions.}
 }
 \value{
 An object of class \code{blm_gwas_ld_diagnostics} containing
 \code{block_report}, \code{variant_failures}, optionally \code{variant_report}, the
 harmonization counts, controls, and the score-correlation assumption.
 Per-variant output includes the raw minimum-partition p-value, its adjusted
-\code{p_value}, and the numbers of assessed and requested partitions. The block
-report separates covariance-factorization failures, non-finite solves, and
-invalid conditional calculations. With repeated partitions,
-\code{failed_windows} counts failed partition-window evaluations and can exceed
-\code{windows}.
+\code{p_value}, and the numbers of assessed, sufficiently tagged, and requested
+partitions. The block report separates covariance-factorization failures,
+non-finite solves, and invalid conditional calculations. With repeated
+partitions, \code{failed_windows} counts failed partition-window evaluations and
+can exceed \code{windows}.
 }
 \description{
 Performs a read-only, blockwise conditional z-score diagnostic after the
@@ -85,16 +87,21 @@ by \verb{1 - R[j,t] solve(R[t,t], R[t,j])}. The supplied \code{ld_shrink} is app
 to all these covariance terms. Set the R seed with \code{\link[=set.seed]{set.seed()}} to make the
 random partitions reproducible. Repeated partitions provide more than one
 opportunity to identify a discrepancy caused by the random predictor split.
-Their minimum raw conditional p-value is multiplied by \code{n_partitions}, so
-\code{p_value} controls the familywise error rate across the attempted splits by
-the Bonferroni inequality without assuming independence.
+The smallest p-value among sufficiently tagged partitions is multiplied by
+\code{n_partitions}, so \code{p_value} controls the familywise error rate across all
+attempted splits by the Bonferroni inequality without assuming independence.
+If no partition reaches \code{min_tagging}, the most discrepant assessed split is
+returned for inspection but cannot be flagged. Flip evidence is maximized
+separately over sufficiently tagged partitions, with the same inspection-only
+fallback when none is sufficiently tagged.
 
 This is a scalable, conservative DENTIST-style first-pass diagnostic, not
 a reimplementation of the complete iterative DENTIST procedure. Windows
 are bounded by variant count and placed in bounded cross-block parallel
-work queues. Linear solves are batched so a global dense LD matrix is never
-created. Optimized BLAS can accelerate the Cholesky and triangular-solve
-operations.
+work queues. A deterministic per-block seed schedule makes partitions
+independent of batch boundaries and \code{nthreads}. Linear solves are batched so
+a global dense LD matrix is never created. Optimized BLAS can accelerate the
+Cholesky and triangular-solve operations.
 
 Conditional p-values assume that correlations among GWAS z-scores equal
 the supplied reference LD. Marginal sample sizes do not identify pairwise

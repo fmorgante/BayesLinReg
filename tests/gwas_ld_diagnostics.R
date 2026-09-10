@@ -124,6 +124,15 @@ errors <- list(
 )
 stopifnot(all(vapply(errors, inherits, logical(1), "try-error")))
 
+# Appending n_partitions preserves the established positional location of
+# store_variant_report.
+set.seed(1510)
+positional_report <- diagnose_gwas_ld(
+  gwas, ld, 2L, 0L, 0.05, 5e-8, 0.1,
+  sqrt(.Machine$double.eps), 0.1, 1L, "all"
+)
+stopifnot(!is.null(positional_report$variant_report))
+
 # BLAS thread requests are interpreted conservatively by vendor.
 requested_blas_threads <- getFromNamespace(
   ".requested_blas_threads", "BayesLinReg"
@@ -212,21 +221,43 @@ for (name in names(reference_windows)) {
   )))
 }
 
-# Repeated partitions retain the most discrepant successful split and apply a
-# Bonferroni correction to its raw conditional p-value.
+# Repeated partitions retain the most discrepant sufficiently tagged split,
+# maximize flip evidence separately, and apply a Bonferroni correction.
 set.seed(1507)
+repeated_seeds <- BayesLinReg:::.diagnostic_partition_seeds(1L, 3L)
 repeated_reference <- lapply(seq_len(3L), function(index) {
-  reference_diagnostic(
-    parallel_R, parallel_gwas$BETA / parallel_gwas$SE, 2L, 1L, 0.05
+  BayesLinReg:::.with_diagnostic_seed(
+    repeated_seeds[index, 1L],
+    reference_diagnostic(
+      parallel_R, parallel_gwas$BETA / parallel_gwas$SE, 2L, 1L, 0.05
+    )
   )
 })
 reference_statistics <- do.call(
   cbind, lapply(repeated_reference, `[[`, "statistic")
 )
-reference_best <- max.col(reference_statistics, ties.method = "first")
+reference_tagging <- do.call(
+  cbind, lapply(repeated_reference, `[[`, "tagging")
+)
+reference_eligible <- is.finite(reference_statistics) & reference_tagging >= 0.1
+eligible_statistics <- reference_statistics
+eligible_statistics[!reference_eligible] <- -Inf
+reference_best <- max.col(eligible_statistics, ties.method = "first")
+no_eligible <- rowSums(reference_eligible) == 0L
+reference_best[no_eligible] <- max.col(
+  reference_statistics[no_eligible, , drop = FALSE], ties.method = "first"
+)
 reference_best_statistic <- reference_statistics[
   cbind(seq_len(nrow(reference_statistics)), reference_best)
 ]
+reference_flip <- do.call(
+  cbind, lapply(repeated_reference, `[[`, "flip_log_likelihood_ratio")
+)
+reference_flip[!reference_eligible] <- -Inf
+reference_best_flip <- apply(reference_flip, 1L, max)
+reference_best_flip[no_eligible] <- do.call(
+  cbind, lapply(repeated_reference, `[[`, "flip_log_likelihood_ratio")
+)[cbind(which(no_eligible), reference_best[no_eligible])]
 set.seed(1507)
 repeated_partitions <- diagnose_gwas_ld(
   parallel_gwas, parallel_ld, window_variants = 2L,
@@ -250,13 +281,78 @@ stopifnot(
     tolerance = 0
   )),
   all(repeated_partitions$variant_report$partitions_assessed == 3L),
+  identical(
+    repeated_partitions$variant_report$partitions_sufficiently_tagged,
+    as.integer(rowSums(reference_eligible))
+  ),
   all(repeated_partitions$variant_report$partitions_requested == 3L),
+  isTRUE(all.equal(
+    repeated_partitions$variant_report$flip_log_likelihood_ratio,
+    reference_best_flip, tolerance = 1e-12
+  )),
   repeated_partitions$block_report$partition_evaluations ==
     3L * repeated_partitions$block_report$windows,
   identical(repeated_partitions$controls$n_partitions, 3L),
   identical(
     repeated_partitions$controls$partition_p_value_adjustment, "bonferroni"
   )
+)
+
+# A low-tagging split with a larger statistic must not suppress a qualifying
+# split for the same variant.
+set.seed(43)
+selection_p <- 30L
+selection_A <- matrix(
+  stats::rnorm(selection_p * selection_p), selection_p, selection_p
+)
+selection_R <- stats::cov2cor(crossprod(selection_A))
+selection_ids <- paste0("selection", seq_len(selection_p))
+dimnames(selection_R) <- list(selection_ids, selection_ids)
+selection_variants <- data.frame(
+  CHR = 1, ID = selection_ids, POS = seq_len(selection_p),
+  A1 = "A", A0 = "C"
+)
+selection_ld <- as_blm_ld(selection_R, selection_variants)
+selection_z <- stats::rnorm(selection_p, 0, 4)
+set.seed(1)
+selection_seeds <- BayesLinReg:::.diagnostic_partition_seeds(1L, 10L)
+selection_parts <- lapply(seq_len(10L), function(index) {
+  BayesLinReg:::.diagnose_gwas_ld_batch(
+    selection_ld$blocks, selection_z, 30L, 0L, 0,
+    sqrt(.Machine$double.eps), 1L, 1L, 0,
+    selection_seeds[index, , drop = FALSE]
+  )
+})
+selection_statistics <- do.call(
+  cbind, lapply(selection_parts, `[[`, "statistic")
+)
+selection_tagging <- do.call(
+  cbind, lapply(selection_parts, `[[`, "tagging")
+)
+selection_eligible <- selection_tagging >= 0.3
+eligible_selection_statistics <- selection_statistics
+eligible_selection_statistics[!selection_eligible] <- -Inf
+selection_target <- 7L
+unrestricted_partition <- which.max(selection_statistics[selection_target, ])
+qualifying_partition <- which.max(
+  eligible_selection_statistics[selection_target, ]
+)
+selected_diagnostic <- BayesLinReg:::.diagnose_gwas_ld_batch(
+  selection_ld$blocks, selection_z, 30L, 0L, 0,
+  sqrt(.Machine$double.eps), 1L, 10L, 0.3, selection_seeds
+)
+stopifnot(
+  selection_tagging[selection_target, unrestricted_partition] < 0.3,
+  selection_tagging[selection_target, qualifying_partition] >= 0.3,
+  identical(
+    selected_diagnostic$statistic[selection_target],
+    selection_statistics[selection_target, qualifying_partition]
+  ),
+  identical(
+    selected_diagnostic$tagging[selection_target],
+    selection_tagging[selection_target, qualifying_partition]
+  ),
+  selected_diagnostic$partitions_sufficiently_tagged[selection_target] > 0L
 )
 
 # Numerical failures distinguish a failed factorization from a conditional
@@ -419,6 +515,35 @@ for (name in setdiff(names(one_batch), "failure_counts")) {
 stopifnot(identical(
   one_batch$failure_counts,
   do.call(rbind, lapply(separate_batches, `[[`, "failure_counts"))
+))
+
+# A per-block seed schedule makes repeated partitions independent of how
+# blocks are grouped into internal work batches.
+set.seed(1802)
+batch_seeds <- BayesLinReg:::.diagnostic_partition_seeds(
+  length(dense_case_ld$blocks), 3L
+)
+together_repeated <- diagnose_batch(
+  dense_case_ld$blocks, case_z, 4L, 2L, 0.03,
+  sqrt(.Machine$double.eps), 1L, 3L, 0.1, batch_seeds
+)
+separate_repeated <- Map(function(block, rows, column) {
+  diagnose_batch(
+    list(block), case_z[rows], 4L, 2L, 0.03,
+    sqrt(.Machine$double.eps), 1L, 3L, 0.1,
+    batch_seeds[, column, drop = FALSE]
+  )
+}, dense_case_ld$blocks, split(seq_along(case_z), rep(1:2, case_sizes)),
+seq_along(dense_case_ld$blocks))
+for (name in setdiff(names(together_repeated), "failure_counts")) {
+  stopifnot(identical(
+    together_repeated[[name]],
+    unlist(lapply(separate_repeated, `[[`, name), use.names = FALSE)
+  ))
+}
+stopifnot(identical(
+  together_repeated$failure_counts,
+  do.call(rbind, lapply(separate_repeated, `[[`, "failure_counts"))
 ))
 
 # Independent windows are reproducible whenever nested BLAS parallelism is not
