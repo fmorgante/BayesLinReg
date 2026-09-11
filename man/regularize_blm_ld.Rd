@@ -32,7 +32,8 @@ the action and numerical adjustment applied to every block. For eigen
 repair, \code{floor_shrink} is the minimal additional identity shrinkage used
 after unit-diagonal normalization to enforce \code{eigen_floor}.
 \code{source_block} preserves the block on which regularization was originally
-performed if later GWAS harmonization subsets or splits that block.
+performed if later GWAS harmonization subsets or splits that block;
+\code{subset_source_block} records the immediate parent of the current block.
 }
 \description{
 Creates a new object from \code{\link[=as_blm_ld]{as_blm_ld()}} with blockwise numerical regularization.

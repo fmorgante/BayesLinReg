@@ -475,6 +475,7 @@ combine_blm_ld_eigen <- function(...) {
     return(data.frame(
       block = names(object$blocks),
       source_block = names(object$blocks),
+      subset_source_block = names(object$blocks),
       parent = vapply(object$blocks, `[[`, character(1), "parent"),
       predictors = as.numeric(vapply(object$blocks, `[[`, integer(1), "size")),
       method = "none", shrink = 0, floor_shrink = 0,
@@ -485,9 +486,13 @@ combine_blm_ld_eigen <- function(...) {
     ))
   }
   if (!"source_block" %in% names(report)) report$source_block <- report$block
+  if (!"subset_source_block" %in% names(report)) {
+    report$subset_source_block <- report$block
+  }
   if (!"floor_shrink" %in% names(report)) report$floor_shrink <- 0
   report[c(
-    "block", "source_block", "parent", "predictors", "method", "shrink",
+    "block", "source_block", "subset_source_block", "parent", "predictors",
+    "method", "shrink",
     "floor_shrink", "minimum_eigenvalue_before", "minimum_eigenvalue_after",
     "positive_definite_after"
   )]

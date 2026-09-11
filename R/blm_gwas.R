@@ -52,7 +52,9 @@
 #'   [regularize_blm_ld()], `ld_regularization_report` preserves that object's
 #'   original regularization audit report unchanged, while
 #'   `ld_regularization_block_map` maps fitted post-harmonization blocks to the
-#'   source blocks in that report. `ld_harmonization` reports
+#'   source blocks in that report. Internally, `source_block` retains the
+#'   original regularization source and `subset_source_block` records the
+#'   immediate parent across repeated filtering stages. `ld_harmonization` reports
 #'   retained and flipped variants together with separate counts for GWAS-only,
 #'   LD-only, location-mismatched, allele-mismatched, and ambiguous variants.
 #'   Its `excluded` element counts excluded table entries: unmatched entries
@@ -981,6 +983,12 @@ match_gwas_ld <- function(gwas, ld) {
     if (!"source_block" %in% names(report)) {
       report$source_block <- report$block
     }
+    # Keep both provenance levels: source_block identifies the block on which
+    # regularization was originally performed, while subset_source_block is
+    # the block in the immediately supplied LD object.
+    report$subset_source_block <- unname(
+      source_blocks[names(new_blocks)]
+    )
     report$block <- names(new_blocks)
     report$parent <- vapply(new_blocks, `[[`, character(1), "parent")
     report$predictors <- vapply(new_blocks, `[[`, integer(1), "size")
@@ -997,38 +1005,6 @@ match_gwas_ld <- function(gwas, ld) {
     result$regularization_report <- report
   }
   result
-}
-
-.ld_regularization_block_map <- function(source_report, fitted_report) {
-  fitted_block <- as.character(fitted_report$block)
-  source_row <- match(fitted_block, source_report$block)
-  unmatched <- is.na(source_row)
-  if (any(unmatched)) {
-    source_provenance <- if ("source_block" %in% names(fitted_report)) {
-      as.character(fitted_report$source_block)
-    } else {
-      fitted_block
-    }
-    source_row[unmatched] <- match(
-      source_provenance[unmatched], source_report$block
-    )
-  }
-  if (anyNA(source_row)) {
-    stop("`ld` regularization metadata are inconsistent.", call. = FALSE)
-  }
-  source_block <- as.character(source_report$block[source_row])
-  source_predictors <- as.integer(source_report$predictors[source_row])
-  fitted_predictors <- as.integer(fitted_report$predictors)
-  data.frame(
-    fitted_block = fitted_block,
-    source_block = source_block,
-    fitted_predictors = fitted_predictors,
-    source_predictors = source_predictors,
-    subset = fitted_block != source_block |
-      fitted_predictors != source_predictors,
-    stringsAsFactors = FALSE,
-    row.names = NULL
-  )
 }
 
 .orient_gwas_coefficients <- function(result, orientation, source_indices,

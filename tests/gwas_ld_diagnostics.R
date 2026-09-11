@@ -286,6 +286,12 @@ stopifnot(
     as.integer(rowSums(reference_eligible))
   ),
   all(repeated_partitions$variant_report$partitions_requested == 3L),
+  identical(
+    repeated_partitions$variant_report[[
+      "p_value_from_sufficiently_tagged_partition"
+    ]],
+    repeated_partitions$variant_report$partitions_sufficiently_tagged > 0L
+  ),
   isTRUE(all.equal(
     repeated_partitions$variant_report$flip_log_likelihood_ratio,
     reference_best_flip, tolerance = 1e-12
@@ -295,6 +301,14 @@ stopifnot(
   identical(repeated_partitions$controls$n_partitions, 3L),
   identical(
     repeated_partitions$controls$partition_p_value_adjustment, "bonferroni"
+  ),
+  identical(
+    repeated_partitions$controls$partition_p_value_source,
+    "most_discrepant_sufficiently_tagged_partition"
+  ),
+  identical(
+    repeated_partitions$controls$flip_partition_aggregation,
+    "maximum_unadjusted_log_likelihood_ratio"
   )
 )
 

@@ -913,7 +913,12 @@ largest conditional discrepancy need not give the strongest flip evidence. It
 uses the same inspection-only fallback when none is sufficiently tagged. The
 score compares the conditional likelihood at $z_j$ and $-z_j$, but is only
 evidence for manual review: automatic orientation changes remain restricted to
-deterministic allele metadata.
+deterministic allele metadata. This maximum flip score is not adjusted for the
+number of partitions, so its probability of crossing the fixed heuristic
+threshold can increase with `n_partitions`; scores computed with different
+partition counts are not directly calibrated. Per-variant output records
+whether the selected p-value came from a sufficiently tagged partition, and
+the controls identify both the p-value selection rule and flip-score aggregation.
 
 An RcppEigen kernel streams each window from the compressed strict-lower LD
 arrays directly into the two within-partition covariance matrices and their
@@ -989,6 +994,10 @@ objects carry a validated internal format version. Indexed triangles are
 checked for strict-lower, sorted, unique row indices within every column, and
 regularization reports are checked against current block names, parents, and
 sizes, so incompatible serialized objects fail before entering compiled code.
+Regularized subsets retain `source_block` as the block originally regularized
+and record the immediately supplied parent in `subset_source_block`. The latter
+is refreshed at every filtering stage, allowing repeated matching and
+harmonization without making original provenance ambiguous.
 Reports created before the provenance and final-floor fields were introduced
 remain valid when their shared structural and numerical fields are consistent.
 
@@ -1126,6 +1135,8 @@ report unchanged. Its separate `ld_regularization_block_map` links each fitted
 post-harmonization block to the source report row, gives fitted and source
 predictor counts, and indicates whether subsetting occurred. The fit's
 `ld_block_table` describes the resulting computational blocks.
+Repeated filtering is resolved through the immediate `subset_source_block`
+lineage while `source_block` continues to identify the original repair source.
 
 A harmonized block obtained only by deleting matching rows and columns is a
 principal submatrix of its repaired source block. Cauchy interlacing therefore
@@ -1229,6 +1240,8 @@ The main implementations are located in:
 - `R/blm_ss.R`: direct sufficient-statistic validation and storage planning.
 - `R/blm_ss_eigen.R`: low-rank transformation and validation.
 - `R/blm_gwas.R`: GWAS validation, harmonization, scaling, and fitting.
+- `R/ld_provenance.R`: regularized-LD lineage mapping across harmonization.
+- `R/blas_threads.R`: external-BLAS thread-setting detection and validation.
 - `R/ld_matrix.R`: LD construction, exact sub-block detection, and compressed
   storage.
 - `R/ld_eigen.R`: truncated-eigen LD construction, combination, validation,

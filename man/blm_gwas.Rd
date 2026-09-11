@@ -89,7 +89,9 @@ it has no single \code{likelihood_df}. When \code{ld} was created by
 \code{\link[=regularize_blm_ld]{regularize_blm_ld()}}, \code{ld_regularization_report} preserves that object's
 original regularization audit report unchanged, while
 \code{ld_regularization_block_map} maps fitted post-harmonization blocks to the
-source blocks in that report. \code{ld_harmonization} reports
+source blocks in that report. Internally, \code{source_block} retains the
+original regularization source and \code{subset_source_block} records the
+immediate parent across repeated filtering stages. \code{ld_harmonization} reports
 retained and flipped variants together with separate counts for GWAS-only,
 LD-only, location-mismatched, allele-mismatched, and ambiguous variants.
 Its \code{excluded} element counts excluded table entries: unmatched entries

@@ -60,6 +60,13 @@
 #'   returned for inspection but cannot be flagged. Flip evidence is maximized
 #'   separately over sufficiently tagged partitions, with the same inspection-only
 #'   fallback when none is sufficiently tagged.
+#'   `p_value_from_sufficiently_tagged_partition` indicates whether the raw and
+#'   adjusted p-values came from a split meeting `min_tagging`; otherwise they
+#'   are inspection-only fallback values. The maximum flip likelihood ratio is
+#'   not multiplicity-adjusted. Its chance of exceeding the fixed heuristic
+#'   threshold can therefore increase with `n_partitions`, and values obtained
+#'   with different partition counts should not be treated as calibrated on the
+#'   same scale.
 #'
 #'   This is a scalable, conservative DENTIST-style first-pass diagnostic, not
 #'   a reimplementation of the complete iterative DENTIST procedure. Windows
@@ -216,7 +223,8 @@ diagnose_gwas_ld <- function(
           "predicted_z", "conditional_variance", "tagging", "conditional_z",
           "statistic", "minimum_partition_p_value", "p_value",
           "flip_log_likelihood_ratio", "predictors_used",
-          "partitions_assessed", "partitions_sufficiently_tagged"
+          "partitions_assessed", "partitions_sufficiently_tagged",
+          "p_value_from_sufficiently_tagged_partition"
         )],
         function(value) value[local]
       )
@@ -247,6 +255,8 @@ diagnose_gwas_ld <- function(
         partitions_assessed = diagnosed$partitions_assessed,
         partitions_sufficiently_tagged =
           diagnosed$partitions_sufficiently_tagged,
+        p_value_from_sufficiently_tagged_partition =
+          diagnosed$p_value_from_sufficiently_tagged_partition,
         partitions_requested = n_partitions,
         stringsAsFactors = FALSE
       )
@@ -344,6 +354,10 @@ diagnose_gwas_ld <- function(
       nthreads = nthreads,
       n_partitions = n_partitions,
       partition_p_value_adjustment = "bonferroni",
+      partition_p_value_source =
+        "most_discrepant_sufficiently_tagged_partition",
+      flip_partition_aggregation =
+        "maximum_unadjusted_log_likelihood_ratio",
       flip_log_likelihood_ratio_threshold = 2,
       flip_absolute_z_threshold = 2
     ),
@@ -597,6 +611,8 @@ print.blm_gwas_ld_diagnostics <- function(x, ...) {
   )
   best$partitions_assessed <- partitions_assessed
   best$partitions_sufficiently_tagged <- partitions_sufficiently_tagged
+  best$p_value_from_sufficiently_tagged_partition <-
+    partitions_sufficiently_tagged > 0L
   best$failure_counts <- failure_counts
   best
 }
@@ -661,87 +677,6 @@ print.blm_gwas_ld_diagnostics <- function(x, ...) {
     expanded_end = as.integer(expanded_end - 1),
     group = group
   )
-}
-
-.validate_diagnostic_blas_threads <- function(nthreads) {
-  if (nthreads <= 1L) return(invisible(NULL))
-  information <- blm_build_info()
-  if (!isTRUE(information$eigen_blas)) return(invisible(NULL))
-  requested <- .requested_blas_threads(information$blas, Sys.getenv())
-  if (!identical(requested, 1L)) {
-    detail <- if (is.na(requested)) {
-      "the external BLAS thread count could not be verified"
-    } else {
-      sprintf("the external BLAS requests %d threads", requested)
-    }
-    stop(sprintf(
-      paste0(
-        "`nthreads > 1` cannot be combined with multithreaded or ",
-        "unverified external BLAS (%s). Configure the BLAS to use exactly ",
-        "one thread before starting R, or use `nthreads = 1`."
-      ),
-      detail
-    ), call. = FALSE)
-  }
-  invisible(NULL)
-}
-
-.requested_blas_threads <- function(blas, environment) {
-  blas <- tolower(paste(blas, collapse = " "))
-  get_setting <- function(name) {
-    value <- unname(environment[name])
-    if (!length(value) || is.na(value)) return("")
-    value[[1L]]
-  }
-  read_setting <- function(names) {
-    for (name in names) {
-      value <- get_setting(name)
-      if (!nzchar(value)) next
-      match <- regexec("^[[:space:]]*([0-9]+)", value)
-      pieces <- regmatches(value, match)[[1L]]
-      if (length(pieces) == 2L) {
-        count <- suppressWarnings(as.integer(pieces[[2L]]))
-        if (!is.na(count) && count >= 1L) return(count)
-      }
-      return(NA_integer_)
-    }
-    NA_integer_
-  }
-  if (grepl("mkl|oneapi", blas)) {
-    domain <- get_setting("MKL_DOMAIN_NUM_THREADS")
-    if (nzchar(domain)) {
-      for (scope in c("BLAS", "ALL")) {
-        match <- regexec(
-          paste0("MKL_", scope, "[[:space:]]*=[[:space:]]*([0-9]+)"),
-          toupper(domain)
-        )
-        pieces <- regmatches(toupper(domain), match)[[1L]]
-        if (length(pieces) == 2L) {
-          count <- suppressWarnings(as.integer(pieces[[2L]]))
-          if (!is.na(count) && count >= 1L) return(count)
-        }
-      }
-    }
-    return(read_setting(c("MKL_NUM_THREADS", "OMP_NUM_THREADS")))
-  }
-  if (grepl("openblas", blas)) {
-    values <- vapply(
-      c("OPENBLAS_NUM_THREADS", "GOTO_NUM_THREADS", "OMP_NUM_THREADS"),
-      function(name) read_setting(name), integer(1)
-    )
-    values <- values[!is.na(values)]
-    if (!length(values)) return(NA_integer_)
-    if (any(values > 1L)) return(max(values))
-    return(1L)
-  }
-  if (grepl("accelerate|veclib", blas)) {
-    return(read_setting("VECLIB_MAXIMUM_THREADS"))
-  }
-  if (grepl("blis", blas)) {
-    return(read_setting(c("BLIS_NUM_THREADS", "OMP_NUM_THREADS")))
-  }
-  if (grepl("librblas|reference blas", blas)) return(1L)
-  read_setting("OMP_NUM_THREADS")
 }
 
 .validate_qc_count <- function(value, name, minimum) {

@@ -715,6 +715,39 @@ stopifnot(
   all(!matched_regularized_fit$ld_regularization_block_map$subset)
 )
 
+# Regularization provenance remains resolvable after more than one filtering
+# stage. source_block retains the original repair source, while
+# subset_source_block records the immediately supplied block.
+twice_filtered_gwas <- matched_regularized$gwas[
+  -nrow(matched_regularized$gwas), , drop = FALSE
+]
+twice_matched <- suppressWarnings(match_gwas_ld(
+  twice_filtered_gwas, matched_regularized$ld
+))
+set.seed(1106)
+twice_filtered_fit <- suppressWarnings(blm_gwas(
+  twice_filtered_gwas, matched_regularized$ld,
+  list(model = "Normal"), residual_var = 1,
+  iterations = 20L, burnin = 10L
+))
+twice_filtered_report <- twice_matched$ld$regularization_report
+stopifnot(
+  "subset_source_block" %in% names(twice_filtered_report),
+  all(
+    twice_filtered_report$subset_source_block %in%
+      matched_regularized$ld$regularization_report$block
+  ),
+  all(
+    twice_filtered_report$source_block %in%
+      regularized_ld$regularization_report$block
+  ),
+  identical(
+    twice_filtered_fit$ld_regularization_block_map$source_block,
+    matched_regularized$ld$regularization_report$block
+  ),
+  any(twice_filtered_fit$ld_regularization_block_map$subset)
+)
+
 harmonization_warnings <- character()
 set.seed(1104)
 excluded_fit <- withCallingHandlers(

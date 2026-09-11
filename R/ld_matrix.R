@@ -284,6 +284,7 @@ combine_blm_ld <- function(...) {
         return(data.frame(
           block = names(object_blocks),
           source_block = names(object_blocks),
+          subset_source_block = names(object_blocks),
           parent = vapply(object_blocks, `[[`, character(1), "parent"),
           predictors = as.numeric(vapply(
             object_blocks, `[[`, integer(1), "size"
@@ -300,11 +301,15 @@ combine_blm_ld <- function(...) {
       if (!"source_block" %in% names(report)) {
         report$source_block <- report$block
       }
+      if (!"subset_source_block" %in% names(report)) {
+        report$subset_source_block <- report$block
+      }
       if (!"floor_shrink" %in% names(report)) {
         report$floor_shrink <- 0
       }
       report[c(
-        "block", "source_block", "parent", "predictors", "method",
+        "block", "source_block", "subset_source_block", "parent",
+        "predictors", "method",
         "shrink", "floor_shrink", "minimum_eigenvalue_before",
         "minimum_eigenvalue_after", "positive_definite_after"
       )]
@@ -433,7 +438,8 @@ diagnose_blm_ld <- function(
 #'   repair, `floor_shrink` is the minimal additional identity shrinkage used
 #'   after unit-diagonal normalization to enforce `eigen_floor`.
 #'   `source_block` preserves the block on which regularization was originally
-#'   performed if later GWAS harmonization subsets or splits that block.
+#'   performed if later GWAS harmonization subsets or splits that block;
+#'   `subset_source_block` records the immediate parent of the current block.
 #' @export
 regularize_blm_ld <- function(
     ld, method = c("auto", "eigen", "shrink"), shrink = 0.01,
@@ -538,6 +544,7 @@ regularize_blm_ld <- function(
     report[[block_index]] <- data.frame(
       block = block$name,
       source_block = block$name,
+      subset_source_block = block$name,
       parent = block$parent,
       predictors = block$size,
       method = action,
@@ -924,6 +931,12 @@ regularize_blm_ld <- function(
   if ("source_block" %in% names(report) &&
       (!is.character(report$source_block) || anyNA(report$source_block) ||
        any(report$source_block == ""))) {
+    stop("`ld` regularization metadata are inconsistent.", call. = FALSE)
+  }
+  if ("subset_source_block" %in% names(report) &&
+      (!is.character(report$subset_source_block) ||
+       anyNA(report$subset_source_block) ||
+       any(report$subset_source_block == ""))) {
     stop("`ld` regularization metadata are inconsistent.", call. = FALSE)
   }
   floor_shrink <- if ("floor_shrink" %in% names(report)) {

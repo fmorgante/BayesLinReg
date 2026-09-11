@@ -94,6 +94,13 @@ If no partition reaches \code{min_tagging}, the most discrepant assessed split i
 returned for inspection but cannot be flagged. Flip evidence is maximized
 separately over sufficiently tagged partitions, with the same inspection-only
 fallback when none is sufficiently tagged.
+\code{p_value_from_sufficiently_tagged_partition} indicates whether the raw and
+adjusted p-values came from a split meeting \code{min_tagging}; otherwise they
+are inspection-only fallback values. The maximum flip likelihood ratio is
+not multiplicity-adjusted. Its chance of exceeding the fixed heuristic
+threshold can therefore increase with \code{n_partitions}, and values obtained
+with different partition counts should not be treated as calibrated on the
+same scale.
 
 This is a scalable, conservative DENTIST-style first-pass diagnostic, not
 a reimplementation of the complete iterative DENTIST procedure. Windows
